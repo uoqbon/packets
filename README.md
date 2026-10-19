@@ -135,11 +135,13 @@ pwsh -File .github/copilot/tests/run-tests.ps1
 
 It builds a throwaway repository with a sample phase and exercises the validator, the board (local provider: sync, verdicts, claims, markers, reconcile), review scope and tiers, scope checks, progress and the installer. It needs no network.
 
+**Inside Copilot**, [tests/copilot-e2e.prompt.md](tests/copilot-e2e.prompt.md) is a staged end-to-end test plan for a sandbox repository. It runs discovery and static checks, the offline suite and the installer, then `/packet-plan` on a mini spec, board setup and sync, a single dispatch, two parallel dispatches with a merge conflict, the Needs human and resume path, and safety probes, and ends with a report. Paste it into Copilot Chat (Agent), or copy it to the sandbox's `.github/prompts/` to run it as `/packet-kit-e2e <stage>`. It stops at each step that needs you (opening dispatcher sessions, merging) and keeps its state in `.packet-e2e/`, which it excludes from git.
+
 Before relying on a hosted provider, smoke-test it on a sandbox repository: `board setup -DryRun`, `board sync -DryRun`, a real `sync` of two packets, `board claim` from two terminals, `board set`, `board marker`, `board reconcile` after closing an issue. The GitHub providers were exercised against a live sandbox while this kit was built; the Azure Boards provider is written against the REST API documentation and has **not** been run against a live organization yet.
 
 ## Known limitations
 
-- **Not yet run end to end inside Copilot.** The agent and skill files follow the current VS Code formats and parse cleanly, and every script they call is tested, but a full dispatcher → implementer → review panel run in Copilot Chat hasn't happened yet. Do that on a sandbox repository first and expect to tune the wording.
+- **Not yet run end to end inside Copilot.** The agent and skill files follow the current VS Code formats and parse cleanly, and every script they call is tested, but a full dispatcher → implementer → review panel run in Copilot Chat hasn't happened yet. Run `tests/copilot-e2e.prompt.md` on a sandbox repository first and expect to tune the wording.
 - **Azure Boards** is written against the REST documentation and hasn't met a live organization.
 - **Harnesses.** Written for the Local harness first. The Copilot harness needs `github.copilot.chat.cli.customAgents.enabled`; whether it runs two reviewer subagents at once depends on the harness (the panel falls back to one at a time). The Copilot cloud agent isn't wired in.
 - **One identity.** The implementer runs with the same GitHub sign-in as the dispatcher. Its instructions forbid `gh` and comments, and `board` ignores other authors, but an agent that ignored its instructions could still post as you. Branch protection with a required human review is the gate that doesn't depend on instructions.
