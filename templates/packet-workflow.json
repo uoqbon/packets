@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "repo": "OWNER/REPO",
+  "defaultBranch": "main",
+  "packetPrefix": "PKT",
+  "humanPrefix": "H",
+  "paths": {
+    "plans": "docs/plan",
+    "decisions": "docs/decisions/{phase}/{packet}.md",
+    "lenses": ".github/packet-lenses"
+  },
+  "board": {
+    "provider": "github-issues",
+    "githubProject": {
+      "owner": "@me",
+      "number": 0,
+      "fields": {
+        "status": "Status",
+        "priority": "Priority",
+        "size": "Size",
+        "wave": "Wave",
+        "packet": "Packet",
+        "target": "Target date"
+      }
+    },
+    "githubIssues": {
+      "statusPrefix": "status:",
+      "priorityPrefix": "priority:",
+      "sizePrefix": "size:",
+      "wavePrefix": "wave:"
+    },
+    "azureBoards": {
+      "organization": "https://dev.azure.com/ORG",
+      "project": "PROJECT",
+      "workItemType": "User Story",
+      "humanWorkItemType": "Task",
+      "areaPath": "",
+      "iterationPath": "",
+      "statusMap": {
+        "Backlog": { "state": "New" },
+        "Ready": { "state": "New", "tag": "status:ready" },
+        "In progress": { "state": "Active" },
+        "In review": { "state": "Active", "tag": "status:in-review" },
+        "Ready to merge": { "state": "Resolved" },
+        "Needs human": { "state": "Active", "tag": "status:needs-human" },
+        "Done": { "state": "Closed" }
+      },
+      "doneStates": ["Closed", "Removed"],
+      "priorityField": "Microsoft.VSTS.Common.Priority",
+      "targetDateField": "",
+      "markdown": true
+    }
+  },
+  "labels": {
+    "packet": "packet",
+    "human": "human-task",
+    "needsHuman": "needs-human",
+    "followUp": "follow-up"
+  },
+  "commands": {
+    "test": "",
+    "ci": ""
+  },
+  "guardrails": {
+    "protectedBranches": ["main"],
+    "forbiddenCommands": [
+      "git push --force",
+      "git push -f",
+      "git push --force-with-lease",
+      "gh pr merge",
+      "gh pr review --approve",
+      "gh workflow run",
+      "gh run rerun"
+    ],
+    "rules": []
+  },
+  "locks": [
+    { "name": "migrations", "paths": ["**/Migrations/**", "**/migrations/**"] }
+  ],
+  "stacking": false,
+  "trustedAuthors": [],
+  "claims": { "leaseMinutes": 30 },
+  "review": {
+    "maxRounds": 3,
+    "maxParallelLenses": 2,
+    "agents": {
+      "1": "packet-reviewer-light",
+      "2": "packet-reviewer-standard",
+      "3": "packet-reviewer-deep",
+      "4": "packet-reviewer-max"
+    },
+    "maxPaths": "",
+    "deepPaths": "",
+    "lensPaths": {
+      "correctness": "^(src|lib|app|pkg|cmd)/",
+      "tests": "(^|/)(tests?|__tests__|spec|specs)/|\\.(test|spec)\\.[a-z]+$|_test\\.[a-z]+$",
+      "security": "(^|/)(auth|authn|authz|identity|security)/|[Tt]oken|[Ss]ecret|[Pp]assword|[Cc]rypto|[Pp]ermission|(^|/)\\.env",
+      "data": "(^|/)(migrations?|Migrations)/|[Ss]chema|\\.sql$|DbContext|[Rr]epository",
+      "concurrency": "[Ww]orker|[Qq]ueue|[Jj]ob|[Pp]oller|[Ss]cheduler|BackgroundService|HostedService",
+      "integration": "(^|/)(clients?|integrations?|adapters?|fixtures?)/",
+      "ops": "^(infra|deploy|\\.github|build|ops|helm|terraform)/|Dockerfile|docker-compose|\\.tf$|appsettings[^/]*\\.json$",
+      "architecture": "(^|/)(contracts?|interfaces?|api)/|\\.(csproj|sln|slnx)$|(^|/)package\\.json$|(^|/)Directory\\.[^/]*\\.props$",
+      "ux": "\\.(razor|tsx|jsx|vue|svelte|html|css|scss)$|(^|/)(wwwroot|components|pages|views)/",
+      "ai": "(^|/)(ai|llm|prompts?)/|[Pp]rompt"
+    },
+    "concurrencyPattern": "\\b(lock|Mutex|SemaphoreSlim|Interlocked|ConcurrentDictionary|Task\\.WhenAll|Parallel\\.|Promise\\.all|asyncio\\.gather|goroutine|go func|sync\\.Mutex|atomic|Channel<)\\b",
+    "lensOrder": ["security", "data", "concurrency", "ai", "integration", "ops", "architecture", "correctness", "ux", "performance", "tests"]
+  },
+  "sizes": { "S": 1, "M": 2, "L": 3 }
+}
