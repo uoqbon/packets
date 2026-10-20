@@ -514,6 +514,102 @@ finally {
     Pop-Location
     if ($Keep) { Write-Host "kept $repo" } else { Remove-Item -Recurse -Force -LiteralPath $repo }
 }
+Write-Host 'check-scope after merging the default branch'
+# Two packets run in parallel; PKT-01 merges first, PKT-02 merges the default branch into its branch.
+# The files PKT-01 landed must not count as PKT-02's, but an edit or a revert of them in the merge must.
+$mergeRepo = Join-Path ([System.IO.Path]::GetTempPath()) ("pw-merge-" + [guid]::NewGuid().ToString('n').Substring(0, 8))
+$originRepo = "$mergeRepo-origin.git"
+New-Item -ItemType Directory -Path $mergeRepo | Out-Null
+Push-Location $mergeRepo
+try {
+    function Write-MergeFile([string]$Path, [string]$Text) {
+        $full = Join-Path $mergeRepo $Path
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $full) | Out-Null
+        [System.IO.File]::WriteAllText($full, $Text, [System.Text.UTF8Encoding]::new($false))
+    }
+    function Invoke-Q { $out = & git @args 2>&1; if ($LASTEXITCODE -ne 0) { throw "git $($args -join ' '): $out" } }
+    Invoke-Q init -q -b main .
+    Invoke-Q config user.email test@example.com; Invoke-Q config user.name Test; Invoke-Q config commit.gpgsign false
+    $mcfg = Get-Content -Raw (Join-Path $kit 'templates/packet-workflow.json') | ConvertFrom-Json -AsHashtable
+    $mcfg.repo = 'example/merge'; $mcfg.board.provider = 'local'
+    Write-MergeFile '.github/packet-workflow.json' ($mcfg | ConvertTo-Json -Depth 10)
+    Write-MergeFile 'src/App.ps1' "# loader`n"
+    Write-MergeFile 'docs/plan/p/plan.md' "# P`n`n## Shared touchpoints`n`n| File | Allowed edit |`n| --- | --- |`n| ``src/App.ps1`` | One line. |`n"
+    Write-MergeFile 'docs/plan/p/packets/PKT-01.md' (New-Packet 'PKT-01' 'Alpha' 'W0' 'none' @('src/A/**') -Touch 'src/App.ps1')
+    Write-MergeFile 'docs/plan/p/packets/PKT-02.md' (New-Packet 'PKT-02' 'Beta' 'W0' 'none' @('src/B/**') -Touch 'src/App.ps1')
+    Write-MergeFile 'docs/plan/p/packets/PKT-03.md' (New-Packet 'PKT-03' 'Gamma' 'W1' 'PKT-02' @('src/C/**'))
+    Invoke-Q add -A; Invoke-Q commit -qm 'phase p'
+    $b0 = (& git rev-parse HEAD).Trim()
+    Invoke-Q init -q --bare -b main $originRepo
+    Invoke-Q remote add origin $originRepo
+    Invoke-Q push -q origin main
+    Invoke-Q remote set-head origin main
+    Invoke-Q switch -q -c pkt/pkt-01-alpha
+    Write-MergeFile 'src/A/a.ps1' "function A {}`n"; Write-MergeFile 'src/App.ps1' "# loader`n. `$PSScriptRoot/A/a.ps1`n"
+    Invoke-Q add -A; Invoke-Q commit -qm 'PKT-01'
+    Invoke-Q switch -q -c pkt/pkt-02-beta $b0
+    Write-MergeFile 'src/B/b.ps1' "function B {}`n"; Write-MergeFile 'src/App.ps1' "# loader`n. `$PSScriptRoot/B/b.ps1`n"
+    Invoke-Q add -A; Invoke-Q commit -qm 'PKT-02'
+    $pkt2Head = (& git rev-parse HEAD).Trim()
+    Invoke-Q switch -q main; Invoke-Q merge -q --no-ff pkt/pkt-01-alpha -m 'Merge PKT-01'; Invoke-Q push -q origin main
+    Invoke-Q fetch -q origin
+    # The conflict in the loader, resolved with both lines.
+    Invoke-Q switch -q pkt/pkt-02-beta
+    & git merge -q origin/main -m 'Merge main' 2>&1 | Out-Null
+    Write-MergeFile 'src/App.ps1' "# loader`n. `$PSScriptRoot/A/a.ps1`n. `$PSScriptRoot/B/b.ps1`n"
+    Invoke-Q add -A; Invoke-Q commit -qm 'Merge main into PKT-02'
+    $r = Invoke-Kit $checkScope @('-Packet', 'PKT-02', '-Base', $b0, '-Json')
+    $cj = $r.Text | ConvertFrom-Json
+    $mainSha = (& git rev-parse origin/main).Trim()
+    Assert-That ($r.Code -eq 0 -and $cj.Base -eq $mainSha -and $cj.BriefBase -eq $b0 -and (@($cj.Changed) -join ',') -eq 'src/App.ps1,src/B/b.ps1') 'after merging the default branch, the files another packet landed are not this packet''s changes' $r.Text
+    $touch = @($cj.Results | Where-Object { $_.Kind -eq 'TOUCH' })
+    Assert-That ($touch.Count -eq 1 -and $touch[0].Detail -match '^1 changed lines') 'the touchpoint counts only this packet''s line' $r.Text
+    # An edit to another packet's file inside the merge commit is still this packet's change.
+    Write-MergeFile 'src/A/a.ps1' "function A { 'changed' }`n"
+    Invoke-Q add -A; Invoke-Q commit -q --amend --no-edit
+    $r = Invoke-Kit $checkScope @('-Packet', 'PKT-02', '-Base', $b0)
+    Assert-That ($r.Code -eq 1 -and $r.Text -match 'OUTSIDE\s+src/A/a\.ps1' -and $r.Text -match 'default branch as last merged') 'an edit to a merged-in file in the merge commit is OUTSIDE' $r.Text
+    # So is undoing it.
+    Invoke-Q rm -q src/A/a.ps1; Invoke-Q commit -q --amend --no-edit
+    $r = Invoke-Kit $checkScope @('-Packet', 'PKT-02', '-Base', $b0)
+    Assert-That ($r.Code -eq 1 -and $r.Text -match 'OUTSIDE\s+src/A/a\.ps1') 'a revert of a merged-in file is OUTSIDE' $r.Text
+    # Stacked on an unmerged dependency: the default branch is behind the brief's base, which stays.
+    Invoke-Q switch -q -c pkt/pkt-03-gamma $pkt2Head
+    Write-MergeFile 'src/C/c.ps1' "function C {}`n"
+    Invoke-Q add -A; Invoke-Q commit -qm 'PKT-03'
+    $r = Invoke-Kit $checkScope @('-Packet', 'PKT-03', '-Base', $pkt2Head, '-Json')
+    $cj = $r.Text | ConvertFrom-Json
+    Assert-That ($r.Code -eq 0 -and $cj.Base -eq $pkt2Head -and (@($cj.Changed) -join ',') -eq 'src/C/c.ps1') 'a stacked packet compares against its dependency''s head' $r.Text
+    # Local origin/* refs don't pick the base: moving them can't make another branch's file look merged.
+    Invoke-Q switch -q -c side $b0
+    Write-MergeFile 'src/A/evil.ps1' "function Evil {}`n"
+    Invoke-Q add -A; Invoke-Q commit -qm 'side'
+    $side = (& git rev-parse HEAD).Trim()
+    Invoke-Q switch -q -c pkt/pkt-02-forged $pkt2Head
+    Invoke-Q merge -q --no-ff side -m 'Merge side'
+    Invoke-Q update-ref refs/remotes/origin/main $side
+    $r1 = Invoke-Kit $checkScope @('-Packet', 'PKT-02', '-Base', $b0)
+    Invoke-Q symbolic-ref refs/remotes/origin/HEAD refs/heads/side
+    $r2 = Invoke-Kit $checkScope @('-Packet', 'PKT-02', '-Base', $b0)
+    Assert-That ($r1.Code -eq 1 -and $r1.Text -match 'OUTSIDE\s+src/A/evil\.ps1' -and $r2.Code -eq 1 -and $r2.Text -match 'OUTSIDE\s+src/A/evil\.ps1') 'a moved origin/main or origin/HEAD does not change the comparison base' ($r1.Text + "`n" + $r2.Text)
+    Invoke-Q fetch -q origin; Invoke-Q remote set-head origin main
+    # An amendment the owner merged on the default branch counts once the branch merges it.
+    Invoke-Q switch -q main
+    Write-MergeFile 'docs/plan/p/packets/PKT-02.md' (New-Packet 'PKT-02' 'Beta' 'W0' 'none' @('src/B/**', 'src/D/**') -Touch 'src/App.ps1')
+    Invoke-Q add -A; Invoke-Q commit -qm 'Amend PKT-02: also owns src/D'; Invoke-Q push -q origin main
+    Invoke-Q switch -q -c pkt/pkt-02-amended $pkt2Head
+    & git merge -q origin/main -m 'Merge main' 2>&1 | Out-Null
+    Write-MergeFile 'src/App.ps1' "# loader`n. `$PSScriptRoot/A/a.ps1`n. `$PSScriptRoot/B/b.ps1`n"
+    Write-MergeFile 'src/D/d.ps1' "function D {}`n"
+    Invoke-Q add -A; Invoke-Q commit -qm 'Merge main, then the amended work'
+    $r = Invoke-Kit $checkScope @('-Packet', 'PKT-02', '-Base', $b0)
+    Assert-That ($r.Code -eq 0 -and $r.Text -notmatch 'OUTSIDE') 'the packet is read at the comparison base, so a merged amendment counts' $r.Text
+}
+finally {
+    Pop-Location
+    if ($Keep) { Write-Host "kept $mergeRepo" } else { Remove-Item -Recurse -Force -LiteralPath $mergeRepo, $originRepo -ErrorAction SilentlyContinue }
+}
+
 Write-Host 'install'
 $target = Join-Path ([System.IO.Path]::GetTempPath()) ("pw-install-" + [guid]::NewGuid().ToString('n').Substring(0, 8))
 New-Item -ItemType Directory -Path $target | Out-Null

@@ -39,7 +39,7 @@ A subagent can't use a model in a higher cost tier than yours; if a reviewer doe
 - Run a command in `guardrails.forbiddenCommands`, or break a rule in `guardrails.rules`.
 - Start a packet whose verdict is BLOCKED, a Backlog packet, or a human task.
 - Stand in for the review panel, or set Ready to merge before the panel passed and CI passed on the head it reviewed.
-- Change a packet's scope, contracts or acceptance criteria. Those are the owner's: set Needs human and ask.
+- Change a packet's scope, contracts or acceptance criteria. Those are the owner's: set Needs human and ask. When the answer changes the packet, open an amendment PR for the packet file yourself (the skill's **Amend**); never ask the owner to edit it.
 - End your work on a packet without releasing its claim.
 
 When you finish, tell the owner in a few lines: the packet, its PR, the outcome (Ready to merge, waiting for CI, Needs human and the question), the models the subagents ran on, any contract question the panel raised for the packets that build on this one, and anything they must do.

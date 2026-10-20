@@ -5,8 +5,17 @@
   check-scope.ps1: does a packet branch stay inside the paths its packet owns?
 
 .DESCRIPTION
-  Compares every path the branch changed (<Base>...<Head>, both sides of a rename) with the packet as it
-  was at the base: its Owns (minus ! exclusions), its shared touchpoints and its decision record.
+  Compares every path the branch changed (both sides of a rename) with the packet: its Owns (minus !
+  exclusions), its shared touchpoints and its decision record.
+
+  The comparison base is the brief's base (-Base), until the branch merges the default branch: from then
+  on it is the default-branch commit the branch last merged: the merge base of HEAD and the default
+  branch's tip as origin reports it (git ls-remote, never the local origin/* refs, which a shell in this
+  clone can move). Files
+  another packet landed on the default branch come in with that merge, so they aren't this packet's
+  changes; an edit to one of them, or a revert, still is. The packet and the config are read at the same
+  base: a commit on the default branch, so the branch can't add locks or paths in its own favour, and an
+  amendment the owner merged there counts.
 
   OUTSIDE    a path the packet neither owns nor lists as a touchpoint            (fails)
   LOCKED     a path under a lock (config locks) the packet doesn't hold          (fails)
@@ -29,9 +38,41 @@ param(
 
 $machineryRe = '(^|/)\.github/(workflows|actions|agents|skills|prompts|instructions|copilot)/|(^|/)\.github/copilot-instructions\.md$|(^|/)AGENTS\.md$|(^|/)\.github/packet-workflow\.json$|(^|/)\.claude/|(^|/)\.agents/|(^|/)\.github/packet-lenses/'
 
+function Get-RemoteDefaultTip([string]$Root) {
+    <# The default branch's tip as origin reports it now (git ls-remote), fetched when it isn't here yet.
+       Never the local origin/* refs: anything with a shell in this clone can move those, and a moved ref
+       would pick the comparison base and the packet text this check reads. $null without an origin, or
+       when origin can't be reached. #>
+    if (@(& git -C $Root remote 2>$null) -notcontains 'origin') { return $null }
+    $lines = @(& git -C $Root ls-remote --symref origin HEAD 2>$null)
+    if ($LASTEXITCODE -ne 0) { Write-Warning "couldn't read origin's default branch; comparing against the brief's base"; return $null }
+    $branch = $null; $tip = $null
+    foreach ($l in $lines) {
+        $m = [regex]::Match($l, '^ref: refs/heads/(?<b>\S+)\s+HEAD$'); if ($m.Success) { $branch = $m.Groups['b'].Value }
+        $m = [regex]::Match($l, '^(?<s>[0-9a-f]{40}(?:[0-9a-f]{24})?)\s+HEAD$'); if ($m.Success) { $tip = $m.Groups['s'].Value }
+    }
+    if (-not $branch -or -not $tip) { Write-Warning "origin reports no default branch; comparing against the brief's base"; return $null }
+    & git -C $Root cat-file -e "$tip^{commit}" 2>$null
+    if ($LASTEXITCODE -ne 0) { & git -C $Root fetch -q origin "refs/heads/$branch" 2>$null; & git -C $Root cat-file -e "$tip^{commit}" 2>$null }
+    if ($LASTEXITCODE -ne 0) { Write-Warning "couldn't fetch origin's $branch; comparing against the brief's base"; return $null }
+    $tip
+}
+
 try {
     $root = Get-RepoRoot
-    $baseSha = (Invoke-PwGit -C $root merge-base $Base $Head | Select-Object -First 1).Trim()
+    $briefSha = (Invoke-PwGit -C $root merge-base $Base $Head | Select-Object -First 1).Trim()
+    # After the branch merges the default branch, compare against the default-branch commit it merged, not
+    # the brief's base: otherwise every file another packet landed meanwhile counts as this packet's change.
+    # The saved base stays when the default branch is behind it (a stacked packet whose dependency hasn't
+    # merged yet), and when there's no origin or it can't be reached: then merged-in files show as OUTSIDE,
+    # which is a false alarm, never a hidden change.
+    $baseSha = $briefSha
+    $mainTip = Get-RemoteDefaultTip $root
+    if ($mainTip) {
+        $mainSha = (Invoke-PwGit -C $root merge-base $mainTip $Head | Select-Object -First 1).Trim()
+        & git -C $root merge-base --is-ancestor $mainSha $briefSha 2>$null
+        if ($LASTEXITCODE -ne 0) { $baseSha = $mainSha }
+    }
     # The config as it is at the base, so a branch can't add locks or paths in its own favour.
     $cfg = Get-PwConfig -Path $ConfigPath -Ref $(if ($ConfigPath) { '' } else { $baseSha })
     # The project's lens directory (paths.lenses) is review machinery wherever it is configured.
@@ -73,10 +114,10 @@ try {
 
     $failing = @($results | Where-Object { $_.Kind -in 'OUTSIDE', 'LOCKED', 'MACHINERY', 'DIRTY' })
     if ($Json) {
-        [pscustomobject]@{ Packet = $pk.Id; Base = $baseSha; Changed = @($paths); Results = @($results); Ok = ($failing.Count -eq 0) } | ConvertTo-Json -Depth 5
+        [pscustomobject]@{ Packet = $pk.Id; Base = $baseSha; BriefBase = $briefSha; Changed = @($paths); Results = @($results); Ok = ($failing.Count -eq 0) } | ConvertTo-Json -Depth 5
     }
     else {
-        Write-Output "$($pk.Id): $($paths.Count) changed path(s) against $($baseSha.Substring(0, 7))"
+        Write-Output "$($pk.Id): $($paths.Count) changed path(s) against $($baseSha.Substring(0, 7))$(if ($baseSha -ne $briefSha) { " (the default branch as last merged into this branch; brief base $($briefSha.Substring(0, 7)))" })"
         foreach ($r in $results) { Write-Output ('{0,-9} {1}  ({2})' -f $r.Kind, $r.Path, $r.Detail) }
         Write-Output $(if ($failing.Count) { "FAIL: $($failing.Count) path(s) outside the packet. Revert them, or stop and ask the owner to re-scope." } else { 'OK: inside the packet''s paths' })
     }

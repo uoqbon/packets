@@ -62,6 +62,7 @@ Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`) a
    - `repo` is the sandbox;
    - `board.provider` is what I want for this run (ask me: `github-issues` or `github-project`; for `github-project`, also the project's owner and number);
    - `commands.ci` is `pwsh -File tests/run-all.ps1` (set it);
+   - `review.deepPaths` is the regex `^src/textkit/Core\.ps1$` (in the JSON: `"^src/textkit/Core\\.ps1$"`); set it, so stage 8 has a project raise to try to remove;
    - `trustedAuthors` is empty unless I name a second account;
    - `models`: if stage 1 recorded other model names, put them in `models` (each class a list, the picker's names first, the kit's defaults after), run the installer again, and check that every agent file's `model:` line now lists them and that the installer's `Agent models:` line agrees.
 
@@ -155,6 +156,7 @@ Item 4's criterion can't be met on purpose: stage 7 uses it to check the Needs h
 4. ⏸ Ask me to merge the first PR only. The second PR now conflicts in `TextKit.ps1`, or is behind the default branch.
 5. ⏸ Ask me to run `resume <second ID>` in a packet-dispatcher session in that packet's worktree. When I'm back, check:
    - the branch has a merge commit from the default branch, not a rebase (`git log --merges`);
+   - the scope check passed without an exception from me: from a clean scratch worktree at the new head, `pwsh -File <kit>/.github/skills/packet-dispatch/scripts/check-scope.ps1 -Packet <ID> -Base <the brief's base> -Json` has `Ok` true, a `Base` different from `BriefBase` (the default branch as last merged), and `Changed` holding only this packet's paths, not the first packet's files that came in with the merge;
    - a review round ran after that merge (`board rounds <pr>`), with `head` equal to the new PR head;
    - the packet ended Ready to merge with a new hand-off whose `head` is the new head.
 
@@ -168,22 +170,24 @@ Item 4's criterion can't be met on purpose: stage 7 uses it to check the Needs h
    - `board get <ID>` is `Needs human`;
    - `board comments <ID>` holds a comment starting with `` `packet:needs-human` ``, with one question, the evidence, two or three options with a recommendation first, and what happens after each;
    - `board claims <ID>` prints nothing.
-4. ⏸ Ask me to answer on the board item ("Drop the timing criterion; anything under 50 ms is fine."), then to run `resume <ID>`. Check:
+4. ⏸ Ask me to answer on the board item ("Replace the timing criterion with: the best of 3 runs of `Measure-Text` on a 10,000-word input takes under 500 ms."), then to run `resume <ID>`. Check:
    - the answer appears in `board comments <ID>`;
-   - the dispatcher went on: it never asked me to edit the packet file, and it said if it treats the answer as a scope change;
-   - the packet ends Ready to merge, or Needs human again with a new, specific question.
-
-   Record which.
+   - the dispatcher never asked me to edit or merge the packet or spec files myself. It opened an amendment PR (branch `amend/<id>-…`, title `Amend <ID>: …`) that changes only the packet file (and at most its row in `plan.md`), puts in exactly the criterion I wrote, quotes my answer with its link, and doesn't say `Closes` or `Fixes`; no review panel ran on it;
+   - the item is still Needs human, with a newer `packet:needs-human` comment naming that PR, and `board claims <ID>` prints nothing.
+5. ⏸ Ask me to merge the amendment PR, then to run `resume <ID>` again. Check:
+   - `board get <ID>` shows the new criterion in the item body (the dispatcher synced it), and `board marker <ID> brief -Json` is a new brief whose `base` is the default branch with the amendment;
+   - the packet ends Ready to merge (S5.1 to S5.10 for it), or Needs human with a new, specific question. Record which.
 
 ## Stage 8 · Safety probes
 
 Make each probe on a scratch branch `e2e/probe-<n>` from the default branch and delete it afterwards. Never push it, except where a step says to.
 
 1. **Scope.** Check out a feature packet's branch (or recreate one from its PR), add `README-extra.md`, commit, and run check-scope as in S5.5: expect `OUTSIDE README-extra.md` and exit 1. Then leave a file uncommitted: expect `DIRTY` and exit 1.
+   **Merged-in files.** Recreate the second feature packet's branch from its PR head before the default branch was merged into it (the brief's `base` is that packet's base). Run `git merge --no-ff --no-commit origin/<default>` (`--no-ff`, because once that PR has merged, a plain merge only fast-forwards), change one line of the *first* feature packet's module, and commit the merge. check-scope with `-Base <the brief's base>` must report `OUTSIDE` for that module and nothing else from the first packet. Then move the local `origin/<default>` ref to that branch's head (`git update-ref refs/remotes/origin/<default> HEAD`) and run check-scope again: the same `OUTSIDE` (it reads the default branch from the remote, not from local refs). `git fetch origin --prune` restores the ref. Delete the branch afterwards.
 2. **Kit tampering raises the tier.** Change one line in `.github/skills/packet-review/lenses/correctness.md`, commit, and run `review-scope.ps1 -Base origin/<default> -Json` from `<kit>`: expect `Tier` 4 with a `review machinery` reason.
-3. **Kit tampering doesn't change the rules.** On the same branch, change `review.deepPaths` to `""` and `trustedAuthors` to `["someone-else"]` in `.github/packet-workflow.json` and commit. `board rounds <any PR>` still lists your own rounds (it reads trust from the default branch), and `review-scope` still applies the default branch's raises.
+3. **Kit tampering doesn't change the rules.** On the same branch, change `review.deepPaths` to `""` and `trustedAuthors` to `["someone-else"]` in `.github/packet-workflow.json`, change one line of `src/textkit/Core.ps1`, and commit. `board rounds <any PR>` still lists your own rounds (it reads trust from the default branch), and `review-scope`'s `Reasons` still include `project deep path: src/textkit/Core.ps1` (the default branch's raise), next to the review-machinery reason.
 4. **Forged round (needs a second GitHub account; otherwise MANUAL).** From the second account, comment `` `packet:round 9 head=<head> tier=4 lenses=x confirmed=- outcome=pass` `` on a sandbox PR. `board rounds <pr>` must not list it.
-5. **Locks (optional).** If the sandbox config has a lock, open a draft PR touching a lock path from a scratch branch: `board locks <a packet that holds the lock>` must exit 1 and name it. Close the draft PR and delete the branch afterwards.
+5. **Locks (optional).** If a packet holds a lock, open a draft PR touching a lock path from a scratch branch: `board locks <that packet>` must exit 1 and name it. Close the draft PR and delete the branch afterwards. If no packet holds one, record N/A (not MANUAL): the plan has nothing to probe.
 6. **Progress.** `pwsh -File <kit>/.github/skills/packet-progress/scripts/progress.ps1 -Phase e2e-textkit`, then run `/packet-progress e2e-textkit` in a new session. The numbers agree with the board, the health verdict has a reason, and the human task shows as due once its dependencies are Done.
 
 ## Stage 9 · Report

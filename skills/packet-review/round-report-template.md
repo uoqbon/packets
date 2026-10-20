@@ -28,6 +28,6 @@
 
 #### Next
 
-<Round <N+1> runs: <lenses> at tier <t>, because <confirmed lenses / the fix touched …>.>
+<Round <N+1> runs: <lenses>, because <confirmed lenses / the fix touched …>. Its tier comes from review-scope then: at least <t>, and one higher if confirmed findings get fixed.>
 <or: Panel passed after <N> round(s)<; its should-fix findings are follow-ups (review.shouldFixPassFromRound <n>)>. The dispatcher checks CI on `<short sha>` and hands the PR to the owner; never "Ready to merge" from the panel itself.>
 <or: Needs human: <the question>.>
