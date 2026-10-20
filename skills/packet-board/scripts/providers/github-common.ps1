@@ -6,6 +6,7 @@ $script:GhLabelCache = $null
 $script:GhMilestoneCache = $null
 $script:GhIssueCache = $null
 $script:GhDependencyApiWorks = $true
+$script:GhLogin = $null
 
 function Invoke-PwGh {
     # Runs gh and returns stdout as one string; throws with stderr on failure. A simple function on
@@ -246,6 +247,36 @@ function Get-PwGhPrForPacket {
     $prefix = "pkt/$($PacketId.ToLowerInvariant())-"
     $prs = Invoke-PwGhJson pr list --repo $Config.repo --state $State --limit 200 --json 'number,headRefName,baseRefName,url,state,isDraft,headRefOid'
     @($prs | Where-Object { $_.headRefName.StartsWith($prefix) } | Sort-Object { $_.number } -Descending) | Select-Object -First 1
+}
+
+function Get-PwGhRounds {
+    <# A PR's round reports, settle requests and settle checks, oldest first, from trusted authors only:
+       the GitHub sign-in and the config's trustedAuthors (PRs are on GitHub, so the GitHub sign-in decides
+       even when the board is elsewhere). A settle request is Consumed once a settle check follows it. #>
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$Pr)
+    if (-not $script:GhLogin) { $script:GhLogin = (Invoke-PwGh api user --jq .login).Trim() }
+    $login = $script:GhLogin
+    $trusted = [System.Collections.Generic.HashSet[string]]::new([string[]]@(@($login) + @($Config.trustedAuthors | Where-Object { $_ })), [StringComparer]::OrdinalIgnoreCase)
+    $last = 0
+    $rows = @(Invoke-PwGhPages "repos/$($Config.repo)/issues/$Pr/comments?per_page=100" | Sort-Object { [long]$_.id } | ForEach-Object {
+            if (-not $trusted.Contains([string]$_.user.login)) { return }
+            $mk = Get-PwMarker $_.body
+            if ($mk -and $mk.Kind -eq 'round') {
+                $last = [int]($mk.Words | Select-Object -First 1)
+                [pscustomobject]@{ Kind = 'round'; Round = $last; Head = $mk.Pairs['head']; Tier = $mk.Pairs['tier']; Lenses = $mk.Pairs['lenses']; Runs = $mk.Pairs['runs']; Confirmed = $mk.Pairs['confirmed']; Outcome = $mk.Pairs['outcome']; Author = $_.user.login; CommentId = $_.id; CreatedAt = $_.created_at; Url = $_.html_url }
+            }
+            elseif ($mk -and $mk.Kind -eq 'settle') {
+                [pscustomobject]@{ Kind = 'settle-request'; Round = $last; Head = $mk.Pairs['head']; Tier = $null; Lenses = $null; Runs = $null; Confirmed = $null; Outcome = 'settle'; Author = $_.user.login; CommentId = $_.id; CreatedAt = $_.created_at; Url = $_.html_url; Body = $_.body }
+            }
+            elseif ($mk -and $mk.Kind -eq 'settle-check') {
+                [pscustomobject]@{ Kind = 'settle-check'; Round = $last; Head = $mk.Pairs['head']; Tier = $null; Lenses = $null; Runs = $null; Confirmed = $null; Outcome = 'settled'; Author = $_.user.login; CommentId = $_.id; CreatedAt = $_.created_at; Url = $_.html_url; Body = $null }
+            }
+        })
+    foreach ($r in $rows) {
+        $used = $r.Kind -eq 'settle-request' -and [bool]($rows | Where-Object { $_.Kind -eq 'settle-check' -and [long]$_.CommentId -gt [long]$r.CommentId })
+        $r | Add-Member -NotePropertyName Consumed -NotePropertyValue $used
+    }
+    , $rows
 }
 
 function Initialize-PwGhLabels {

@@ -26,7 +26,10 @@
                          when > 50 code lines changed; tests when tests changed; architecture when a path
                          is outside the packet's Owns and touchpoints. A conflict resolution, or a merge of
                          anything but the default branch, adds every path-matched lens and correctness.
-  The lenses come back in review.lensOrder (riskiest first), the order the panel pairs them in.
+  The lenses come back in review.lensOrder (riskiest first). Runs groups them into reviewer runs of
+  review.lensesPerReviewer lenses (neighbours in that order; 1 by default, so one lens per run), and
+  Pairs groups the runs the panel starts together (review.maxParallelLenses at a time), each run
+  written as its lenses joined with '+'. Grouping never drops a lens or changes the tier.
 
   review-scope.ps1 -Base <ref> [-Head <ref>] [-Packet <ID>] [-Since <prev head>] [-Confirmed a,b]
                    [-PreviousTier N] [-FixedConfirmed] [-Json]
@@ -178,7 +181,8 @@ try {
     # The project's lens directory (paths.lenses) is review machinery wherever it is configured.
     $lensDir = ConvertTo-PwRepoPath $cfg.paths.lenses
     if ($lensDir) { $machineryRe += '|^' + [regex]::Escape($lensDir) + '/' }
-    # -Confirmed arrives as one string under pwsh -File ("security,data"), and a pass round's marker says "-".
+    # -Confirmed arrives as one string under pwsh -File ("security,data"); the panel passes "-" when the previous
+    # round passed (with nothing confirmed, or with should-fix findings it left to follow-ups).
     $Confirmed = @($Confirmed | ForEach-Object { "$_" -split '[,\s]+' } | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ -and $_ -ne '-' })
     $pk = $null
     if ($Packet) {
@@ -348,6 +352,12 @@ try {
     $ordered = @($lenses | Sort-Object { $i = [array]::IndexOf($order, $_); if ($i -lt 0) { 999 } else { $i } }, { $_ })
 
     $agent = $cfg.review.agents[[string]$tier]
+    # Reviewer runs: review.lensesPerReviewer lenses each, neighbours in lensOrder. Pairs: the runs started
+    # together (review.maxParallelLenses at a time), each run written as its lenses joined with '+'.
+    $per = [int]$cfg.review.lensesPerReviewer
+    $par = [int]$cfg.review.maxParallelLenses
+    $runs = @(for ($i = 0; $i -lt $ordered.Count; $i += $per) { , @($ordered[$i..([Math]::Min($i + $per, $ordered.Count) - 1)]) })
+    $runNames = @($runs | ForEach-Object { $_ -join '+' })
     $result = [pscustomobject]@{
         Tier = $tier; Name = $tierNames[$tier]; Agent = $agent; Floor = $floor
         Base = $baseSha.Substring(0, 12); Head = $headSha.Substring(0, 12); HeadSha = $headSha; BaseSha = $baseSha
@@ -355,7 +365,13 @@ try {
         Breakdown = [ordered]@{ code = $code; tests = $tests; docs = $docs; config = $config; ignored = $ignored }
         Reasons = @($reasons)
         Lenses = $ordered; LensReasons = @($lensWhy)
-        Pairs = @(for ($i = 0; $i -lt $ordered.Count; $i += [int]$cfg.review.maxParallelLenses) { , @($ordered[$i..([Math]::Min($i + [int]$cfg.review.maxParallelLenses, $ordered.Count) - 1)]) })
+        Runs = $runs
+        Pairs = @(for ($i = 0; $i -lt $runNames.Count; $i += $par) { , @($runNames[$i..([Math]::Min($i + $par, $runNames.Count) - 1)]) })
+        # The panel's limits, from the config at the base like everything above: never the checkout's copy.
+        Settings = [ordered]@{
+            MaxRounds = [int]$cfg.review.maxRounds; ShouldFixPassFromRound = [int]$cfg.review.shouldFixPassFromRound
+            MaxParallelLenses = $par; LensesPerReviewer = $per
+        }
     }
     if ($Json) { $result | ConvertTo-Json -Depth 6 }
     else {
@@ -365,6 +381,8 @@ try {
         foreach ($r in $reasons) { Write-Output "  - $r" }
         Write-Output "LENSES=$($ordered -join ',')"
         foreach ($r in $lensWhy) { Write-Output "  - $r" }
+        if ($per -gt 1) { Write-Output "RUNS=$($runNames -join ',') ($($runs.Count) reviewer runs, up to $per lenses each)" }
+        Write-Output "SETTINGS=maxRounds $($result.Settings.MaxRounds), should-fix-only rounds pass from round $($result.Settings.ShouldFixPassFromRound), $par reviewer runs at a time, $per lens(es) per run"
     }
 }
 catch [PwError] {

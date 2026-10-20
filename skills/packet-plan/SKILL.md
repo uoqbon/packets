@@ -49,6 +49,8 @@ Good packets make parallel work safe. Bad ones make agents edit the same files, 
 
 **Shared touchpoints.** Files many packets must touch (startup, DI registration, routing, nav, package manifests, solution files). List each in the plan's touchpoints table with the one kind of edit allowed: "one `AddX()` line", "one package version line". A packet lists the touchpoints it uses, with the edit. Anything bigger than that edit belongs in the packet's own files (an extension method, a module), with only the one-line hook in the shared file. Conflicts there are resolved by merging the default branch, never by rebasing.
 
+**Review machinery stays with the owner.** CI workflows (`.github/workflows/`), agents, skills, prompts and repository instructions, and this kit's config decide how every PR is judged. Put the ones the phase needs in the owner's setup pull request, or in a human task the first packet depends on, not in a packet. A packet that owns one is reviewed at the top tier in every round (in the kit's end-to-end run, one CI file made a small packet cost about 40% more), and its PR could weaken the gate that judges it. If a packet must own one, say why in its Dispatcher notes.
+
 **Contracts first.** The packet that lands the shared types, interfaces and fakes comes first and stays small, because everything waits on it. Its **Provides** names every type and signature exactly; dependent packets name the same things under **Consumes**. Where the plan leaves a name open, decide it here so parallel packets agree.
 
 **Dependencies.** Only real ones: "needs code from X merged". Keep the graph wide and shallow, so many packets can run at once; a deep chain is a schedule risk. No cycles. A human task can be a dependency (an approval, a key).
@@ -94,6 +96,7 @@ A project can add its own lenses (for domain rules) as `<paths.lenses>/<name>.md
 | "Tests later" packet | code merges unproven; reviewers can't judge | tests live in the packet that writes the code |
 | Vague criteria ("works well", "is fast") | nothing to test, nothing to review against | numbers and observable outcomes |
 | A packet waiting on an approval nobody owns | it blocks silently | a human task with a target date, as a dependency |
+| The foundation packet adds the CI workflow or agent files | every round runs at the top tier, and the PR can change the checks that judge it | the owner's setup PR, or a human task before the first packet |
 
 ## Repairing existing packets
 

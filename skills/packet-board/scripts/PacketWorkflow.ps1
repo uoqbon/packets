@@ -34,12 +34,25 @@ $script:Defaults = @{
     trustedAuthors = @()
     claims        = @{ leaseMinutes = 30 }
     review        = @{
-        maxRounds = 3; maxParallelLenses = 2
+        maxRounds = 3; maxParallelLenses = 2; lensesPerReviewer = 1
+        # shouldFixPassFromRound defaults to maxRounds (Get-PwConfig): only the last round passes on should-fix findings.
         agents = @{ '1' = 'packet-reviewer-light'; '2' = 'packet-reviewer-standard'; '3' = 'packet-reviewer-deep'; '4' = 'packet-reviewer-max' }
         maxPaths = ''; deepPaths = ''; lensPaths = @{}; concurrencyPattern = ''
         lensOrder = @('security', 'data', 'concurrency', 'ai', 'integration', 'ops', 'architecture', 'correctness', 'ux', 'performance', 'tests')
     }
     sizes         = @{ S = 1; M = 2; L = 3 }
+    # Credits per run on GitHub Copilot's usage-based billing (docs/cost.md), for progress.ps1 -Credits.
+    # Estimates to calibrate against the AI usage report; monthlyCredits 0 means no allowance is set.
+    budget        = @{
+        monthlyCredits = 0
+        creditsPerRun  = @{
+            dispatcher = 50; dispatcherPerRound = @{ S = 300; M = 330; L = 390 }; dispatcherPerReviewerRun = 35
+            implementer = @{ S = 105; M = 200; L = 355 }
+            implementerFix = @{ S = 40; M = 55; L = 75 }
+            reviewerByTier = @{ S = @(20, 50, 110, 195); M = @(30, 70, 160, 280); L = @(40, 95, 225, 380) }
+            laterRoundFactor = 0.85
+        }
+    }
 }
 
 class PwError : System.Exception {
@@ -139,6 +152,27 @@ function Get-PwConfig {
         if (-not $lock.name -or -not $lock.paths) { Stop-Pw 'config: every entry in locks needs a name and paths' }
     }
     if ([int]$cfg.claims.leaseMinutes -lt 5) { Stop-Pw 'config: claims.leaseMinutes must be at least 5' }
+    # The review limits, as whole numbers (a quoted "3" still counts). The table is copied first: without a
+    # review block in the config it is the defaults' own, which a second config in this process would inherit.
+    $rv = Merge-PwHashtable $cfg.review @{}
+    $cfg.review = $rv
+    $whole = { param($v) if ($v -is [int] -or $v -is [long]) { [int]$v } elseif ($v -is [double] -and $v -ge 0 -and $v -le 1000 -and $v -eq [Math]::Floor($v)) { [int]$v } elseif ($v -is [string] -and $v -match '^\s*\d{1,4}\s*$') { [int]$v.Trim() } else { $null } }
+    foreach ($key in 'maxRounds', 'maxParallelLenses', 'lensesPerReviewer') {
+        $n = & $whole $rv[$key]
+        if ($null -eq $n) { Stop-Pw "config: review.$key must be a whole number (got '$($rv[$key])')" }
+        $rv[$key] = $n
+    }
+    if ($rv.maxRounds -lt 1 -or $rv.maxParallelLenses -lt 1) { Stop-Pw 'config: review.maxRounds and review.maxParallelLenses must be at least 1' }
+    if ($rv.lensesPerReviewer -lt 1 -or $rv.lensesPerReviewer -gt 3) { Stop-Pw "config: review.lensesPerReviewer must be 1, 2 or 3 (got $($rv.lensesPerReviewer))" }
+    # From this round on, a round whose confirmed findings are all should-fix passes with follow-ups.
+    # Unset, or past maxRounds, it is the last round: the rule before this setting existed.
+    if (-not $rv.Contains('shouldFixPassFromRound') -or $null -eq $rv.shouldFixPassFromRound) { $rv.shouldFixPassFromRound = $rv.maxRounds }
+    else {
+        $n = & $whole $rv.shouldFixPassFromRound
+        if ($null -eq $n -or $n -lt 1) { Stop-Pw "config: review.shouldFixPassFromRound must be a round number, 1 or more (got '$($rv.shouldFixPassFromRound)')" }
+        $rv.shouldFixPassFromRound = [Math]::Min($n, $rv.maxRounds)
+    }
+    # budget is checked where it is used (Get-PwCreditEstimate): a typo there must not stop the board.
     $cfg
 }
 
@@ -595,6 +629,119 @@ function Get-PwMarker {
         if ($tok -match '^(?<k>[A-Za-z][\w-]*)=(?<v>.*)$') { $pairs[$Matches.k] = $Matches.v } else { $words.Add($tok) }
     }
     [pscustomobject]@{ Kind = $m.Groups['kind'].Value; Words = @($words); Pairs = $pairs }
+}
+
+# ---------------------------------------------------------------------------------------------------
+# Credit estimates (docs/cost.md). Counts come from a PR's trusted round markers; credits per run from
+# budget.creditsPerRun. Estimates only: Copilot reports no tokens to the agents, so calibrate the table
+# against the AI usage report. Resume sessions and CI-fix runs leave no marker and aren't counted.
+
+function Get-PwField {
+    <# A field of a row that may be a hashtable or an object, or $null when it has none (strict mode). #>
+    param($Row, [string]$Name)
+    if ($null -eq $Row) { return $null }
+    if ($Row -is [System.Collections.IDictionary]) { return $Row[$Name] }
+    $p = $Row.PSObject.Properties[$Name]
+    if ($p) { $p.Value } else { $null }
+}
+
+function Get-PwRoundRows {
+    <# The round reports among a PR's marker rows (settle requests and checks left out). #>
+    param([object[]]$Rows = @())
+    , @($Rows | Where-Object { $null -ne $_ -and (($k = Get-PwField $_ 'Kind') -eq 'round' -or -not $k) })
+}
+
+function Get-PwSum {
+    <# The sum of one numeric field over rows; 0 for none (Measure-Object prints nothing then). #>
+    param([object[]]$Rows = @(), [Parameter(Mandatory)][string]$Name)
+    $sum = 0.0
+    foreach ($r in $Rows) { if ($null -ne $r) { $v = Get-PwField $r $Name; if ($null -ne $v) { $sum += [double]$v } } }
+    $sum
+}
+
+function Get-PwCreditRate {
+    <# A creditsPerRun entry for a size: a number, or a table by S/M/L. Stops on anything else, so a
+       typo in the budget stops the estimate (never the board, which doesn't read it). #>
+    param($Table, [string]$Name, [string]$Size, $Default)
+    $v = $Table[$Name]
+    if ($null -eq $v -and $null -ne $Default) { return [double]$Default }
+    if ($v -is [System.Collections.IDictionary]) { $v = $v[$Size] }
+    if ($v -isnot [ValueType] -or $v -is [bool]) { Stop-Pw "config: budget.creditsPerRun.$Name must be a number, or a number per size (S, M, L); its $Size value is missing or not a number" }
+    [double]$v
+}
+
+function Get-PwCreditEstimate {
+    <# One packet's credits from its round markers (rows with Round, Tier, Lenses, Runs, Outcome,
+       CreatedAt, as board.ps1 rounds returns them), priced with budget.creditsPerRun:
+         base   dispatcher + implementer (preflight, brief, PR, hand-off; the first implementer run)
+         round  dispatcherPerRound + dispatcherPerReviewerRun × runs + reviewers + implementerFix if it was a fix
+       Reviewers: reviewerByTier[size][tier] for each run, a run of n lenses counting 1 + 0.4 (n - 1),
+       times laterRoundFactor from round 2 on. A round without runs= ran one reviewer per lens. #>
+    param([Parameter(Mandatory)]$Config, [string]$Size, [object[]]$Rounds = @())
+    $t = $Config.budget.creditsPerRun
+    $sz = if ($Size -in 'S', 'M', 'L') { $Size } else { 'M' }
+    $dispatcher = Get-PwCreditRate $t 'dispatcher' $sz
+    $perRound = Get-PwCreditRate $t 'dispatcherPerRound' $sz
+    $perRun = Get-PwCreditRate $t 'dispatcherPerReviewerRun' $sz 0
+    $later = Get-PwCreditRate $t 'laterRoundFactor' $sz 1
+    $implementer = Get-PwCreditRate $t 'implementer' $sz
+    $implementerFix = Get-PwCreditRate $t 'implementerFix' $sz
+    $byTier = @($t.reviewerByTier[$sz] | Where-Object { $_ -is [ValueType] -and $_ -isnot [bool] })
+    if ($byTier.Count -ne 4) { Stop-Pw "config: budget.creditsPerRun.reviewerByTier.$sz must list four numbers, tiers 1 to 4" }
+    $rows = @(foreach ($r in (Get-PwRoundRows $Rounds)) {
+            $tier = 4
+            if ("$(Get-PwField $r 'Tier')" -match '^[1-4]$') { $tier = [int](Get-PwField $r 'Tier') }
+            $lenses = @("$(Get-PwField $r 'Lenses')" -split '[,\s]+' | Where-Object { $_ -and $_ -ne '-' })
+            $n = [Math]::Max(1, $lenses.Count)
+            $given = "$(Get-PwField $r 'Runs')"
+            $runs = if ($given -match '^\d+$' -and [int]$given -ge 1) { [Math]::Min([int]$given, $n) } else { $n }
+            $round = [int](Get-PwField $r 'Round')
+            $reviewers = [double]$byTier[$tier - 1] * ($runs + 0.4 * ($n - $runs)) * $(if ($round -ge 2) { $later } else { 1 })
+            $fix = "$(Get-PwField $r 'Outcome')" -eq 'fix'
+            $credits = $perRound + $perRun * $runs + $reviewers + $(if ($fix) { $implementerFix } else { 0 })
+            [pscustomobject]@{ Round = $round; Tier = $tier; Lenses = $n; ReviewerRuns = $runs; Fix = $fix; Credits = [Math]::Round($credits); CreatedAt = (Get-PwField $r 'CreatedAt') }
+        })
+    $base = $dispatcher + $implementer
+    [pscustomobject]@{
+        Size = $sz; Base = [Math]::Round($base); Rounds = $rows
+        ReviewerRuns = [int](Get-PwSum $rows 'ReviewerRuns')
+        ImplementerRuns = 1 + @($rows | Where-Object Fix).Count
+        Credits = [Math]::Round($base + (Get-PwSum $rows 'Credits'))
+    }
+}
+
+function Get-PwCreditSummary {
+    <# A phase's estimated credits. -Packets: objects with Id, Size, Pr and Rounds (round marker rows).
+       -Today is a UTC date: the AI-credit pool resets on the 1st, UTC. This month counts each round in
+       the UTC month of its report, and a packet's base (preflight, brief, first implementer run) in the
+       month of its round 1. A packet is finished once its last round passed or went to the owner. #>
+    param([Parameter(Mandatory)]$Config, [object[]]$Packets = @(), [DateTime]$Today = [DateTime]::UtcNow)
+    $month = [DateTime]::new($Today.Year, $Today.Month, 1)
+    $inMonth = { param($at) if (-not $at) { return $false }; $d = ([DateTimeOffset]$at).UtcDateTime; $d.Year -eq $month.Year -and $d.Month -eq $month.Month }
+    $rows = @(foreach ($p in $Packets) {
+            $rounds = Get-PwRoundRows @(Get-PwField $p 'Rounds')
+            if (-not $rounds.Count) { continue }
+            $e = Get-PwCreditEstimate -Config $Config -Size (Get-PwField $p 'Size') -Rounds $rounds
+            $mtd = Get-PwSum @($e.Rounds | Where-Object { & $inMonth $_.CreatedAt }) 'Credits'
+            if (& $inMonth ($e.Rounds | Select-Object -First 1).CreatedAt) { $mtd += $e.Base }
+            $lastOutcome = "$(Get-PwField ($rounds | Select-Object -Last 1) 'Outcome')"
+            [pscustomobject]@{
+                Id = (Get-PwField $p 'Id'); Size = $e.Size; Pr = (Get-PwField $p 'Pr'); Rounds = $e.Rounds.Count; ReviewerRuns = $e.ReviewerRuns; ImplementerRuns = $e.ImplementerRuns
+                Credits = $e.Credits; ThisMonth = [Math]::Round($mtd); Finished = $lastOutcome -in 'pass', 'needs-human'
+            }
+        })
+    $finished = @($rows | Where-Object Finished)
+    $avgOf = @(if ($finished.Count) { $finished } else { $rows })
+    $avg = if ($avgOf.Count) { [Math]::Round((Get-PwSum $avgOf 'Credits') / $avgOf.Count) } else { 0 }
+    $total = Get-PwSum $rows 'Credits'
+    $mtdAll = Get-PwSum $rows 'ThisMonth'
+    $monthly = [int]$Config.budget.monthlyCredits
+    [pscustomobject]@{
+        Estimate = $true; Packets = $rows; Total = [Math]::Round($total); PerFinishedPacket = $avg
+        Month = $month.ToString('yyyy-MM'); ThisMonth = [Math]::Round($mtdAll); MonthlyCredits = $monthly
+        Left = $(if ($monthly) { [Math]::Round($monthly - $mtdAll) } else { $null })
+        PacketsLeft = $(if ($monthly -and $avg) { [Math]::Max(0, [Math]::Floor(($monthly - $mtdAll) / $avg)) } else { $null })
+    }
 }
 
 function New-PwClaimId {

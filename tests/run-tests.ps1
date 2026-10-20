@@ -266,6 +266,44 @@ Click through it.
     Assert-That ($r.Code -eq 0 -and $s.Tier -eq 3) 'auth path and a semaphore raise the tier to 3' $r.Text
     Assert-That ($s.Agent -eq 'packet-reviewer-deep') 'tier 3 names the deep reviewer' $r.Text
     Assert-That (($s.Lenses -contains 'security') -and ($s.Lenses -contains 'concurrency') -and ($s.Lenses -contains 'correctness')) 'lenses: packet lenses plus security and concurrency from the diff' $r.Text
+    Assert-That ($s.Runs.Count -eq $s.Lenses.Count -and $s.Pairs[0][0] -eq $s.Lenses[0] -and $s.Settings.MaxRounds -eq 3 -and $s.Settings.ShouldFixPassFromRound -eq 3 -and $s.Settings.LensesPerReviewer -eq 1) 'by default one lens per reviewer run, and should-fix-only rounds pass only in the last round' $r.Text
+    $altCfg = Join-Path ([System.IO.Path]::GetTempPath()) "pw-cfg-$([guid]::NewGuid().ToString('n')).json"
+    $alt = $cfg.Clone(); $alt.review = $cfg.review.Clone(); $alt.review.lensesPerReviewer = 2; $alt.review.shouldFixPassFromRound = 2
+    Set-Content -LiteralPath $altCfg -Value ($alt | ConvertTo-Json -Depth 10)
+    $r = Invoke-Kit $reviewScope @('-Base', 'main', '-Packet', 'PKT-03', '-Json', '-ConfigPath', $altCfg)
+    $s = $r.Text | ConvertFrom-Json
+    Assert-That ($r.Code -eq 0 -and $s.Tier -eq 3 -and (($s.Lenses) -join ',') -eq 'security,concurrency,correctness' -and $s.Runs.Count -eq 2 -and (($s.Runs[0]) -join '+') -eq 'security+concurrency' -and (($s.Pairs[0]) -join ',') -eq 'security+concurrency,correctness' -and $s.Settings.ShouldFixPassFromRound -eq 2) 'lensesPerReviewer 2 groups neighbouring lenses into runs, keeps every lens and the tier' $r.Text
+    $alt.review.lensesPerReviewer = 4
+    Set-Content -LiteralPath $altCfg -Value ($alt | ConvertTo-Json -Depth 10)
+    $r = Invoke-Kit $reviewScope @('-Base', 'main', '-Packet', 'PKT-03', '-ConfigPath', $altCfg)
+    Assert-That ($r.Code -eq 2 -and $r.Text -match 'lensesPerReviewer must be 1, 2 or 3') 'more than three lenses per reviewer run is refused' $r.Text
+    $alt.review.lensesPerReviewer = 1; $alt.review.shouldFixPassFromRound = 9
+    Set-Content -LiteralPath $altCfg -Value ($alt | ConvertTo-Json -Depth 10)
+    $r = Invoke-Kit $reviewScope @('-Base', 'main', '-Packet', 'PKT-03', '-Json', '-ConfigPath', $altCfg)
+    $s = $r.Text | ConvertFrom-Json
+    Assert-That ($r.Code -eq 0 -and $s.Settings.ShouldFixPassFromRound -eq 3) 'a shouldFixPassFromRound past maxRounds means the last round' $r.Text
+    $alt.review.shouldFixPassFromRound = 0
+    Set-Content -LiteralPath $altCfg -Value ($alt | ConvertTo-Json -Depth 10)
+    $r = Invoke-Kit $reviewScope @('-Base', 'main', '-Packet', 'PKT-03', '-ConfigPath', $altCfg)
+    Assert-That ($r.Code -eq 2 -and $r.Text -match 'shouldFixPassFromRound must be a round number') 'round 0 is refused' $r.Text
+    # The template leaves shouldFixPassFromRound null, so it follows maxRounds.
+    $alt.review.lensesPerReviewer = 1; $alt.review.shouldFixPassFromRound = $null; $alt.review.maxRounds = 4
+    Set-Content -LiteralPath $altCfg -Value ($alt | ConvertTo-Json -Depth 10)
+    $r = Invoke-Kit $reviewScope @('-Base', 'main', '-Packet', 'PKT-03', '-Json', '-ConfigPath', $altCfg)
+    $s = $r.Text | ConvertFrom-Json
+    Assert-That ($r.Code -eq 0 -and $s.Settings.MaxRounds -eq 4 -and $s.Settings.ShouldFixPassFromRound -eq 4) 'a null shouldFixPassFromRound (the template''s) follows maxRounds' $r.Text
+    # Existing installs have no lensesPerReviewer or shouldFixPassFromRound: one lens per run, and only the last round passes on should-fix.
+    $alt.review.Remove('lensesPerReviewer'); $alt.review.Remove('shouldFixPassFromRound'); $alt.review.maxRounds = 5
+    Set-Content -LiteralPath $altCfg -Value ($alt | ConvertTo-Json -Depth 10)
+    $r = Invoke-Kit $reviewScope @('-Base', 'main', '-Packet', 'PKT-03', '-Json', '-ConfigPath', $altCfg)
+    $s = $r.Text | ConvertFrom-Json
+    Assert-That ($r.Code -eq 0 -and $s.Settings.MaxRounds -eq 5 -and $s.Settings.ShouldFixPassFromRound -eq 5 -and $s.Settings.LensesPerReviewer -eq 1 -and $s.Runs.Count -eq $s.Lenses.Count) 'a config without the new keys keeps the old panel: should-fix passes only in the last round, one lens per run' $r.Text
+    $alt.review.maxRounds = '3'
+    Set-Content -LiteralPath $altCfg -Value ($alt | ConvertTo-Json -Depth 10)
+    $r = Invoke-Kit $reviewScope @('-Base', 'main', '-Packet', 'PKT-03', '-Json', '-ConfigPath', $altCfg)
+    $s = $r.Text | ConvertFrom-Json
+    Assert-That ($r.Code -eq 0 -and $s.Settings.MaxRounds -eq 3 -and $s.Settings.ShouldFixPassFromRound -eq 3) 'a quoted whole number still counts' $r.Text
+    Remove-Item -LiteralPath $altCfg
     Write-File 'docs/notes.md' "a note`n"
     & git add -A; & git commit -qm 'note' | Out-Null
     $r = Invoke-Kit $reviewScope @('-Base', 'HEAD~1', '-Json')
@@ -353,6 +391,47 @@ function Confirm-PwGhLabel { param(`$Config, `$Name, `$Color, `$Description, [sw
 "labels=" + ((Initialize-PwGhLabels -Config @{ labels = @{ packet = 'packet'; human = 'human-task'; needsHuman = 'needs-human'; followUp = 'follow-up' } } -Keys 'needsHuman', 'followUp') -join ',')
 "claim=`$(New-PwClaimId)"
 "host=`$(([System.Net.Dns]::GetHostName() -split '\.')[0])"
+# Credit estimates: stage 5's PKT-1 (S, three tier-4 rounds of 4, 3 and 1 lenses, two fix rounds).
+`$ec = Merge-PwHashtable `$script:Defaults @{}
+`$s5 = @(
+    [pscustomobject]@{ Kind = 'round'; Round = 1; Tier = '4'; Lenses = 'ops,architecture,correctness,tests'; Runs = `$null; Outcome = 'fix'; CreatedAt = '2026-10-19T21:20:00Z' },
+    [pscustomobject]@{ Kind = 'round'; Round = 2; Tier = '4'; Lenses = 'ops,correctness,tests'; Runs = `$null; Outcome = 'fix'; CreatedAt = '2026-10-19T21:40:00Z' },
+    [pscustomobject]@{ Kind = 'settle-request'; Round = 2; Tier = `$null; Lenses = `$null; Runs = `$null; Outcome = 'settle'; CreatedAt = '2026-10-19T21:45:00Z' },
+    [pscustomobject]@{ Kind = 'round'; Round = 3; Tier = '4'; Lenses = 'tests'; Outcome = 'pass'; CreatedAt = '2026-10-19T21:55:00Z' })
+`$e = Get-PwCreditEstimate -Config `$ec -Size 'S' -Rounds `$s5
+"estimate=`$(`$e.Credits)|runs=`$(`$e.ReviewerRuns)|impl=`$(`$e.ImplementerRuns)|rounds=`$(`$e.Rounds.Count)"
+`$g = Get-PwCreditEstimate -Config `$ec -Size 'S' -Rounds @([pscustomobject]@{ Round = 1; Tier = '4'; Lenses = 'ops,architecture,correctness,tests'; Runs = '2'; Outcome = 'pass'; CreatedAt = `$null })
+"grouped=`$(`$g.Credits)|runs=`$(`$g.ReviewerRuns)"
+`$ec.budget = Merge-PwHashtable `$ec.budget @{ monthlyCredits = 12500 }
+`$p2 = @(
+    @{ Kind = 'round'; Round = 1; Tier = '3'; Lenses = 'correctness,tests'; Outcome = 'fix'; CreatedAt = '2026-09-30T23:00:00Z' },
+    @{ Kind = 'round'; Round = 2; Tier = '4'; Lenses = 'tests'; Outcome = 'fix'; CreatedAt = '2026-10-01T01:00:00Z' })
+`$sum = Get-PwCreditSummary -Config `$ec -Today ([DateTime]'2026-10-20') -Packets @(
+    [pscustomobject]@{ Id = 'PKT-01'; Size = 'S'; Pr = 7; Rounds = `$s5 },
+    [pscustomobject]@{ Id = 'PKT-02'; Size = 'M'; Pr = 8; Rounds = `$p2 },
+    [pscustomobject]@{ Id = 'PKT-03'; Size = 'L'; Pr = 9; Rounds = @() })
+"summary=`$(`$sum.Total)|avg=`$(`$sum.PerFinishedPacket)|month=`$(`$sum.Month):`$(`$sum.ThisMonth)|left=`$(`$sum.Left)|more=`$(`$sum.PacketsLeft)|finished=`$((`$sum.Packets | ForEach-Object Finished) -join ',')|counted=`$(`$sum.Packets.Count)"
+`$bad = Merge-PwHashtable `$script:Defaults @{ budget = @{ creditsPerRun = @{ reviewerByTier = @{ M = @(30, 70, 160) } } } }
+try { [void](Get-PwCreditEstimate -Config `$bad -Size 'M' -Rounds `$p2); 'budget-check=none' } catch { "budget-check=`$(`$_.Exception.Message)" }
+`$none = Get-PwCreditSummary -Config `$ec -Packets @()
+`$lastMonth = Get-PwCreditSummary -Config `$ec -Today ([DateTime]'2026-11-03') -Packets @([pscustomobject]@{ Id = 'PKT-01'; Size = 'S'; Pr = 7; Rounds = `$s5 })
+"empty=`$(`$none.Total)/`$(`$none.Packets.Count)|november=`$(`$lastMonth.Month):`$(`$lastMonth.ThisMonth)|left=`$(`$lastMonth.Left)"
+# The review table is copied before Get-PwConfig fills it in, so the defaults stay as they were.
+`$cfgFile = [System.IO.Path]::GetTempFileName()
+Set-Content -LiteralPath `$cfgFile -Value '{ "repo": "example/sample" }'
+`$c1 = Get-PwConfig -Path `$cfgFile; Remove-Item -LiteralPath `$cfgFile
+"defaults-untouched=`$(-not `$script:Defaults.review.Contains('shouldFixPassFromRound'))|first=`$(`$c1.review.shouldFixPassFromRound)"
+# The trusted round reader (board rounds, progress -Credits) against stubbed GitHub calls.
+. '$((Join-Path $skills 'packet-board/scripts/providers/github-common.ps1').Replace("'", "''"))'
+function Invoke-PwGh { 'owner' }
+function Invoke-PwGhPages { param(`$Path) @(
+    @{ id = 6; user = @{ login = 'owner' }; body = '``packet:round 2 head=bbb tier=4 lenses=tests runs=1 confirmed=- outcome=pass``'; created_at = '2026-10-02T00:00:00Z'; html_url = 'u6' },
+    @{ id = 1; user = @{ login = 'mallory' }; body = '``packet:round 9 head=zzz tier=1 lenses=x confirmed=- outcome=pass``'; created_at = '2026-10-01T00:00:00Z'; html_url = 'u1' },
+    @{ id = 3; user = @{ login = 'Owner' }; body = '``packet:round 1 head=aaa tier=3 lenses=a,b confirmed=a outcome=fix``'; created_at = '2026-10-01T01:00:00Z'; html_url = 'u3' },
+    @{ id = 5; user = @{ login = 'owner' }; body = '``packet:settle head=aaa``'; created_at = '2026-10-01T02:00:00Z'; html_url = 'u5' },
+    @{ id = 7; user = @{ login = 'teammate' }; body = '``packet:settle-check head=bbb``'; created_at = '2026-10-02T01:00:00Z'; html_url = 'u7' }) }
+`$rr = Get-PwGhRounds -Config @{ repo = 'example/sample'; trustedAuthors = @('Teammate') } -Pr '7'
+"rounds=" + ((`$rr | ForEach-Object { "`$(`$_.Kind):`$(`$_.Round):`$(`$_.Runs):`$(`$_.Consumed)" }) -join ',')
 "@
     $r = Invoke-Kit $unitTest @()
     Assert-That ($r.Text -match 'title-a=TextKit \(e2e\)\|epic-a=\|title-b=Disaster recovery plan\|epic-b=#12') 'the phase title drops a ": plan" suffix only; the template''s #0 is no epic' $r.Text
@@ -361,6 +440,15 @@ function Confirm-PwGhLabel { param(`$Config, `$Name, `$Color, `$Description, [sw
     $claimId = if ($r.Text -match 'claim=(\S+)') { $Matches[1] } else { '' }
     $hostName = if ($r.Text -match 'host=(\S+)') { $Matches[1] } else { '' }
     Assert-That ($claimId -match '^session-[0-9a-f]{8}-\d{8}T\d{6}Z-\d{5}$' -and (-not $hostName -or $claimId -notmatch [regex]::Escape($hostName))) 'a claim id carries a hash of the machine, not its host name' $r.Text
+    # Base 50 + 105. Rounds: 300 + 4×35 + 4×195 + 40 = 1260; 300 + 3×35 + 0.85×3×195 + 40 = 942; 300 + 35 + 0.85×195 = 501.
+    Assert-That ($r.Text -match 'estimate=2858\|runs=8\|impl=3\|rounds=3') 'credit estimate for stage 5: settle rows ignored, a row without Runs is one run per lens' $r.Text
+    Assert-That ($r.Text -match 'grouped=1071\|runs=2') 'two runs of two lenses count 2.8 runs' $r.Text
+    # PKT-02 (M): 250 base and 775 in September (its round 1), 330 + 35 + 0.85×280 + 55 = 658 in October; only PKT-01 has finished.
+    Assert-That ($r.Text -match 'summary=4541\|avg=2858\|month=2026-10:3516\|left=8984\|more=3\|finished=True,False\|counted=2') 'credit summary: month by round date, average over finished packets, packets with no round left out' $r.Text
+    Assert-That ($r.Text -match 'budget-check=config: budget\.creditsPerRun\.reviewerByTier\.M must list four numbers') 'a malformed credits table stops the estimate with a clear message' $r.Text
+    Assert-That ($r.Text -match 'empty=0/0\|november=2026-11:0\|left=12500') 'a phase with no round reports, and one whose rounds are all last month, are estimated without failing' $r.Text
+    Assert-That ($r.Text -match 'defaults-untouched=True\|first=3') 'Get-PwConfig fills in shouldFixPassFromRound on a copy, not on the shared defaults' $r.Text
+    Assert-That ($r.Text -match 'rounds=round:1::False,settle-request:1::True,round:2:1:False,settle-check:2::False(\r?\n|$)') 'the trusted round reader: untrusted rounds dropped, comment order, settle rounds, Consumed, runs=' $r.Text
     Remove-Item -LiteralPath $unitTest; Remove-Item -Recurse -Force -LiteralPath $phaseRoot
     & git switch -q main
 
@@ -379,6 +467,48 @@ function Confirm-PwGhLabel { param(`$Config, `$Name, `$Color, `$Description, [sw
     $pj = $r.Text | ConvertFrom-Json
     Assert-That ((@($pj.Inversions | Where-Object { $_.Id -eq 'PKT-06' -and $_.DependsOn -eq 'PKT-05' }).Count -eq 1)) 'priority inversion is reported' $r.Text
     Assert-That ((@($pj.WaitingOnBacklog | Where-Object { $_.Id -eq 'PKT-06' }).Count -eq 1) -and $pj.Health -ne 'on track') 'waiting on Backlog is reported and lowers health' $r.Text
+
+    # progress -Credits end to end, with a fake gh on PATH: PR lookup by branch (newest wins), trusted
+    # round markers only, the month by UTC report date. Packets are M; see Get-PwCreditEstimate.
+    $fakeBin = Join-Path ([System.IO.Path]::GetTempPath()) ("pw-gh-" + [guid]::NewGuid().ToString('n').Substring(0, 8))
+    New-Item -ItemType Directory -Path $fakeBin | Out-Null
+    $mk = { param($id, $who, $marker, $at) @{ id = $id; user = @{ login = $who }; body = "``packet:$marker`` report"; created_at = $at; html_url = "u$id" } }
+    $ghData = @{
+        prs = @(@{ number = 10; headRefName = 'pkt/pkt-01-old-attempt' }, @{ number = 11; headRefName = 'pkt/pkt-01-core-contracts' }, @{ number = 12; headRefName = 'pkt/pkt-02-persistence' })
+        comments = @{
+            '10' = @(& $mk 9 'owner' 'round 1 head=old tier=4 lenses=a,b,c,d,e confirmed=- outcome=pass' '2026-09-01T00:00:00Z')
+            '11' = @((& $mk 1 'owner' 'round 1 head=a tier=3 lenses=architecture,correctness,tests confirmed=tests outcome=fix' '2026-09-30T23:30:00Z'),
+                (& $mk 2 'mallory' 'round 2 head=z tier=1 lenses=x confirmed=- outcome=pass' '2026-10-01T00:00:00Z'),
+                (& $mk 3 'owner' 'round 2 head=b tier=4 lenses=tests confirmed=- outcome=pass' '2026-10-01T00:30:00Z'))
+            '12' = @(& $mk 4 'owner' 'round 1 head=c tier=2 lenses=data,correctness runs=1 confirmed=data outcome=fix' '2026-10-01T02:00:00Z')
+        }
+    }
+    Set-Content -LiteralPath (Join-Path $fakeBin 'gh-data.json') -Value ($ghData | ConvertTo-Json -Depth 8)
+    Set-Content -LiteralPath (Join-Path $fakeBin 'gh.ps1') -Value @'
+$data = Get-Content -Raw (Join-Path $PSScriptRoot 'gh-data.json') | ConvertFrom-Json -AsHashtable
+$a = @($args)
+if ($a[0] -eq 'pr' -and $a[1] -eq 'list') { ConvertTo-Json -InputObject @($data.prs) -Depth 5; exit 0 }
+if ($a[0] -eq 'api' -and $a -contains 'user') { 'owner'; exit 0 }
+$path = @($a | Where-Object { "$_" -match '/issues/\d+/comments' })[0]
+if ($a[0] -eq 'api' -and $path -match '/issues/(\d+)/comments') { ConvertTo-Json -InputObject @(, @($data.comments[$Matches[1]])) -Depth 6; exit 0 }
+[Console]::Error.WriteLine("fake gh: unexpected call: $($a -join ' ')"); exit 1
+'@
+    if ($IsWindows) { Set-Content -LiteralPath (Join-Path $fakeBin 'gh.cmd') -Value "@pwsh -NoProfile -File `"%~dp0gh.ps1`" %*" }
+    else { Set-Content -LiteralPath (Join-Path $fakeBin 'gh') -Value "#!/bin/sh`nexec pwsh -NoProfile -File `"`$(dirname `"`$0`")/gh.ps1`" `"`$@`""; & chmod +x (Join-Path $fakeBin 'gh') }
+    $oldPath = $env:PATH
+    $env:PATH = $fakeBin + [System.IO.Path]::PathSeparator + $env:PATH
+    try {
+        $r = Invoke-Kit $progress @('-WorkingTree', '-Credits', '-Today', '2026-10-20', '-Json')
+        $c = ($r.Text | ConvertFrom-Json).Credits
+        $line = (@($c.Packets) | ForEach-Object { "$($_.Id):$($_.Pr):$($_.Credits):$($_.Finished)" }) -join ','
+        Assert-That ($r.Code -eq 0 -and $line -eq 'PKT-01:11:1823:True,PKT-02:12:768:False' -and $c.Total -eq 2591 -and $c.PerFinishedPacket -eq 1823 -and $c.Month -eq '2026-10' -and $c.ThisMonth -eq 1371) 'progress -Credits: newest PR per packet, untrusted rounds dropped, credits per packet, phase and month' $r.Text
+        $r = Invoke-Kit $progress @('-WorkingTree', '-Credits', '-Today', '2026-09-30', '-Json')
+        $c = ($r.Text | ConvertFrom-Json).Credits
+        Assert-That ($r.Code -eq 0 -and $c.Month -eq '2026-09' -and $c.ThisMonth -eq 1220) 'a round reported at 23:30 UTC on 30 September counts in September, with its packet''s base' $r.Text
+        $r = Invoke-Kit $progress @('-WorkingTree', '-Credits')
+        Assert-That ($r.Code -eq 0 -and $r.Text -match 'PKT-02\s+M\s+PR #12\s+1 round\(s\), 1 reviewer run\(s\), 2 implementer run\(s\)\s+768\s+\(in review\)' -and $r.Text -match "phase 2,591 · 1,823 per finished packet · $([DateTime]::UtcNow.ToString('yyyy-MM')):") 'progress -Credits text: the estimate per packet and the UTC month by default' $r.Text
+    }
+    finally { $env:PATH = $oldPath; Remove-Item -Recurse -Force -LiteralPath $fakeBin }
 }
 finally {
     Pop-Location

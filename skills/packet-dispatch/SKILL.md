@@ -49,7 +49,7 @@ Every call runs this first, `resume` and `status` included.
    pwsh -NoProfile -Command "Expand-Archive -Path '<temp>/packet-kit-<random>.zip' -DestinationPath '<temp>/packet-kit-<random>'"
    ```
 
-   If `symbolic-ref` fails, run `git remote set-head origin --auto` once and retry. If `git archive` finds no `.github/skills`, the kit isn't merged on the default branch yet: stop.
+   If `symbolic-ref` fails, run `git remote set-head origin --auto` once and retry. If `git archive` finds no `.github/skills`, the kit isn't merged on the default branch yet: stop. Note the commit you archived (`git rev-parse <the ref it printed>`) as `<kit sha>`: reviewers read their lens texts from it (packet-review, Setup step 6).
 2. `.github/packet-workflow.json` exists. `gh auth status` succeeds (with the `project` scope for `github-project`); for `azure-boards`, `AZURE_DEVOPS_EXT_PAT` is set or `az login` works.
 3. The working tree is clean (`git status --porcelain` prints nothing). If not, stop: packet work never mixes with other changes.
 4. If this is the repository's main checkout (`git rev-parse --git-dir` equals `git rev-parse --git-common-dir`), tell the owner that only one dispatcher may run in a checkout, and suggest a worktree session for the next one.
@@ -104,7 +104,7 @@ For STACK add `dep=<dependency ID> dep-pr=<its PR number> dep-branch=<its head b
 
 ## 5 · Run the implementer
 
-Refresh the claim. Then run the **`packet-implementer`** agent as a subagent, with the whole brief as its task (in VS Code: the Run Subagent tool, naming the agent). Subagents are stateless: each follow-up (a test failure, review findings) is a new run with the brief, what to do now, and the current state (`git log --oneline <base-sha>..HEAD`).
+Refresh the claim. Then run the **`packet-implementer`** agent as a subagent (in VS Code: the Run Subagent tool, naming the agent). Its task names the brief's file rather than pasting it, so your own context stays small: "Your implementation brief is in `<the brief file from step 4>`. Read all of it first (`pwsh -NoProfile -Command "Get-Content -Raw '<file>'"`), then build the packet it describes." Subagents are stateless: each follow-up (a test failure, review findings) is a new run with the brief's file, what to do now, and the current state (`git log --oneline <base-sha>..HEAD`). If the file is gone (a new session, a cleaned temp folder), write it again from the brief marker comment (`board marker <ID> brief`).
 
 While it runs, do nothing else on this packet.
 
@@ -113,7 +113,7 @@ While it runs, do nothing else on this packet.
 1. **Clean tree and kit integrity, with git alone.** `git status --porcelain` must print nothing: if the implementer left uncommitted changes, run it again to commit or discard them; an uncommitted edit to a script would run as is. Then `git diff --name-only <base-sha>...HEAD`: if it lists anything under `.github/skills/`, `.github/agents/`, the project lens directory (`paths.lenses`, `.github/packet-lenses/` by default) or `.github/packet-workflow.json` that the packet doesn't own, restore those paths from the base (`git checkout <base-sha> -- <path>`) and commit. The pinned kit never runs the checkout's copies, but the PR must not carry kit changes the packet doesn't own; the scripts read the config at the base (`board` at the default branch) for the same reason.
 2. Refresh the claim. **Questions:** if the implementer stopped with a question, answer it when the plan or the code settles it and run it again. A product, scope or contract decision goes to **Needs human**.
 3. **Scope.** `pwsh -File <kit>/.github/skills/packet-dispatch/scripts/check-scope.ps1 -Packet <ID> -Base <base-sha>` must exit 0. For OUTSIDE, LOCKED or MACHINERY lines, restore those paths from the base and commit, or send the work back. For each TOUCH line, read that file's diff and confirm it is exactly the edit the packet allows.
-4. **Tests.** Run the packet's **Tests to run**, then `commands.ci` from the config once, if it is set. On a failure caused by the packet, refresh the claim and send the failure back to a new implementer run (step 5). After two failed attempts, **Needs human**.
+4. **Tests.** Run the packet's **Tests to run**, then `commands.ci` from the config once, if it is set. Send each command's output to a file in the system temp directory and read its summary and failures (the last 60 lines, plus each failing test the runner names), not the whole log: every line you read stays in your context for the rest of the packet. For step 5's evidence, search the file for the tests the brief maps to acceptance criteria. On a failure caused by the packet, refresh the claim and send the failure back to a new implementer run (step 5). After two failed attempts, **Needs human**.
 5. **Evidence.** Every acceptance criterion maps to a test that passed or a command's output. A criterion that can't be met as written goes to **Needs human**.
 6. **Decision record.** The file at `paths.decisions` for this packet exists and covers each choice the packet left open.
 
@@ -130,7 +130,7 @@ Refresh the claim, then:
 
 Refresh the claim before each round, then follow the [packet-review](../packet-review/SKILL.md) skill for the PR. It returns one of:
 
-- **Fix**: confirmed findings, rounds left. Refresh the claim, then run a new implementer with the brief, the findings, and: "Fix only these findings. One commit: `Round-<N> review fixes (<ID>)`." Verify as in step 6 (kit integrity, scope, the packet's tests), refresh the claim, push, and start the next round.
+- **Fix**: the panel returned confirmed findings to fix. Refresh the claim, then run a new implementer with the brief's file (step 5), the findings, and: "Fix only these findings. One commit: `Round-<N> review fixes (<ID>)`." Verify as in step 6 (kit integrity, scope, the packet's tests), refresh the claim, push, and start the next round.
 - **Pass**: go to step 9.
 - **Needs human**: the panel has set the status and asked the question. Release the claim and stop.
 
@@ -169,7 +169,7 @@ When the dependency merges: merge `origin/<defaultBranch>` into the packet branc
    - nowhere locally but on the remote: `git switch -c <branch> --track origin/<branch>`;
    - nowhere at all (the work was never pushed and its worktree is gone): start again from step 3 with the same claim.
 
-   Re-read the brief from the marker comment.
+   Re-read the brief from the marker comment, and write it to a file in the system temp directory for the implementer runs (step 5).
 4. Continue where the state says:
    - In progress, no PR: commits on the branch → step 6; none → step 5.
    - In review: the last round's outcome decides. `fix` → if a `Round-<N> review fixes` commit already sits above that round's head (`git log --oneline <head>..HEAD`), verify it as step 6 says (clean tree and kit first, scope, the packet's tests), then push and start the next round; otherwise apply the findings (step 8, Fix). `pass` → step 9. A round started but never reported → run it again (step 8).

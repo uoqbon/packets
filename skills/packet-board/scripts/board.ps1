@@ -390,32 +390,10 @@ try {
         'rounds' {
             $pr = ([string]$Rest[0]).TrimStart('#')
             if ($pr -notmatch '^\d+$') { Stop-Pw 'usage: board.ps1 rounds <PR number>' }
-            # Round reports and the owner's settle checks, from trusted authors only (PRs are on GitHub, so
-            # the GitHub sign-in decides even when the board is elsewhere).
-            $login = (Invoke-PwGh api user --jq .login).Trim()
-            $trusted = [System.Collections.Generic.HashSet[string]]::new([string[]]@(@($login) + @($cfg.trustedAuthors | Where-Object { $_ })), [StringComparer]::OrdinalIgnoreCase)
-            $last = 0
-            $rows = @(Invoke-PwGhPages "repos/$($cfg.repo)/issues/$pr/comments?per_page=100" | Sort-Object { [long]$_.id } | ForEach-Object {
-                    if (-not $trusted.Contains([string]$_.user.login)) { return }
-                    $mk = Get-PwMarker $_.body
-                    if ($mk -and $mk.Kind -eq 'round') {
-                        $last = [int]($mk.Words | Select-Object -First 1)
-                        [pscustomobject]@{ Kind = 'round'; Round = $last; Head = $mk.Pairs['head']; Tier = $mk.Pairs['tier']; Lenses = $mk.Pairs['lenses']; Confirmed = $mk.Pairs['confirmed']; Outcome = $mk.Pairs['outcome']; Author = $_.user.login; CommentId = $_.id; CreatedAt = $_.created_at; Url = $_.html_url }
-                    }
-                    elseif ($mk -and $mk.Kind -eq 'settle') {
-                        [pscustomobject]@{ Kind = 'settle-request'; Round = $last; Head = $mk.Pairs['head']; Tier = $null; Lenses = $null; Confirmed = $null; Outcome = 'settle'; Author = $_.user.login; CommentId = $_.id; CreatedAt = $_.created_at; Url = $_.html_url; Body = $_.body }
-                    }
-                    elseif ($mk -and $mk.Kind -eq 'settle-check') {
-                        [pscustomobject]@{ Kind = 'settle-check'; Round = $last; Head = $mk.Pairs['head']; Tier = $null; Lenses = $null; Confirmed = $null; Outcome = 'settled'; Author = $_.user.login; CommentId = $_.id; CreatedAt = $_.created_at; Url = $_.html_url; Body = $null }
-                    }
-                })
-            # A settle request is used up once a settle check follows it: it never applies twice.
-            foreach ($r in $rows) {
-                $used = $r.Kind -eq 'settle-request' -and [bool]($rows | Where-Object { $_.Kind -eq 'settle-check' -and [long]$_.CommentId -gt [long]$r.CommentId })
-                $r | Add-Member -NotePropertyName Consumed -NotePropertyValue $used
-            }
+            # Round reports and the owner's settle checks, from trusted authors only (github-common.ps1).
+            $rows = Get-PwGhRounds -Config $cfg -Pr $pr
             if ($Json) { Write-PwJson $rows }
-            else { foreach ($r in $rows) { '{0} {1} head={2} tier={3} outcome={4} lenses={5} confirmed={6} by {7}{8}' -f $r.Kind, $r.Round, $r.Head, $r.Tier, $r.Outcome, $r.Lenses, $r.Confirmed, $r.Author, $(if ($r.Consumed) { ' (used)' } else { '' }) } }
+            else { foreach ($r in $rows) { '{0} {1} head={2} tier={3} outcome={4} lenses={5}{6} confirmed={7} by {8}{9}' -f $r.Kind, $r.Round, $r.Head, $r.Tier, $r.Outcome, $r.Lenses, $(if ($r.Runs) { " runs=$($r.Runs)" } else { '' }), $r.Confirmed, $r.Author, $(if ($r.Consumed) { ' (used)' } else { '' }) } }
         }
         'locks' {
             $st = Get-PwBoardState $cfg

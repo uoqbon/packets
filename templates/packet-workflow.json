@@ -82,12 +82,14 @@
   "claims": { "leaseMinutes": 30 },
   "models": {
     "strong": ["Claude Opus 5.5 (copilot)", "GPT-5.6 Sol (copilot)"],
-    "standard": ["Claude Sonnet 5.5 (copilot)", "GPT-5.6 Sol (copilot)"],
+    "standard": ["Claude Sonnet 5.5 (copilot)", "GPT-6.1 Sol (copilot)"],
     "light": ["Claude Sonnet 5.5 (copilot)", "GPT-5.6 Luna (copilot)"]
   },
   "review": {
     "maxRounds": 3,
     "maxParallelLenses": 2,
+    "lensesPerReviewer": 1,
+    "shouldFixPassFromRound": null,
     "agents": {
       "1": "packet-reviewer-light",
       "2": "packet-reviewer-standard",
@@ -111,5 +113,15 @@
     "concurrencyPattern": "\\b(lock|Mutex|SemaphoreSlim|Interlocked|ConcurrentDictionary|Task\\.WhenAll|Parallel\\.|Promise\\.all|asyncio\\.gather|goroutine|go func|sync\\.Mutex|atomic|Channel<)\\b",
     "lensOrder": ["security", "data", "concurrency", "ai", "integration", "ops", "architecture", "correctness", "ux", "performance", "tests"]
   },
-  "sizes": { "S": 1, "M": 2, "L": 3 }
+  "sizes": { "S": 1, "M": 2, "L": 3 },
+  "budget": {
+    "monthlyCredits": 0,
+    "creditsPerRun": {
+      "dispatcher": 50, "dispatcherPerRound": { "S": 300, "M": 330, "L": 390 }, "dispatcherPerReviewerRun": 35,
+      "implementer": { "S": 105, "M": 200, "L": 355 },
+      "implementerFix": { "S": 40, "M": 55, "L": 75 },
+      "reviewerByTier": { "S": [20, 50, 110, 195], "M": [30, 70, 160, 280], "L": [40, 95, 225, 380] },
+      "laterRoundFactor": 0.85
+    }
+  }
 }

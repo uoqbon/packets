@@ -17,9 +17,12 @@
     - backlog problems: a packet waiting on lower-priority work (a priority inversion), or on a packet
       parked in Backlog behind the cut line (it can never start);
     - drift: packet files missing from the board, board items with no file, closed items not Done;
-    - a health verdict: on track, at risk or off track, with the reasons.
+    - a health verdict: on track, at risk or off track, with the reasons;
+    - with -Credits, an estimate of the AI credits each packet's runs cost (from its PR's trusted round
+      markers and budget.creditsPerRun, docs/cost.md), the phase total and this month's against
+      budget.monthlyCredits. It reads every packet PR's comments, so it is off by default.
 
-  progress.ps1 [-Phase p] [-WorkingTree | -Ref <commit>] [-StaleHours 24] [-Today yyyy-MM-dd] [-Json]
+  progress.ps1 [-Phase p] [-WorkingTree | -Ref <commit>] [-StaleHours 24] [-Today yyyy-MM-dd] [-Credits] [-Json]
   Exit codes: 0 report printed · 2 the report couldn't be made.
 #>
 param(
@@ -29,6 +32,7 @@ param(
     [int]$StaleHours = 24,
     [string]$Today,
     [switch]$Json,
+    [switch]$Credits,
     [string]$ConfigPath
 )
 
@@ -63,6 +67,8 @@ try {
     $prCache = @{}
     $finder = { param($id) if (-not $prCache.ContainsKey($id)) { $prCache[$id] = Get-PwGhPrForPacket -Config $cfg -PacketId $id -State open }; $prCache[$id] }.GetNewClosure()
     if (-not $cfg.stacking) { $finder = { param($id) $null } }
+    # -Credits: every packet PR once (pull requests always live on GitHub), then each one's round markers.
+    $creditPrs = if ($Credits) { @(Invoke-PwGhJson pr list --repo $cfg.repo --state all --limit 1000 --json 'number,headRefName') } else { @() }
 
     $statusOf = { param($p) $it = $byId[$p.Id]; if ($it) { $it.Status } else { 'Not on board' } }
     $reports = foreach ($ph in $phases) {
@@ -176,7 +182,19 @@ try {
         }
         if (-not $reasons.Count) { $reasons.Add('no late, stale or blocked P0 work') }
 
-        [pscustomobject]@{
+        $creditReport = $null
+        if ($Credits) {
+            $withRounds = @(foreach ($p in $agent) {
+                    $prefix = "pkt/$($p.Id.ToLowerInvariant())-"
+                    $pr = @($creditPrs | Where-Object { "$($_.headRefName)".StartsWith($prefix) } | Sort-Object { [int]$_.number } -Descending) | Select-Object -First 1
+                    if (-not $pr) { continue }
+                    [pscustomobject]@{ Id = $p.Id; Size = $p.Size; Pr = [int]$pr.number; Rounds = (Get-PwGhRounds -Config $cfg -Pr ([string]$pr.number)) }
+                })
+            # The pool resets on the 1st, UTC: "this month" is the UTC month unless -Today names a day.
+            $creditReport = Get-PwCreditSummary -Config $cfg -Packets $withRounds -Today $(if ($Today) { $asOf } else { [DateTime]::UtcNow })
+        }
+
+        $report = [pscustomobject]@{
             Phase = $ph; Title = $info.Title; Source = $(if ($src) { $src } else { 'working tree' }); Today = $asOf.ToString('yyyy-MM-dd')
             Health = $health; HealthReasons = @($reasons)
             Totals = [pscustomobject]@{ Packets = $agent.Count; HumanTasks = $human.Count; Weight = $total; DoneWeight = $done; LandedWeight = $landed; DonePercent = if ($total) { [math]::Round(100 * $done / $total) } else { 0 }; LandedPercent = if ($total) { [math]::Round(100 * $landed / $total) } else { 0 } }
@@ -188,6 +206,8 @@ try {
             Late = @($late); DueSoon = @($dueSoon); Stale = $stale; Drift = @($drift)
             Inversions = @($inversions); WaitingOnBacklog = @($parked)
         }
+        if ($Credits) { $report | Add-Member -NotePropertyName Credits -NotePropertyValue $creditReport }
+        $report
     }
     $reports = @($reports)
     if ($Json) { if ($reports.Count -eq 1) { $reports[0] | ConvertTo-Json -Depth 8 } else { $reports | ConvertTo-Json -Depth 8 } ; exit 0 }
@@ -219,6 +239,14 @@ try {
         if ($r.Inversions) { Write-Output "Priority inversions: $(($r.Inversions | ForEach-Object { "$($_.Id) ($($_.Priority)) waits on $($_.DependsOn) ($($_.DependencyPriority))" }) -join ', ')" }
         if ($r.WaitingOnBacklog) { Write-Output "Waiting on Backlog: $(($r.WaitingOnBacklog | ForEach-Object { "$($_.Id) ($($_.Status)) waits on $($_.DependsOn)" }) -join ', ')" }
         if ($r.Drift) { Write-Output 'Drift:'; foreach ($d in $r.Drift) { Write-Output "  $d" } }
+        if ($r.PSObject.Properties['Credits']) {
+            $c = $r.Credits
+            Write-Output 'Credits (an estimate from round markers and budget.creditsPerRun; calibrate it as the kit''s docs/cost.md says):'
+            foreach ($x in $c.Packets) { Write-Output ('  {0,-8} {1}  PR #{2,-5} {3} round(s), {4} reviewer run(s), {5} implementer run(s)  {6,7:N0}{7}' -f $x.Id, $x.Size, $x.Pr, $x.Rounds, $x.ReviewerRuns, $x.ImplementerRuns, $x.Credits, $(if ($x.Finished) { '' } else { '  (in review)' })) }
+            if (-not $c.Packets) { Write-Output '  no packet PR has a round report yet' }
+            $monthText = if ($c.MonthlyCredits) { ' of {0:N0} ({1:N0} left; about {2} more packet(s) at that rate)' -f $c.MonthlyCredits, $c.Left, $(if ($null -ne $c.PacketsLeft) { $c.PacketsLeft } else { '?' }) } else { ' (set budget.monthlyCredits to compare)' }
+            Write-Output ('  phase {0:N0} · {1:N0} per finished packet · {2}: {3:N0}{4}' -f $c.Total, $c.PerFinishedPacket, $c.Month, $c.ThisMonth, $monthText)
+        }
         Write-Output ''
     }
 }

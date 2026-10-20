@@ -28,8 +28,9 @@ Run it from a checkout of the default branch (or from a dispatcher's pinned kit)
 | `Late`, `DueSoon`, `Stale` | past target; due within two days and not started; no update for 24 hours (`-StaleHours`) |
 | `Inversions`, `WaitingOnBacklog` | a packet waiting on lower-priority work; a packet waiting on one parked in Backlog |
 | `Drift` | packet files missing from the board, closed items not Done, Done items still open |
+| `Credits` (with `-Credits`) | an **estimate** of the AI credits each packet's runs cost, from its PR's trusted round markers (rounds, tier, lenses, reviewer runs, fix rounds) and `budget.creditsPerRun`; the phase total, the average per finished packet, this month's credits against `budget.monthlyCredits`, and how many more packets fit this month at that average. Resume sessions and CI-fix runs leave no marker and aren't counted. |
 
-Without `-Json` it prints the same as text. For a question about one packet, `board deps <ID>` and `board get <ID>` (`board` is `pwsh -File .github/skills/packet-board/scripts/board.ps1`) are cheaper.
+Without `-Json` it prints the same as text. `-Credits` reads every packet PR's comments, so add it only when the owner asks about cost or budget. For a question about one packet, `board deps <ID>` and `board get <ID>` (`board` is `pwsh -File .github/skills/packet-board/scripts/board.ps1`) are cheaper.
 
 ## Judge
 
@@ -42,6 +43,7 @@ The script can't see everything; check before you advise:
 - **Backlog.** An inversion or a packet waiting on Backlog is a planning bug: propose raising the dependency's priority, promoting it from Backlog, or dropping the dependency.
 - **Stale work.** For each stale item, `board claims <ID>`: a live claim means a session is on it; none means the session ended without finishing. Suggest `/packet-dispatch resume <ID>`.
 - **Drift.** Suggest `board sync` for missing items and `board reconcile` for closed ones.
+- **Budget** (with `-Credits`). The figures are estimates, so say so. When this month's credits pass about three quarters of `budget.monthlyCredits`, or an L packet would not fit in what is left, say so, and recommend the cheaper next moves: merges first, then S and M packets on the critical path. Suggest calibrating `budget.creditsPerRun` against the billing AI usage report when the owner has one.
 
 ## Report
 
