@@ -47,7 +47,8 @@ $Target = (Resolve-Path -LiteralPath $Target).Path
 $top = & git -C $Target rev-parse --show-toplevel 2>$null
 if ($LASTEXITCODE -ne 0) { throw "$Target is not inside a git repository" }
 $Target = ($top | Select-Object -First 1).Trim()
-if ([System.IO.Path]::GetFullPath($Target) -eq [System.IO.Path]::GetFullPath((Join-Path $kit '../..'))) {
+$kitTop = & git -C $kit rev-parse --show-toplevel 2>$null
+if ($LASTEXITCODE -eq 0 -and $Target -eq ($kitTop | Select-Object -First 1).Trim()) {
     Write-Warning 'Installing into the repository the kit lives in: the installed copies under .github/agents and .github/skills will sit next to the kit source.'
 }
 

@@ -11,7 +11,7 @@ You are the **verifier** for the packet workflow kit (the `packet-*` agents and 
 
 Inputs (if one is still a literal `${input:…}` placeholder, ask me for it before anything else):
 
-- Kit source folder (holds `install.ps1`, `skills/`, `agents/`): `${input:kitSource:path to the kit source folder, e.g. ../drafter/.github/copilot}`
+- Kit source folder (holds `install.ps1`, `skills/`, `agents/`): `${input:kitSource:path to the kit source folder, e.g. ../packets}`
 - Sandbox repository on GitHub (owner/name): `${input:sandboxRepo:owner/name of a throwaway repository}`
 - Stage to run: the argument after the command, or `${input:stage:stage number, status, or empty for the next one}`
 

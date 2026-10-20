@@ -1,6 +1,6 @@
 # What the kit costs on GitHub Copilot
 
-This page estimates what the packet workflow costs in GitHub AI Credits, and how to run it on a team allowance of about 12,500 credits a month.
+This page estimates what the packet workflow costs in GitHub AI Credits, and how to run it on a limited team allowance, with 12,500 credits a month as the example.
 
 The run counts per packet come from three sources: the kit's rules, the stage 5 end-to-end run, and 73 merged packets of the Drafter project, where the workflow started. The tokens per run are estimates. The end-to-end run used the owner's own API key, so Copilot billed nothing and nothing recorded tokens. [Calibrate](#calibrate) says how to replace the estimates with measurements.
 

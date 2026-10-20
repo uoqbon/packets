@@ -1,6 +1,6 @@
 # Packet workflow kit for GitHub Copilot
 
-A way of working for building planned software with several coding agents at once, packaged as GitHub Copilot custom agents and agent skills for VS Code. It came out of the Drafter project, where it ran on Claude Code; this is the portable, provider-neutral version.
+A way of working for building planned software with several coding agents at once, packaged as GitHub Copilot custom agents and agent skills for VS Code. It came out of Drafter, a private project where it ran on Claude Code; this is the portable, provider-neutral version.
 
 ```text
 implementation plan
@@ -53,13 +53,19 @@ The ideas that make it work:
 
 ## Install
 
+Clone this repository next to (not inside) the repository you want to set up, then run its installer against that repository:
+
 ```bash
-pwsh -File .github/copilot/install.ps1 -Target <path to the repository> -WithInstructions
+git clone https://github.com/uoqbon/packets.git
+```
+
+```bash
+pwsh -File packets/install.ps1 -Target <path to the repository> -WithInstructions
 ```
 
 It copies the agents to `<repo>/.github/agents/` and the skills to `<repo>/.github/skills/` (where Copilot discovers them), creates `.github/packet-workflow.json` from the template with the repository and default branch filled in, and with `-WithInstructions` adds the workflow's rules to `.github/copilot-instructions.md` between markers. `-DryRun` shows what it would do.
 
-Upgrades use the same command. The installer records hashes in `.github/packet-workflow.kit.json`, replaces only files you haven't changed since the last install, and lists the ones it kept (`-Force` replaces them). Put project-specific review lenses in `.github/packet-lenses/<name>.md`; the kit never touches that folder, and a lens there overrides the kit's lens of the same name.
+To upgrade, pull this repository (`git -C packets pull`) and run the same command. The installer records hashes in `.github/packet-workflow.kit.json`, replaces only files you haven't changed since the last install, and lists the ones it kept (`-Force` replaces them). Put project-specific review lenses in `.github/packet-lenses/<name>.md`; the kit never touches that folder, and a lens there overrides the kit's lens of the same name.
 
 Commit what it installs in a pull request; Copilot reads the files from the checkout, and worktree sessions see only committed files.
 
@@ -105,7 +111,7 @@ When a dispatcher needs you, the packet goes to **Needs human** with a question 
 
 ## Copilot specifics
 
-- **Discovery.** Copilot reads custom agents from `.github/agents/` and skills from `.github/skills/`. This folder (`.github/copilot/`) is the kit's source and is **not** discovered; `install.ps1` copies it into place. The settings that used to add extra locations (`chat.agentFilesLocations`, `chat.agentSkillsLocations`) are deprecated and only work in the Local harness.
+- **Discovery.** Copilot reads custom agents from `.github/agents/` and skills from `.github/skills/`. This repository is the kit's source and is **not** discovered from here; `install.ps1` copies it into place. The settings that used to add extra locations (`chat.agentFilesLocations`, `chat.agentSkillsLocations`) are deprecated and only work in the Local harness.
 - **Harnesses.** In the **Local** harness, the dispatcher starts subagents with the Run Subagent tool, limited by its `agents:` list; subagents are stateless and can't start further subagents (unless `chat.subagents.allowInvocationsFromSubagents` is on, which the kit doesn't need); handoff buttons work. In the **Copilot** harness (Copilot CLI sessions, worktree sessions), turn on `github.copilot.chat.cli.customAgents.enabled` so the custom agents are available; `reasoning-effort` in the reviewer agents is honoured there.
 - **Models.** Each agent lists models in preference order (`model:`); the first one available is used. The installer writes those lines from `models` in `.github/packet-workflow.json`, so set that map to what your organization offers, or, with your own API key (BYOK), to the names your model picker shows, and run `install.ps1` again; don't hand-edit the agent files (an upgrade would keep them as locally changed). You can list names from both harnesses in one class, since names that aren't available are skipped. If none is offered, the dispatcher asks you once for a model per class instead of choosing per agent. A Local subagent won't start on a model in a higher cost tier than the session's, so run the dispatcher on a model at least as capable as `packet-reviewer-max`'s.
 - **Tool budget.** With many MCP servers enabled, a session can offer more tools than the model accepts (Copilot warns that some tools "were not provided to the model"). The packet agents name only the tools they need, and an end-to-end run went through with the warning showing. If a subagent reports a missing terminal or edit tool, turn off the MCP servers this workspace doesn't need. Every tool's description is sent with every model call, so they also cost credits: about 14% more per packet with Copilot's 128-tool limit reached ([cost](docs/cost.md)).
@@ -136,7 +142,7 @@ When a dispatcher needs you, the packet goes to **Needs human** with a question 
 ## Tests
 
 ```bash
-pwsh -File .github/copilot/tests/run-tests.ps1
+pwsh -File tests/run-tests.ps1
 ```
 
 It builds a throwaway repository with a sample phase and exercises the validator, the board (local provider: sync, verdicts, claims, markers, reconcile), review scope, tiers and lens grouping, scope checks, progress, the credit estimates and the installer. It needs no network.
@@ -161,3 +167,11 @@ Kept: packets with owned paths and touchpoints, contracts first, locks, one deci
 Changed: PowerShell instead of Bash, so the scripts run on Windows; three board providers instead of one GitHub Project; packet files in the repository as the source of truth (sync renders board items from them); markers are visible code spans so they survive every board's renderer; one session per worktree with stateless subagents instead of a background implementer in a separate worktree; tiers configured per repository.
 
 Left out, on purpose: Drafter's cloud-session token checks, its GraphQL budget accounting, the detailed CI-failure classification and the many recovery paths its dispatcher grew for one tight deadline. Add them back per project if you need them.
+
+## Contributing
+
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) says how to test a change and what a pull request needs.
+
+## License
+
+[MIT](LICENSE).

@@ -626,6 +626,7 @@ try {
     $installer = Join-Path $kit 'install.ps1'
     $r = Invoke-Kit $installer @('-Target', $target, '-WithInstructions')
     Assert-That ($r.Code -eq 0) 'install succeeds' $r.Text
+    Assert-That ($r.Text -notmatch 'the kit lives in') 'installing into another repository gives no self-install warning' $r.Text
     $cfgOut = Get-Content -Raw (Join-Path $target '.github/packet-workflow.json') | ConvertFrom-Json
     Assert-That ($cfgOut.repo -eq 'acme/widgets') 'install fills repo from the origin remote' $r.Text
     Assert-That ((Test-Path (Join-Path $target '.github/agents/packet-dispatcher.agent.md')) -and (Test-Path (Join-Path $target '.github/skills/packet-board/scripts/board.ps1'))) 'agents and skills land where Copilot looks' $r.Text
@@ -654,6 +655,11 @@ try {
     [System.IO.File]::WriteAllText($cfgPath, ($cfgIn | ConvertTo-Json -Depth 10), [System.Text.UTF8Encoding]::new($false))
     $r = Invoke-Kit $installer @('-Target', $target)
     Assert-That ($r.Text -match 'kept\s+\.github/agents/packet-implementer\.agent\.md' -and $r.Text -match 'except the kept packet-implementer, which keeps its own model: line' -and (Get-Content -Raw $implementer) -match "model: \['Hand Picked'\]") 'a hand-edited agent is kept, and the models summary says so' $r.Text
+    $vendored = Join-Path $target 'packet-kit'
+    New-Item -ItemType Directory -Path $vendored | Out-Null
+    foreach ($item in 'install.ps1', 'VERSION', 'agents', 'skills', 'templates') { Copy-Item -Recurse -LiteralPath (Join-Path $kit $item) -Destination $vendored }
+    $r = Invoke-Kit (Join-Path $vendored 'install.ps1') @('-Target', $target, '-DryRun')
+    Assert-That ($r.Code -eq 0 -and $r.Text -match 'Installing into the repository the kit lives in') 'installing into the repository that holds the kit warns' $r.Text
 }
 finally { if (-not $Keep) { Remove-Item -Recurse -Force -LiteralPath $target } }
 
