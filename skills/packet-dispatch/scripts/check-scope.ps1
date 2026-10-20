@@ -45,16 +45,16 @@ function Get-RemoteDefaultTip([string]$Root) {
        when origin can't be reached. #>
     if (@(& git -C $Root remote 2>$null) -notcontains 'origin') { return $null }
     $lines = @(& git -C $Root ls-remote --symref origin HEAD 2>$null)
-    if ($LASTEXITCODE -ne 0) { Write-Warning "couldn't read origin's default branch; comparing against the brief's base"; return $null }
+    if ($LASTEXITCODE -ne 0) { [Console]::Error.WriteLine("check-scope: couldn't read origin's default branch; comparing against the brief's base"); return $null }
     $branch = $null; $tip = $null
     foreach ($l in $lines) {
         $m = [regex]::Match($l, '^ref: refs/heads/(?<b>\S+)\s+HEAD$'); if ($m.Success) { $branch = $m.Groups['b'].Value }
         $m = [regex]::Match($l, '^(?<s>[0-9a-f]{40}(?:[0-9a-f]{24})?)\s+HEAD$'); if ($m.Success) { $tip = $m.Groups['s'].Value }
     }
-    if (-not $branch -or -not $tip) { Write-Warning "origin reports no default branch; comparing against the brief's base"; return $null }
+    if (-not $branch -or -not $tip) { [Console]::Error.WriteLine("check-scope: origin reports no default branch; comparing against the brief's base"); return $null }
     & git -C $Root cat-file -e "$tip^{commit}" 2>$null
     if ($LASTEXITCODE -ne 0) { & git -C $Root fetch -q origin "refs/heads/$branch" 2>$null; & git -C $Root cat-file -e "$tip^{commit}" 2>$null }
-    if ($LASTEXITCODE -ne 0) { Write-Warning "couldn't fetch origin's $branch; comparing against the brief's base"; return $null }
+    if ($LASTEXITCODE -ne 0) { [Console]::Error.WriteLine("check-scope: couldn't fetch origin's $branch; comparing against the brief's base"); return $null }
     $tip
 }
 

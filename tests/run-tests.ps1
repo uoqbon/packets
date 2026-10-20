@@ -592,6 +592,13 @@ try {
     Invoke-Q symbolic-ref refs/remotes/origin/HEAD refs/heads/side
     $r2 = Invoke-Kit $checkScope @('-Packet', 'PKT-02', '-Base', $b0)
     Assert-That ($r1.Code -eq 1 -and $r1.Text -match 'OUTSIDE\s+src/A/evil\.ps1' -and $r2.Code -eq 1 -and $r2.Text -match 'OUTSIDE\s+src/A/evil\.ps1') 'a moved origin/main or origin/HEAD does not change the comparison base' ($r1.Text + "`n" + $r2.Text)
+    # With origin out of reach, it keeps the brief's base (a false alarm at worst), never the local refs.
+    Invoke-Q symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+    Invoke-Q remote set-url origin (Join-Path $mergeRepo 'no-such-origin.git')
+    $r = Invoke-Kit $checkScope @('-Packet', 'PKT-02', '-Base', $b0, '-Json')
+    $cjOff = try { $r.Text -split "`n" | Where-Object { $_ -notmatch '^check-scope:' } | Out-String | ConvertFrom-Json } catch { $null }
+    Assert-That ($r.Code -eq 1 -and $cjOff -and $cjOff.Base -eq $b0 -and @($cjOff.Results | Where-Object { $_.Kind -eq 'OUTSIDE' -and $_.Path -eq 'src/A/evil.ps1' }).Count -eq 1) 'with origin unreachable it keeps the brief''s base, not the moved local ref' $r.Text
+    Invoke-Q remote set-url origin $originRepo
     Invoke-Q fetch -q origin; Invoke-Q remote set-head origin main
     # An amendment the owner merged on the default branch counts once the branch merges it.
     Invoke-Q switch -q main
