@@ -36,8 +36,8 @@ Without `-Json` it prints the same as text. For a question about one packet, `bo
 The script can't see everything; check before you advise:
 
 - **Merges first.** Ready-to-merge PRs are the cheapest progress. Order them by leverage (what each unblocks) and then age. A Ready-to-merge PR whose head moved since its hand-off needs `/packet-dispatch resume <ID>` before it merges.
-- **Owner decisions.** Read each Needs human item's last `packet:needs-human` comment and restate the question in one line, with the recommended option.
-- **Dispatch capacity.** The number of Startable packets is the most sessions worth running now (one packet per session, each in its own worktree). Recommend the P0s on the critical path first.
+- **Owner decisions.** Read each Needs human item's last `packet:needs-human` comment and restate the question in one line, with the recommended option. Then list the open contract questions (`gh issue list --repo <repo> --state open --label <labels.followUp> --label <labels.needsHuman> --limit 200 --json number,title`; titles `<ID> contract: …`): each blocks every packet that depends on `<ID>` until the owner answers it and removes the label or closes the issue.
+- **Dispatch capacity.** The number of Startable packets, minus those a contract question blocks, is the most sessions worth running now (one packet per session, each in its own worktree). Recommend the P0s on the critical path first.
 - **Schedule.** Compare the critical path's remaining weight with the time left to the phase's next milestone (from its `plan.md`). If it doesn't fit, say what to cut: candidates are P2 and P3 packets off the critical path, or splitting the heaviest packet on it.
 - **Backlog.** An inversion or a packet waiting on Backlog is a planning bug: propose raising the dependency's priority, promoting it from Backlog, or dropping the dependency.
 - **Stale work.** For each stale item, `board claims <ID>`: a live claim means a session is on it; none means the session ended without finishing. Suggest `/packet-dispatch resume <ID>`.

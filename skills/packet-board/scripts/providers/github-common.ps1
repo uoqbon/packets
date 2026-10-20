@@ -249,15 +249,19 @@ function Get-PwGhPrForPacket {
 }
 
 function Initialize-PwGhLabels {
-    <# The labels every GitHub provider uses. Returns the names it created. #>
-    param([Parameter(Mandatory)]$Config, [switch]$DryRun)
+    <# The labels every GitHub provider uses (or only those named in -Keys). Returns the names it created. #>
+    param([Parameter(Mandatory)]$Config, [string[]]$Keys = @('packet', 'human', 'needsHuman', 'followUp'), [switch]$DryRun)
     $created = [System.Collections.Generic.List[string]]::new()
-    $want = @(
-        @($Config.labels.packet, '1d76db', 'Managed by the packet workflow'),
-        @($Config.labels.human, 'fbca04', 'A task only a person can do'),
-        @($Config.labels.needsHuman, 'd93f0b', 'Waiting on a decision from the owner'),
-        @($Config.labels.followUp, 'c5def5', 'Found in review; outside the packet that found it')
-    )
-    foreach ($w in $want) { if (Confirm-PwGhLabel -Config $Config -Name $w[0] -Color $w[1] -Description $w[2] -DryRun:$DryRun) { $created.Add($w[0]) } }
+    $want = [ordered]@{
+        packet     = @($Config.labels.packet, '1d76db', 'Managed by the packet workflow')
+        human      = @($Config.labels.human, 'fbca04', 'A task only a person can do')
+        needsHuman = @($Config.labels.needsHuman, 'd93f0b', 'Waiting on a decision from the owner')
+        followUp   = @($Config.labels.followUp, 'c5def5', 'Found in review; outside the packet that found it')
+    }
+    foreach ($k in $want.Keys) {
+        if ($Keys -notcontains $k) { continue }
+        $w = $want[$k]
+        if (Confirm-PwGhLabel -Config $Config -Name $w[0] -Color $w[1] -Description $w[2] -DryRun:$DryRun) { $created.Add($w[0]) }
+    }
     , $created
 }

@@ -378,5 +378,9 @@ function Initialize-ProvBoard {
     }
     if ($ab.priorityField -ne 'Microsoft.VSTS.Common.Priority') { $lines.Add("priority field: $($ab.priorityField)") }
     $lines.Add('tags (packet, status:*, size:*, wave:*, phase:*) are created on first use')
+    # Review follow-ups are GitHub issues even here (the code is on GitHub), and a contract question also
+    # carries the needs-human label, so both labels must exist on the repository.
+    $created = Initialize-PwGhLabels -Config $script:PwConfig -Keys 'needsHuman', 'followUp' -DryRun:$DryRun
+    $lines.Add($(if ($created.Count) { "$(if ($DryRun) { 'would create' } else { 'created' }) GitHub labels on $($script:PwConfig.repo): $($created -join ', ')" } else { "GitHub labels for follow-ups: all present on $($script:PwConfig.repo)" }))
     $lines
 }

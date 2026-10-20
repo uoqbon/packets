@@ -49,6 +49,8 @@ Round 1's lenses are the packet's **Review lenses** plus those the diff's paths 
 
 Refresh the claim before each pair. For each pair, start the round's reviewer agent once per lens, both in one step if your harness runs subagents in parallel, otherwise one after the other. Wait until both have answered before the next pair. Don't edit the checkout or push while a pair runs.
 
+Reviewers run on the models their agent files pin. If your subagent tool asks for a model, or doesn't offer the pinned ones, use the model the owner named for the agent's class (the dispatcher asks once, in its Preflight; invoked directly, ask the owner yourself, before the first pair), never a weaker one, and put the model in the report's header.
+
 Each reviewer gets this prompt, filled in:
 
 ```text
@@ -82,10 +84,11 @@ When every lens has reported, refresh the claim. Reviewers can be wrong, so you 
 1. **Merge duplicates** across lenses; keep the strongest reproduction.
 2. **Verify** each against the code at the head: open the cited lines; if it gives a command or test, run it.
 3. **Classify:** *confirmed* (blocking or should-fix; keep the reviewer's severity unless the evidence says otherwise, and say why) or *rejected* (with the file:line or output that disproves it). A real problem outside the packet's scope becomes a **follow-up**, not a fix in this PR.
+4. **Contract findings.** A confirmed finding that questions something under the packet's **Provides** (a name, a signature, or behaviour that later packets build on) is a *contract* finding: tag it `contract` in the report. If it isn't fixed in this PR, its follow-up is a decision for the owner before those packets start, not a note for later (§5).
 
 ## 4 · Report
 
-Refresh the claim. Fill [round-report-template.md](./round-report-template.md) and post it as one PR comment: `gh pr comment <pr> --body-file <file>`. Its first line is the round marker, which every later round, resume and progress report reads:
+Refresh the claim. In the last round, open the follow-up issues first (§5), so the report lists them: if opening one fails, stop here, with no report. Then fill [round-report-template.md](./round-report-template.md) and post it as one PR comment: `gh pr comment <pr> --body-file <file>`. Its first line is the round marker, which every later round, resume and progress report reads:
 
 ```text
 `packet:round <N> head=<head sha> tier=<tier> lenses=<a,b,c> confirmed=<lenses with confirmed findings> outcome=<pass|fix|needs-human>`
@@ -96,7 +99,7 @@ Refresh the claim. Fill [round-report-template.md](./round-report-template.md) a
 - **Pass**: no confirmed findings. Return Pass. The dispatcher checks CI on this head and hands off (its step 9); invoked directly, tell the owner `/packet-dispatch resume <ID>` hands it off. The panel never sets Ready to merge.
 - **Fix**: confirmed findings and rounds left. Return the confirmed list (file:line, claim, reproduction, fix plan). The fixes land as one commit, `Round-<N> review fixes (<ID>)`, and the next round starts with this skill again.
 - **Last round with confirmed findings:**
-  - only should-fix: open one follow-up issue per finding (`gh issue create --label follow-up`, linking the PR and the finding), list them in the report, and Pass;
+  - only should-fix: open one follow-up issue per finding before the report (§4) (`gh issue create --label <labels.followUp>`, linking the PR and the finding), list them in the report, and Pass. A contract finding's issue is titled `<ID> contract: <the question>` and also gets the `<labels.needsHuman>` label, so no dispatcher starts a packet that depends on this one while the label is on (packet-dispatch, Select). Its body names those packets and says how to clear it: answer on the issue, then remove the `<labels.needsHuman>` label (keep the issue open if the follow-up work remains) or close it. If `gh issue create` fails because a label doesn't exist, stop and tell the owner to create it (`board setup` does, for the GitHub and Azure Boards providers; with the local board, `gh label create <name> --repo <repo>`); never file the follow-up without its labels;
   - any blocking: **Needs human**: `board set <ID> "Status=Needs human"`, and comment on the item (first line `` `packet:needs-human` ``) with the finding and three options: the owner settles it on the PR (pushes or describes the fix, then posts `` `packet:settle` `` and resumes; the dispatcher verifies scope, tests and CI, with no further panel round), re-scopes it as a new packet, or merges with a follow-up issue.
 
 Release your own claim (if you made one) as your last action. Never approve, request changes, merge or push.

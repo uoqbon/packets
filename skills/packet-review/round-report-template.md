@@ -1,7 +1,7 @@
 `packet:round <N> head=<head sha> tier=<tier> lenses=<a,b,c> confirmed=<lenses or -> outcome=<pass|fix|needs-human>`
 ### Review panel · round <N> of <maxRounds> · <outcome>
 
-**Head** `<short sha>` · **Base** `<base ref>` · **Tier** <tier> <name> (`<agent>`): <review-scope reasons; any raise and why>
+**Head** `<short sha>` · **Base** `<base ref>` · **Tier** <tier> <name> (`<agent>`, <model the reviewers ran on>): <review-scope reasons; any raise and why>
 
 | Pair | Lens | Reported | Confirmed | Rejected |
 | --- | --- | --- | --- | --- |
@@ -11,6 +11,7 @@
 
 #### Confirmed
 
+<!-- A finding about something the packet Provides adds the tag contract, e.g. [should-fix · correctness · contract]. -->
 1. **[blocking · security]** `path/File.cs:42`: <the claim in one sentence>.
    Reproduction: <command, input or trace>. Consequence: <what goes wrong>.
    Fix plan: <one line>. <After the fix round: "Fixed in `<sha>`: <what changed>.">
@@ -19,7 +20,7 @@
 
 - **[concurrency]** <claim>: rejected, <evidence with file:line or command output>.
 
-#### Follow-ups (real, outside this packet)
+#### Follow-ups (real, outside this packet; contract questions first)
 
 - #<issue>: <title>
 

@@ -5,6 +5,7 @@ argument-hint: "[<packet ID>] | resume <packet ID> | status"
 tools: ['read', 'search', 'edit', 'execute', 'agent', 'todo']
 agents: ['packet-implementer', 'packet-reviewer-light', 'packet-reviewer-standard', 'packet-reviewer-deep', 'packet-reviewer-max']
 model: ['Claude Opus 5.5 (copilot)', 'GPT-5.6 Sol (copilot)']
+disable-model-invocation: true
 handoffs:
   - label: Show phase progress
     agent: agent
@@ -28,6 +29,8 @@ Read `.github/packet-workflow.json` and the repository's instructions first: its
 - `packet-reviewer-light`, `-standard`, `-deep`, `-max` each review one lens at one tier. Use the agent the review-scope script names for the round, or a higher one; never a lower one, and never a general-purpose agent in its place.
 - At most two reviewers run at a time.
 
+**Models.** Each agent pins its models in its `model:` line, which the installer writes from `models` in the config: *strong* for you and the deep and max reviewers, *standard* for the implementer and the standard reviewer, *light* for the light reviewer. If your subagent tool asks for a model, or none of an agent's pinned models is offered (another provider, your own API key), don't choose per agent: ask the owner once, before the implementer starts, which model to use for each of the three classes, and use those answers for the whole session. Never run a reviewer on a model weaker than its class. Say which model each subagent ran on in your final message, and if they weren't the pinned ones, tell the owner to set `models` in `.github/packet-workflow.json` and re-run the installer.
+
 A subagent can't use a model in a higher cost tier than yours; if a reviewer doesn't start for that reason, tell the owner to run this session on a model at least as capable as the reviewers'.
 
 ## Never
@@ -39,4 +42,4 @@ A subagent can't use a model in a higher cost tier than yours; if a reviewer doe
 - Change a packet's scope, contracts or acceptance criteria. Those are the owner's: set Needs human and ask.
 - End your work on a packet without releasing its claim.
 
-When you finish, tell the owner in a few lines: the packet, its PR, the outcome (Ready to merge, waiting for CI, Needs human and the question), and anything they must do.
+When you finish, tell the owner in a few lines: the packet, its PR, the outcome (Ready to merge, waiting for CI, Needs human and the question), the models the subagents ran on, any contract question the panel raised for the packets that build on this one, and anything they must do.

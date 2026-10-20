@@ -89,7 +89,7 @@ try {
             if (-not (& $concurrent $a $b)) { continue }
             $both = @($ownedFiles[$a.Id] | Where-Object { $ownedFiles[$b.Id].Contains($_) })
             if ($both.Count) {
-                Add-Finding 'ERROR' $a.Id "$($a.Id) and $($b.Id) can run at the same time and both own $($both.Count) existing file(s), e.g. $($both[0]). Split the paths or make one depend on the other."
+                Add-Finding 'ERROR' "$($a.Id),$($b.Id)" "$($a.Id) and $($b.Id) can run at the same time and both own $($both.Count) existing file(s), e.g. $($both[0]). Split the paths or make one depend on the other."
             }
             else {
                 foreach ($ga in $a.Owns) {
@@ -124,10 +124,10 @@ try {
                         $dirB = if ($nb -match '^(?<d>[^*?]+)/\*\*$') { $Matches.d } elseif ($nb -notmatch '[*?]') { $nb } else { $null }
                         $certain = ($na -eq $nb) -or ($dirA -and ($pb + '/').StartsWith("$dirA/")) -or ($dirB -and ($pa + '/').StartsWith("$dirB/"))
                         if ($certain) {
-                            Add-Finding 'ERROR' $a.Id "$($a.Id) owns '$ga' and $($b.Id) owns '$gb', and they can run at the same time: both own whatever is written there. Split the paths, add a '!' exclusion, or order them."
+                            Add-Finding 'ERROR' "$($a.Id),$($b.Id)" "$($a.Id) owns '$ga' and $($b.Id) owns '$gb', and they can run at the same time: both own whatever is written there. Split the paths, add a '!' exclusion, or order them."
                             continue
                         }
-                        Add-Finding 'WARN' $a.Id "$($a.Id) owns '$ga' and $($b.Id) owns '$gb', and they can run at the same time: the globs may meet on files not yet written. Narrow one, add a '!' exclusion, or order them."
+                        Add-Finding 'WARN' "$($a.Id),$($b.Id)" "$($a.Id) owns '$ga' and $($b.Id) owns '$gb', and they can run at the same time: the globs may meet on files not yet written. Narrow one, add a '!' exclusion, or order them."
                     }
                 }
             }
@@ -140,7 +140,7 @@ try {
                 }
             }
             $sharedLocks = @($a.Locks | Where-Object { $b.Locks -contains $_ })
-            foreach ($l in $sharedLocks) { Add-Finding 'ERROR' $a.Id "$($a.Id) and $($b.Id) both hold lock '$l' and can run at the same time; order them with Depends on" }
+            foreach ($l in $sharedLocks) { Add-Finding 'ERROR' "$($a.Id),$($b.Id)" "$($a.Id) and $($b.Id) both hold lock '$l' and can run at the same time; order them with Depends on" }
         }
     }
     foreach ($p in ($agentPackets | Where-Object { $inScope.Contains($_.Id) })) {

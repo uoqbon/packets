@@ -38,7 +38,7 @@ Good packets make parallel work safe. Bad ones make agents edit the same files, 
    ```
 
    ERRORs block the board: overlapping ownership between packets that can run at the same time, a shared lock without an order, a cycle, a missing dependency, a malformed file. Fix each WARN too, or say in the plan why it stands. The summary gives the waves, the packets most others depend on and the critical path; use them in the plan.
-6. **Write the plan file**: goal and constraints, milestones, the packet index table, a Mermaid dependency graph, the critical path, the schedule by wave, a `## Shared touchpoints` section with its table (the validator checks packets against it, and warns when packets use touchpoints but the plan has no such section), locks, and the cut line.
+6. **Write the plan file**: its heading is the phase's name, which becomes the board's milestone. Then goal and constraints, milestones, the packet index table, a Mermaid dependency graph, the critical path, the schedule by wave, a `## Shared touchpoints` section with its table (the validator checks packets against it, and warns when packets use touchpoints but the plan has no such section), locks, and the cut line. Add the optional **Board** and **Epic** lines only when the owner gives you a link or an existing epic issue; nothing fills them in later.
 7. **Hand off.** Tell the owner: the number of packets per priority and wave, the critical path, what must merge first, the human tasks and when they're due, and any judgement call you made. Recommend reviewing the phase as a pull request before the board is populated (`/packet-board sync`), because every later step trusts these files.
 
 ## Rules for a good packet

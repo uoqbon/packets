@@ -379,8 +379,13 @@ function Get-PwPhaseInfo {
     }
     $title = $Phase; $epic = $null
     if ($text) {
-        if ($text -match '(?m)^#\s+(?<t>.+?)\s*$') { $title = $Matches.t }
-        if ($text -match '\*\*Epic:\*\*\s*(?<e>(?:AB)?#\d+)') { $epic = $Matches.e }
+        # The phase's name is the heading, without a ": plan" suffix (the template's old heading).
+        if ($text -match '(?m)^#\s+(?<t>.+?)\s*$') {
+            $t = $Matches.t -creplace '(?:\s*:|\s+[·—–-])\s*[Pp]lan$', ''
+            if ($t) { $title = $t }
+        }
+        # Only a real item number: the template's placeholder (#0) or a missing number means no epic.
+        if ($text -match '\*\*Epic:\*\*\s*(?<e>(?:AB)?#0*[1-9]\d*)\b') { $epic = $Matches.e }
     }
     [pscustomobject]@{ Slug = $Phase; Title = $title; Epic = $epic; Path = $rel; Exists = [bool]$text }
 }
@@ -593,9 +598,10 @@ function Get-PwMarker {
 }
 
 function New-PwClaimId {
-    $hostName = ([System.Net.Dns]::GetHostName() -split '\.')[0] -replace '[^A-Za-z0-9-]', ''
-    if (-not $hostName) { $hostName = 'host' }
-    '{0}-{1}-{2}' -f $hostName, [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'), (Get-Random -Minimum 10000 -Maximum 99999)
+    # Claims are public comments, so the machine shows only as a short hash: sessions on one machine
+    # share it, and a public repository doesn't learn the host or user name.
+    $machine = (Get-PwSha256 "$([System.Net.Dns]::GetHostName())|$([Environment]::UserName)").Substring(0, 8)
+    'session-{0}-{1}-{2}' -f $machine, [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'), (Get-Random -Minimum 10000 -Maximum 99999)
 }
 
 $script:PwTrusted = $null

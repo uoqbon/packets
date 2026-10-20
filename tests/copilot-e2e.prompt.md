@@ -41,7 +41,7 @@ Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`) a
 1. Tools: `pwsh -v` (7.2 or later), `git --version` (2.38 or later), `gh --version`, and `gh auth status` (shows the scopes; for a `github-project` board it needs `project`).
 2. Remote default branch: `git symbolic-ref --short refs/remotes/origin/HEAD` prints `origin/<default>`.
 3. **Copilot discovery.** List the agent skills you can use in this session, with name and one-line description, without reading any files. Expected: `packet-plan`, `packet-board`, `packet-dispatch`, `packet-review`, `packet-progress`. Record any that are missing, extra or duplicated, including copies under `.claude/skills` or `.agents/skills`.
-4. **Custom agents.** List the custom agents you could start as subagents, without reading any files. Expected: `packet-implementer` and `packet-reviewer-light`, `-standard`, `-deep` and `-max`. Then ask me to open the agents dropdown and confirm that `packet-dispatcher` appears there and the other five don't (they are `user-invocable: false`). ⏸ only if I haven't answered yet.
+4. **Custom agents.** List the custom agents you could start as subagents, without reading any files. Expected: `packet-implementer` and `packet-reviewer-light`, `-standard`, `-deep` and `-max`, and **not** `packet-dispatcher` (it has `disable-model-invocation: true`: only a person starts it). Then ask me to open the agents dropdown and confirm that `packet-dispatcher` appears there and the other five don't (they are `user-invocable: false`). ⏸ only if I haven't answered yet.
 5. **Your tools.** Say which of these you have now: reading files, searching, editing, running terminal commands, starting subagents, a todo list. Record the harness I'm using (Local, or Copilot/CLI), asking me if you can't tell. For the Copilot harness, ask me to confirm that `github.copilot.chat.cli.customAgents.enabled` is on.
 6. **Static file checks** on the installed kit (`.github/agents/*.agent.md`, `.github/skills/*/SKILL.md`):
    - each file opens with a YAML frontmatter block;
@@ -51,36 +51,38 @@ Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`) a
    - `review.agents` in `.github/packet-workflow.json` names the same four reviewer agents.
 
    Write a short PowerShell script into `.packet-e2e/` for these checks and run it. Don't eyeball them.
-7. **Models.** Read the `model:` lists in the agent files. Ask me whether the first entry of each appears in my model picker, and record the answers.
+7. **Models.** Read the `model:` lists in the agent files and `models` in `.github/packet-workflow.json`, or in the kit source's `templates/packet-workflow.json` if the kit isn't installed yet (*strong*: dispatcher, deep and max reviewers; *standard*: implementer and standard reviewer; *light*: light reviewer). Ask me whether the first entry of each class appears in my model picker. If one doesn't (my own API key, an organization's model list), ask me for the names my picker shows for a strong, a standard and a light model, exactly as the picker writes them, and record them for stage 2.
 
 ## Stage 2 · Offline suite and installer
 
 1. Run the kit's own tests from the kit source: `pwsh -File <kitSource>/tests/run-tests.ps1`. Expect `0 failed`, and record the pass count.
 2. Install or upgrade the kit in the sandbox: `pwsh -File <kitSource>/install.ps1 -Target . -WithInstructions -DryRun`, then without `-DryRun`. Record what it added, updated and kept.
-3. Run it a second time: expect no `add` or `update` lines.
+3. Run it a second time: expect no `add` or `update` lines, and `<n> file(s) already up to date` where `<n>` is the number of files under the kit source's `agents/` and `skills/` folders.
 4. Check `.github/packet-workflow.json`:
    - `repo` is the sandbox;
    - `board.provider` is what I want for this run (ask me: `github-issues` or `github-project`; for `github-project`, also the project's owner and number);
    - `commands.ci` is `pwsh -File tests/run-all.ps1` (set it);
-   - `trustedAuthors` is empty unless I name a second account.
+   - `trustedAuthors` is empty unless I name a second account;
+   - `models`: if stage 1 recorded other model names, put them in `models` (each class a list, the picker's names first, the kit's defaults after), run the installer again, and check that every agent file's `model:` line now lists them and that the installer's `Agent models:` line agrees.
 
 ## Stage 3 · Plan to packets
 
 1. Write the mini plan below to `docs/specs/textkit.md`. It's the input for `/packet-plan`. Don't write the packets yourself.
-2. ⏸ Ask me to run `/packet-plan docs/specs/textkit.md e2e-textkit` in a **new** chat session (Agent, default agent), and to come back when it says it's done.
-3. When I'm back, check what it produced:
-   - `docs/plan/e2e-textkit/plan.md` exists, with a packet index, a Mermaid graph, a critical path and a `## Shared touchpoints` table that lists `src/textkit/TextKit.ps1`;
-   - one packet file per spec item, plus a human task: the foundation packet, word count, title case, the optional slow packet, and H-n;
-   - each packet has `Owns`, `Acceptance criteria` written as `- [ ]`, `Tests to run` with backticked commands, and `Review lenses`;
-   - the two feature packets depend only on the foundation and own disjoint paths, so they can run in parallel;
-   - the slow packet has `**Initial status:** Backlog`.
-4. `pwsh -File .github/skills/packet-plan/scripts/validate-packets.ps1 -Phase e2e-textkit` reports 0 errors.
-5. **Negative probe.** Temporarily add `` - `src/textkit/WordCount.ps1` `` to the title-case packet's Owns, run the validator, and expect an `ERROR` naming both packets. Then restore the file and confirm 0 errors again.
-6. Add CI so that dispatchers can reach Ready to merge:
-   - `tests/run-all.ps1` runs every `tests/*.tests.ps1` with `pwsh -File` and exits 1 if any of them fails;
+2. Add the scaffold the spec says already exists, so the planner sees it and the packets don't own it:
+   - `tests/run-all.ps1` runs every `tests/*.tests.ps1` with `pwsh -File` and exits 1 if any of them fails (and 0 when there are none yet);
    - `.github/workflows/ci.yml` runs on `pull_request` against the default branch, on `ubuntu-latest`, with the step `pwsh -File tests/run-all.ps1`;
    - `src/textkit/TextKit.ps1`, the entry point that dot-sources the modules, starts empty apart from a comment.
-7. ⏸ Commit all of this (the kit from stage 2 included) on a branch `e2e/setup`, push it, and open a PR. Ask me to merge it, then to come back for stage 4.
+3. ⏸ Ask me to run `/packet-plan docs/specs/textkit.md e2e-textkit` in a **new** chat session (Agent, default agent), and to come back when it says it's done. Tell me before I go: if the planner asks about item 4's time budget, answer "keep it exactly as written; it's behind the cut line" (stage 7 needs it).
+4. When I'm back, check what it produced:
+   - `docs/plan/e2e-textkit/plan.md` exists, with a packet index, a Mermaid graph, a critical path and a `## Shared touchpoints` table that lists `src/textkit/TextKit.ps1`; its heading is the phase's name with no placeholder text, and any **Board** or **Epic** line holds a real link or issue number, not a promise that something will fill it in;
+   - one packet file per spec item, plus a human task: the foundation packet, word count, title case, the optional slow packet, and H-n;
+   - each packet has `Owns`, `Acceptance criteria` written as `- [ ]`, `Tests to run` with backticked commands, and `Review lenses`;
+   - no packet owns `tests/run-all.ps1`, `.github/workflows/ci.yml` or `src/textkit/TextKit.ps1` (the scaffold); the feature packets list `TextKit.ps1` as a shared touchpoint;
+   - the two feature packets depend only on the foundation and own disjoint paths, so they can run in parallel;
+   - the slow packet has `**Initial status:** Backlog` and still has the "under 0 milliseconds" criterion. If the planner changed it anyway, record a FAIL with what it wrote, restore the criterion in the packet and the plan, and rerun the validator.
+5. `pwsh -File .github/skills/packet-plan/scripts/validate-packets.ps1 -Phase e2e-textkit` reports 0 errors.
+6. **Negative probe.** Temporarily add `` - `src/textkit/WordCount.ps1` `` to the title-case packet's Owns, run the validator, and expect an `ERROR` whose ID column names both packets (`<one ID>,<the other ID>`). Then restore the file and confirm 0 errors again.
+7. ⏸ Commit all of this (the kit from stage 2, the spec, the scaffold and the plan) on a branch `e2e/setup`, push it, and open a PR. Ask me to merge it, then to come back for stage 4.
 
 ### Mini plan (write this to `docs/specs/textkit.md`)
 
@@ -89,6 +91,9 @@ Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`) a
 
 Goal: a small text toolkit, used to exercise the packet workflow. Everything is plain PowerShell 7 with
 no modules to install. Tests are scripts under tests/ that throw on failure and run with `pwsh -File`.
+
+Already in the repository (not packet work): tests/run-all.ps1 runs every tests/*.tests.ps1, CI
+(.github/workflows/ci.yml) runs it on every pull request, and src/textkit/TextKit.ps1 is the entry point.
 
 Work:
 1. Foundation (first, small): src/textkit/Core.ps1 with `Split-Words [string]$Text` -> string[] (splits on
@@ -104,8 +109,7 @@ Work:
    tests/stats.tests.ps1.
 5. A person reads the output of 2 and 3 on three real paragraphs and says whether it looks right.
 
-Shared file: src/textkit/TextKit.ps1 dot-sources each module, one line per module.
-CI runs `pwsh -File tests/run-all.ps1` on every pull request.
+Shared file: src/textkit/TextKit.ps1 dot-sources each module, one line per module; each packet adds its own line.
 ```
 
 Item 4's criterion can't be met on purpose: stage 7 uses it to check the Needs human path.
@@ -118,7 +122,7 @@ Item 4's criterion can't be met on purpose: stage 7 uses it to check the Needs h
    - a second `sync` reports `0 created, 0 updated`;
    - `board show -Phase e2e-textkit`: the slow packet is Backlog and the rest are Ready;
    - `board next -Phase e2e-textkit`: only the foundation packet is `START`, and both feature packets are `BLOCKED` on it.
-4. On GitHub, each item's body ends with a `packet:source` marker, the dependency links show (or a single warning explains why not), and the items sit in the phase milestone.
+4. On GitHub, each item's body ends with a `packet:source` marker, the dependency links show (or a single warning explains why not), and the items sit in one milestone named after `plan.md`'s heading (without a `: plan` suffix).
 5. **Edit probe.** Change one word in a feature item's body on GitHub (`gh issue edit`), then edit that packet's file locally and run `board sync -Phase e2e-textkit -WorkingTree`. Expect `skipped … edited on the board`. Revert both changes, then sync again: unchanged.
 
 ## Stage 5 · Dispatch the foundation packet
@@ -139,12 +143,14 @@ Item 4's criterion can't be met on purpose: stage 7 uses it to check the Needs h
    - **S5.8 Hand-off:** if Ready to merge, `board marker <ID> handoff -Json` has `head` equal to the PR head, and `gh pr checks <pr>` shows every check passed on that head.
    - **S5.9 No merge:** the PR is not merged and has no approving review from the agent.
    - **S5.10 Commits:** the commit subjects are clear; any fix commits are named `Round-<N> review fixes (<ID>)`; the decision record exists.
-3. ⏸ Ask me to merge the PR. Then: `board reconcile` makes the item Done, and `board next -Phase e2e-textkit` shows both feature packets `START`.
+   - **S5.11 Models:** ask me which model the implementer and each reviewer ran on (the subagent's header in the dispatcher session shows it), and compare with the class each agent belongs to in `models`. If the pinned models weren't offered, the dispatcher asked me once for all three classes before the implementer started, instead of choosing per agent, and it named the models in its final message. Each round report's header names the reviewers' model.
+   - **S5.12 Contract questions:** if a round confirmed a finding about something the foundation **Provides** that wasn't fixed, its follow-up is titled `<ID> contract: …`, carries the `needs-human` label as well as `follow-up`, and names the feature packets; the hand-off comment has a `Decide before … start` line. Otherwise record N/A.
+3. ⏸ If S5.12 found a contract question, ask me to answer it on the issue and remove its `needs-human` label (or close it) before the feature packets start; until then `/packet-dispatch status` and `/packet-progress` should list it as blocking them. Then ask me to merge the PR. Then: `board reconcile` makes the item Done, and `board next -Phase e2e-textkit` shows both feature packets `START`.
 
 ## Stage 6 · Two dispatchers in parallel, then a conflict
 
 1. ⏸ Ask me to open **two** new worktree sessions, both packet-dispatcher, and to type `dispatch` in both at about the same moment, without naming a packet.
-2. While they run, check claims from here: `board claims <ID>` for each feature packet shows exactly one live claim id each, and different ids for the two packets. Then `board claim <ID> e2e-probe` on one of them must print `LOST` with exit 1 and leave no comment behind (`board claims <ID>` again).
+2. While they run, check claims from here: `board claims <ID>` for each feature packet shows exactly one live claim id each (a refresh repeats the same id), and different ids for the two packets. Each id looks like `session-<8 hex>-<UTC time>-<number>` and doesn't contain this machine's host name (`hostname`). Then `board claim <ID> e2e-probe` on one of them must print `LOST` with exit 1 and leave no comment behind (`board claims <ID>` again).
 3. When both have finished, run the stage 5 checks (S5.1 to S5.10) for both packets. Also check that their changed files are disjoint, apart from `src/textkit/TextKit.ps1`, where each added exactly one line (`gh pr diff <pr>`).
 4. ⏸ Ask me to merge the first PR only. The second PR now conflicts in `TextKit.ps1`, or is behind the default branch.
 5. ⏸ Ask me to run `resume <second ID>` in a packet-dispatcher session in that packet's worktree. When I'm back, check:

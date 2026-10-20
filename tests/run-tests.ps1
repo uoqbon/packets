@@ -125,7 +125,7 @@ Click through it.
     Write-Host 'validate-packets'
     $r = Invoke-Kit $validate @('-Phase', 'phase-1')
     Assert-That ($r.Code -eq 1) 'overlapping packets fail validation (exit 1)' $r.Text
-    Assert-That ($r.Text -match 'ERROR\s+PKT-03\s+PKT-03 and PKT-05 can run at the same time and both own') 'existing file owned by two concurrent packets is an ERROR' $r.Text
+    Assert-That ($r.Text -match 'ERROR\s+PKT-03,PKT-05\s+PKT-03 and PKT-05 can run at the same time and both own') 'existing file owned by two concurrent packets is an ERROR tagged with both IDs' $r.Text
     Assert-That ($r.Text -match "PKT-05\s+owns paths under lock 'migrations'") 'undeclared lock is an ERROR' $r.Text
     Assert-That ($r.Text -match 'critical path \(weight \d+\): PKT-01 -> PKT-03 -> PKT-04') 'critical path is reported' $r.Text
     Assert-That ($r.Text -notmatch 'PKT-02\s+owns paths under lock') 'declared lock is accepted' $r.Text
@@ -140,7 +140,7 @@ Click through it.
     # Two concurrent packets with the same directory glob collide for certain, even before any file exists.
     Write-File 'docs/plan/phase-1/packets/PKT-07.md' (New-Packet 'PKT-07' 'Web admin' 'W2' 'PKT-03' @('src/Web/Admin/**') 'correctness')
     $r = Invoke-Kit $validate @('-Phase', 'phase-1')
-    Assert-That ($r.Code -eq 1 -and $r.Text -match "ERROR\s+PKT-04\s+PKT-04 owns 'src/Web/\*\*' and PKT-07 owns 'src/Web/Admin/\*\*'") 'a glob inside a concurrent packet''s directory is an ERROR' $r.Text
+    Assert-That ($r.Code -eq 1 -and $r.Text -match "ERROR\s+PKT-04,PKT-07\s+PKT-04 owns 'src/Web/\*\*' and PKT-07 owns 'src/Web/Admin/\*\*'") 'a glob inside a concurrent packet''s directory is an ERROR' $r.Text
     # An exclusion of file types ('!**/*.md') doesn't carve out an area, so it can't hide that overlap.
     Write-File 'docs/plan/phase-1/packets/PKT-04.md' ((New-Packet 'PKT-04' 'Web pages' 'W2' 'PKT-03' @('src/Web/**', '!**/*.md') 'ux, correctness' -Priority 'P1'))
     $r = Invoke-Kit $validate @('-Phase', 'phase-1')
@@ -233,6 +233,14 @@ Click through it.
     Assert-That ($r.Text -match 'PKT-01\s+#1\s+Done') 'sync never changes Status' $r.Text
     & git add -A; & git commit -qm 'retitle PKT-04' | Out-Null
     Remove-Item -LiteralPath $brief
+    $planPath = Join-Path $repo 'docs/plan/phase-1/plan.md'
+    [System.IO.File]::WriteAllText($planPath, ((Get-Content -Raw $planPath) -replace '(?m)^# Phase 1 · Sample', '# Phase 1 · Renamed'), [System.Text.UTF8Encoding]::new($false))
+    $r = Invoke-Kit $board @('sync')
+    $moved = (Invoke-Kit $board @('get', 'PKT-02')).Text | ConvertFrom-Json
+    Assert-That ($r.Text -match 'sync: 0 created, 6 updated' -and $moved.Milestone -eq 'Phase 1 · Renamed') 'a renamed phase heading moves every item to the new milestone' $r.Text
+    & git checkout -q -- docs/plan/phase-1/plan.md
+    $r = Invoke-Kit $board @('sync')
+    Assert-That ($r.Text -match 'sync: 0 created, 6 updated') 'and back' $r.Text
 
     # board reads the config as merged on origin/main: a branch can't switch the board or the trust list.
     $bare = Join-Path ([System.IO.Path]::GetTempPath()) ("pw-origin-" + [guid]::NewGuid().ToString('n').Substring(0, 8))
@@ -327,6 +335,33 @@ function Get-ProvComments { param(`$Ref) @(
     $r = Invoke-Kit $trustTest @()
     Assert-That ($r.Text.Trim() -eq 'owner-1,teammate-1') 'claims from untrusted authors are ignored; trustedAuthors count, case-insensitively' $r.Text
     Remove-Item -LiteralPath $trustTest
+    $unitTest = Join-Path ([System.IO.Path]::GetTempPath()) "pw-unit-$([guid]::NewGuid().ToString('n')).ps1"
+    $phaseRoot = Join-Path ([System.IO.Path]::GetTempPath()) "pw-phases-$([guid]::NewGuid().ToString('n'))"
+    $headings = [ordered]@{ a = "# TextKit (e2e): plan`n`n- **Epic:** #0`n"; b = "# Disaster recovery plan`n`n- **Epic:** #12`n"; c = "# Office floor-plan`n"; d = "# Migration-Plan`n"; e = "# Checkout — Plan`n" }
+    foreach ($k in $headings.Keys) {
+        New-Item -ItemType Directory -Force -Path (Join-Path $phaseRoot "docs/plan/$k") | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $phaseRoot "docs/plan/$k/plan.md"), $headings[$k], [System.Text.UTF8Encoding]::new($false))
+    }
+    Set-Content -LiteralPath $unitTest -Value @"
+. '$((Join-Path $skills 'packet-board/scripts/PacketWorkflow.ps1').Replace("'", "''"))'
+`$cfg = @{ paths = @{ plans = 'docs/plan' }; repoRoot = '$($phaseRoot.Replace("'", "''"))' }
+`$a = Get-PwPhaseInfo -Config `$cfg -Phase 'a'; `$b = Get-PwPhaseInfo -Config `$cfg -Phase 'b'
+"title-a=`$(`$a.Title)|epic-a=`$(`$a.Epic)|title-b=`$(`$b.Title)|epic-b=`$(`$b.Epic)"
+"titles=" + ((@('c', 'd', 'e') | ForEach-Object { (Get-PwPhaseInfo -Config `$cfg -Phase `$_).Title }) -join '|')
+. '$((Join-Path $skills 'packet-board/scripts/providers/github-common.ps1').Replace("'", "''"))'
+function Confirm-PwGhLabel { param(`$Config, `$Name, `$Color, `$Description, [switch]`$DryRun) `$true }
+"labels=" + ((Initialize-PwGhLabels -Config @{ labels = @{ packet = 'packet'; human = 'human-task'; needsHuman = 'needs-human'; followUp = 'follow-up' } } -Keys 'needsHuman', 'followUp') -join ',')
+"claim=`$(New-PwClaimId)"
+"host=`$(([System.Net.Dns]::GetHostName() -split '\.')[0])"
+"@
+    $r = Invoke-Kit $unitTest @()
+    Assert-That ($r.Text -match 'title-a=TextKit \(e2e\)\|epic-a=\|title-b=Disaster recovery plan\|epic-b=#12') 'the phase title drops a ": plan" suffix only; the template''s #0 is no epic' $r.Text
+    Assert-That ($r.Text -match 'titles=Office floor-plan\|Migration-Plan\|Checkout(\r?\n|$)') 'a hyphenated word ending in plan is kept; a spaced dash before Plan is a suffix' $r.Text
+    Assert-That ($r.Text -match 'labels=needs-human,follow-up') 'the follow-up labels can be set up on their own (Azure Boards setup)' $r.Text
+    $claimId = if ($r.Text -match 'claim=(\S+)') { $Matches[1] } else { '' }
+    $hostName = if ($r.Text -match 'host=(\S+)') { $Matches[1] } else { '' }
+    Assert-That ($claimId -match '^session-[0-9a-f]{8}-\d{8}T\d{6}Z-\d{5}$' -and (-not $hostName -or $claimId -notmatch [regex]::Escape($hostName))) 'a claim id carries a hash of the machine, not its host name' $r.Text
+    Remove-Item -LiteralPath $unitTest; Remove-Item -Recurse -Force -LiteralPath $phaseRoot
     & git switch -q main
 
     Write-Host 'progress'
@@ -369,6 +404,23 @@ try {
     Assert-That ((Get-Content -Raw (Join-Path $target '.github/copilot-instructions.md')).Split('packet-workflow:start').Count -eq 2) 'instructions block is replaced, not duplicated' $r.Text
     $r = Invoke-Kit $installer @('-Target', $target, '-Force')
     Assert-That ($r.Text -match 'update\s+\.github/skills/packet-plan/SKILL\.md' -and -not ((Get-Content -Raw $edited) -match 'local note')) '-Force replaces it' $r.Text
+    $sameAsSource = @(Get-ChildItem -LiteralPath (Join-Path $kit 'agents') -Filter '*.agent.md' | Where-Object { (Get-FileHash $_.FullName).Hash -ne (Get-FileHash (Join-Path $target ".github/agents/$($_.Name)")).Hash })
+    Assert-That ($sameAsSource.Count -eq 0) 'with the default models, installed agents equal their sources (the model lines and the template agree)' (($sameAsSource | ForEach-Object Name) -join ', ')
+    Assert-That ((Get-Content -Raw (Join-Path $target '.github/agents/packet-dispatcher.agent.md')) -match '(?m)^disable-model-invocation: true$') 'the dispatcher cannot be started as a subagent' ''
+    $cfgPath = Join-Path $target '.github/packet-workflow.json'
+    $cfgIn = Get-Content -Raw $cfgPath | ConvertFrom-Json -AsHashtable
+    $cfgIn.models.light = @("Claude Sonnet 5.5 (Anthropic)", "it's fine")
+    [System.IO.File]::WriteAllText($cfgPath, ($cfgIn | ConvertTo-Json -Depth 10), [System.Text.UTF8Encoding]::new($false))
+    $r = Invoke-Kit $installer @('-Target', $target)
+    $lightLine = (Get-Content (Join-Path $target '.github/agents/packet-reviewer-light.agent.md') | Where-Object { $_ -match '^model:' })
+    Assert-That ($lightLine -eq "model: ['Claude Sonnet 5.5 (Anthropic)', 'it''s fine']" -and $r.Text -match 'update\s+\.github/agents/packet-reviewer-light\.agent\.md' -and $r.Text -notmatch 'update\s+\.github/agents/packet-reviewer-max') 'models in the config rewrite only that class''s agents, quoted' $r.Text
+    Assert-That ($r.Text -match '\d+ file\(s\) already up to date' -and $r.Text -match 'Agent models: .*light Claude Sonnet 5\.5 \(Anthropic\)') 'the installer reports unchanged files and the models it wrote' $r.Text
+    $implementer = Join-Path $target '.github/agents/packet-implementer.agent.md'
+    [System.IO.File]::WriteAllText($implementer, ((Get-Content -Raw $implementer) -replace '(?m)^model:.*$', "model: ['Hand Picked']"), [System.Text.UTF8Encoding]::new($false))
+    $cfgIn.models.standard = @('Claude Sonnet 5.5 (Anthropic)')
+    [System.IO.File]::WriteAllText($cfgPath, ($cfgIn | ConvertTo-Json -Depth 10), [System.Text.UTF8Encoding]::new($false))
+    $r = Invoke-Kit $installer @('-Target', $target)
+    Assert-That ($r.Text -match 'kept\s+\.github/agents/packet-implementer\.agent\.md' -and $r.Text -match 'except the kept packet-implementer, which keeps its own model: line' -and (Get-Content -Raw $implementer) -match "model: \['Hand Picked'\]") 'a hand-edited agent is kept, and the models summary says so' $r.Text
 }
 finally { if (-not $Keep) { Remove-Item -Recurse -Force -LiteralPath $target } }
 

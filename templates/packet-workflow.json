@@ -80,6 +80,11 @@
   "stacking": false,
   "trustedAuthors": [],
   "claims": { "leaseMinutes": 30 },
+  "models": {
+    "strong": ["Claude Opus 5.5 (copilot)", "GPT-5.6 Sol (copilot)"],
+    "standard": ["Claude Sonnet 5.5 (copilot)", "GPT-5.6 Sol (copilot)"],
+    "light": ["Claude Sonnet 5.5 (copilot)", "GPT-5.6 Luna (copilot)"]
+  },
   "review": {
     "maxRounds": 3,
     "maxParallelLenses": 2,

@@ -1,9 +1,10 @@
-# Phase name: plan
+# <Phase name>
 
 Date · one line on what this phase delivers, cut into task packets that agents build in parallel.
 
-- **Board:** <link to the GitHub Project, the issues filter, or the Azure Boards query>
-- **Epic:** #0
+<!-- The heading is the phase's name on the board (the GitHub milestone). Optional lines, filled in by
+     the owner, not by sync: "- **Board:** <link>" and "- **Epic:** #<n>" (or AB#<n>) naming an issue or work
+     item that already exists; sync then makes each packet its sub-issue or child. Leave them out otherwise. -->
 - **Source plan:** <link to the implementation plan this was cut from>
 
 ## Goal and constraints

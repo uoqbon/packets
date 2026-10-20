@@ -55,12 +55,14 @@ Every call runs this first, `resume` and `status` included.
 4. If this is the repository's main checkout (`git rev-parse --git-dir` equals `git rev-parse --git-common-dir`), tell the owner that only one dispatcher may run in a checkout, and suggest a worktree session for the next one.
 5. `board reconcile` (closed items become Done).
 6. Read `guardrails` from the config (`board` and the scripts use the config as merged on the default branch) and the repository instructions. They bind you and every agent you start.
+7. **Models** (not for `status`). The implementer and the reviewers run on the models their agent files pin (`model:`, written by the installer from `models` in the config). If your subagent tool asks you to choose a model, or doesn't offer an agent's pinned models, ask the owner once, now, which model to use for each class (*strong*: deep and max reviewers; *standard*: the implementer and the standard reviewer; *light*: the light reviewer), and keep those answers for the session. Never pick one per agent on your own, and never run a reviewer on a model weaker than its class.
 
 ## 1 · Select
 
 - Named packet: `board deps <ID>`. Its status must be **Ready** and its verdict **START** (or **STACK** when `stacking` is on). Otherwise say why and stop, or offer `board next`.
 - No packet named: `board next`; take the first START or STACK line.
 - Locks: if the packet lists **Locks**, `board locks <ID>` must exit 0 (no other open PR touches the lock's paths).
+- Open contract questions: `gh issue list --repo <repo> --state open --label <labels.followUp> --label <labels.needsHuman> --limit 200 --json number,title`. A title that starts with one of this packet's dependencies (`<dependency ID> contract: …`) is a question about code this packet builds on (packet-review, Outcome): don't start the packet. Tell the owner which issue to decide (they answer there, then remove its `<labels.needsHuman>` label or close it; the issue can stay open as the follow-up's to-do). Stop if the owner named this packet; otherwise take the next START line.
 
 ## 2 · Claim
 
@@ -147,6 +149,8 @@ Refresh the claim before each round, then follow the [packet-review](../packet-r
    `packet:handoff pr=<pr> head=<head sha>` Ready to merge: PR #<pr>, <N> review round(s), follow-ups <#… or none>, CI passed on <sha7>.
    ```
 
+   If the panel opened contract questions (follow-ups titled `<ID> contract: …`), add a second line: `Decide before <the packets that depend on this one> start: #<n>, … (answer on the issue, then remove its needs-human label or close it)`. Put the same line first in your message to the owner.
+
    Release the claim. Tell the owner the PR is theirs to merge. Never merge it yourself.
 
 ## Stacked packets
@@ -194,4 +198,4 @@ A settle counts only if `board rounds <pr> -Json` lists it as a `settle-request`
 
 ## Status
 
-`board next` (what can start), then the owner's queue from `board show`: Ready to merge (the owner merges), Needs human (the owner decides), and human tasks whose dependencies are done. For health, the critical path and merge order, use `/packet-progress`.
+`board next` (what can start), then the owner's queue from `board show`: Ready to merge (the owner merges), Needs human (the owner decides), and human tasks whose dependencies are done. Add the open contract questions (`gh issue list --repo <repo> --state open --label <labels.followUp> --label <labels.needsHuman> --limit 200 --json number,title`): each blocks the packets that depend on the packet its title names, even when `board next` says START. For health, the critical path and merge order, use `/packet-progress`.

@@ -200,7 +200,10 @@ function Invoke-PwSync {
         }
         $split = Split-PwItemBody $item.Body
         $newSplit = Split-PwItemBody $body
-        $same = $split.Marker -and $split.Marker.Pairs['file'] -eq $newSplit.Marker.Pairs['file'] -and $split.Marker.Pairs['body'] -eq $newSplit.Marker.Pairs['body'] -and $item.Title -eq $title -and (Test-ProvItemComplete $item)
+        # The phase is the GitHub milestone (the plan's heading) or Azure Boards' phase: tag (its folder name).
+        # Comparing it moves items after the heading changes, so a phase never splits across two milestones.
+        $phaseValue = if ((Get-ProvName) -eq 'azure-boards') { $ph.Slug } else { $ph.Title }
+        $same = $split.Marker -and $split.Marker.Pairs['file'] -eq $newSplit.Marker.Pairs['file'] -and $split.Marker.Pairs['body'] -eq $newSplit.Marker.Pairs['body'] -and $item.Title -eq $title -and $item.Milestone -eq $phaseValue -and (Test-ProvItemComplete $item)
         if ($same) { $counts.unchanged++; continue }
         if ($roundTrips -and $split.Marker -and -not $Force) {
             $boardSha = (Get-PwSha256 $split.Content).Substring(0, 16)
