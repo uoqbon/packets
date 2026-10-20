@@ -81,9 +81,9 @@
   "trustedAuthors": [],
   "claims": { "leaseMinutes": 30 },
   "models": {
-    "strong": ["Claude Opus 5.5 (copilot)", "GPT-5.6 Sol (copilot)"],
-    "standard": ["Claude Sonnet 5.5 (copilot)", "GPT-6.1 Sol (copilot)"],
-    "light": ["Claude Sonnet 5.5 (copilot)", "GPT-5.6 Luna (copilot)"]
+    "strong": ["GPT-6.1 Sol (copilot)", "Claude Sonnet 5.5 (copilot)"],
+    "standard": ["GPT-6.1 Sol (copilot)", "Claude Sonnet 5.5 (copilot)"],
+    "light": ["GPT-6.1 Sol (copilot)", "Claude Sonnet 5.5 (copilot)"]
   },
   "review": {
     "maxRounds": 3,

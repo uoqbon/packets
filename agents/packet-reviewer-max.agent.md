@@ -3,8 +3,8 @@ name: packet-reviewer-max
 description: "Tier-4 lens review (max) for the largest diffs, safety-critical or security-sensitive code, review machinery and critical paths. Adversarial by remit. Started by the review panel with one lens (or a small group of lenses) and the packet; read-only."
 tools: ['read', 'search', 'execute']
 user-invocable: false
-model: ['Claude Opus 5.5 (copilot)', 'GPT-5.6 Sol (copilot)']
-reasoning-effort: high
+model: ['GPT-6.1 Sol (copilot)', 'Claude Sonnet 5.5 (copilot)']
+reasoning-effort: xhigh
 ---
 
 # Packet reviewer · tier 4 max

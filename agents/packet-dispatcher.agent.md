@@ -4,7 +4,7 @@ description: "Runs one task packet end to end. Claims a Ready packet from the bo
 argument-hint: "[<packet ID>] | resume <packet ID> | status"
 tools: ['read', 'search', 'edit', 'execute', 'agent', 'todo']
 agents: ['packet-implementer', 'packet-reviewer-light', 'packet-reviewer-standard', 'packet-reviewer-deep', 'packet-reviewer-max']
-model: ['Claude Opus 5.5 (copilot)', 'GPT-5.6 Sol (copilot)']
+model: ['GPT-6.1 Sol (copilot)', 'Claude Sonnet 5.5 (copilot)']
 disable-model-invocation: true
 handoffs:
   - label: Show phase progress
