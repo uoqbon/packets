@@ -3,7 +3,7 @@ name: packet-implementer
 description: "Implements one task packet from the dispatcher's implementation brief, inside the packet's owned paths, with a test for every acceptance criterion and a decision record, then reports back. Started by packet-dispatcher as a subagent. Never pushes, opens PRs or touches other packets' paths."
 tools: ['read', 'search', 'edit', 'execute', 'todo']
 user-invocable: false
-model: ['Claude Sonnet 5.5 (copilot)', 'GPT-6.1 Sol (copilot)']
+model: ['GPT-6.1 Sol (copilot)', 'Claude Sonnet 5.5 (copilot)']
 ---
 
 # Packet implementer

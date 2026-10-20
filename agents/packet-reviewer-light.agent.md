@@ -3,8 +3,8 @@ name: packet-reviewer-light
 description: "Tier-1 lens review (light) for small mechanical changes: docs, comments, renames, formatting, config values, test-only edits. Started by the review panel with one lens (or a small group of lenses) and the packet; read-only."
 tools: ['read', 'search', 'execute']
 user-invocable: false
-model: ['Claude Sonnet 5.5 (copilot)', 'GPT-5.6 Luna (copilot)']
-reasoning-effort: medium
+model: ['GPT-6.1 Sol (copilot)', 'Claude Sonnet 5.5 (copilot)']
+reasoning-effort: low
 ---
 
 # Packet reviewer · tier 1 light

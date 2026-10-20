@@ -3,8 +3,8 @@ name: packet-reviewer-deep
 description: "Tier-3 lens review (deep) for large or cross-cutting changes and anything touching migrations, schemas, API contracts, auth, infrastructure or concurrency. Started by the review panel with one lens (or a small group of lenses) and the packet; read-only."
 tools: ['read', 'search', 'execute']
 user-invocable: false
-model: ['Claude Opus 5.5 (copilot)', 'GPT-5.6 Sol (copilot)']
-reasoning-effort: medium
+model: ['GPT-6.1 Sol (copilot)', 'Claude Sonnet 5.5 (copilot)']
+reasoning-effort: high
 ---
 
 # Packet reviewer · tier 3 deep

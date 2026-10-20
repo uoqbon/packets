@@ -3,8 +3,8 @@ name: packet-reviewer-standard
 description: "Tier-2 lens review (standard) for ordinary feature or bug-fix code confined to one area. Started by the review panel with one lens (or a small group of lenses) and the packet; read-only."
 tools: ['read', 'search', 'execute']
 user-invocable: false
-model: ['Claude Sonnet 5.5 (copilot)', 'GPT-6.1 Sol (copilot)']
-reasoning-effort: high
+model: ['GPT-6.1 Sol (copilot)', 'Claude Sonnet 5.5 (copilot)']
+reasoning-effort: medium
 ---
 
 # Packet reviewer · tier 2 standard
