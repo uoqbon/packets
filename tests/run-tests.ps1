@@ -624,6 +624,9 @@ if ($a[0] -eq 'api' -and $path -match '/issues/(\d+)/comments') { ConvertTo-Json
             })
         $lb.nextNumber = [int]$lb.nextNumber + 1
         [System.IO.File]::WriteAllText($boardFile, ($lb | ConvertTo-Json -Depth 64), [System.Text.UTF8Encoding]::new($false))
+        $r = Invoke-Kit $board @('sync')
+        $g = (Invoke-Kit $board @('get', 'PKT-12')).Text | ConvertFrom-Json
+        Assert-That ($r.Code -eq 0 -and $r.Text -match 'orphan API-4' -and $g.Body -match '\*\*Depends on:\*\* API-4, API-5' -and @($g.Dependencies).Count -eq 0) 'sync neither annotates nor links a remote dependency to the item here with its ID' $r.Text
         Remove-Item -LiteralPath $callLog -ErrorAction SilentlyContinue
         $r = Invoke-Kit $board @('show', '-WorkingTree')
         Assert-That ($r.Code -eq 0 -and @($remoteCalls.Invoke()).Count -eq 0) 'board show reads no other repository' $r.Text
@@ -642,6 +645,11 @@ if ($a[0] -eq 'api' -and $path -match '/issues/(\d+)/comments') { ConvertTo-Json
         $r = Invoke-Kit $progress @('-WorkingTree', '-Json')
         $pj = $r.Text | ConvertFrom-Json
         Assert-That ($r.Code -eq 0 -and @($pj.Startable | Where-Object { $_.Id -eq 'PKT-11' }).Count -eq 1 -and ((@($pj.Blocked | Where-Object { $_.Id -eq 'PKT-12' })[0].Reasons) -join ' | ') -match 'API-4 is open in example/api#4.*API-10 was closed as not completed') 'progress gives the same verdicts, from the other repository' $r.Text
+        # A packet closed as completed whose status still says Ready is listed, and judged, all the same.
+        [void](Invoke-Kit $board @('set', 'PKT-12', 'Closed=true'))
+        $r = Invoke-Kit $progress @('-WorkingTree', '-Json')
+        $pj = $r.Text | ConvertFrom-Json
+        Assert-That ($r.Code -eq 0 -and ((@($pj.Blocked | Where-Object { $_.Id -eq 'PKT-12' })[0].Reasons) -join ' | ') -match 'API-4 is open in example/api#4') 'progress reads a closed but Ready packet''s remote dependencies too, never the item here with that ID' $r.Text
         $rcfg.remotes.API.repo = 'example/gone'
         Set-Content -LiteralPath $altCfg -Value ($rcfg | ConvertTo-Json -Depth 10)
         $r = Invoke-Kit $board @('deps', 'PKT-11', '-WorkingTree', '-ConfigPath', $altCfg)

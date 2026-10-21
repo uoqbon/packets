@@ -65,8 +65,9 @@ try {
     $byId = @{}; foreach ($it in $items) { if (-not $byId.ContainsKey($it.Id)) { $byId[$it.Id] = $it } }
     $phases = @($all | Where-Object { -not $Phase -or $_.Phase -eq $Phase } | ForEach-Object Phase | Select-Object -Unique)
     if (-not $phases) { Stop-Pw "no packets$(if ($Phase) { " in phase $Phase" }) under $($cfg.paths.plans)" }
-    # Unfinished packets' dependencies in other repositories (remotes), read from their issues there.
-    $remote = Get-PwRemoteItems -Config $cfg -Ids @($all | Where-Object { $phases -contains $_.Phase -and -not (Test-PwItemDone $byId[$_.Id]) } | ForEach-Object { $_.DependsOn })
+    # Dependencies in other repositories (remotes), read from their issues there. Every packet's, not only
+    # unfinished ones': a closed packet whose status still says Ready is judged like any other.
+    $remote = Get-PwRemoteItems -Config $cfg -Ids @($all | Where-Object { $phases -contains $_.Phase } | ForEach-Object { $_.DependsOn })
     foreach ($id in $remote.Keys) { $byId[$id] = $remote[$id] }
     $prCache = @{}
     $finder = { param($id) if (-not $prCache.ContainsKey($id)) { $prCache[$id] = Get-PwGhPrForPacket -Config $cfg -PacketId $id -State open }; $prCache[$id] }.GetNewClosure()

@@ -132,7 +132,8 @@ function Format-PwItemBody {
        board refs, and a source marker carrying the file's and the body's hashes. #>
     param($Config, $Packet, [string]$FileText, [hashtable]$ItemsById)
     $body = $Packet.Body
-    $deps = @($Packet.DependsOn | ForEach-Object { $it = $ItemsById[$_]; if ($it) { "$_ ($(Get-PwItemRefLabel $it))" } else { $_ } })
+    # Another repository's packet (remotes) keeps its bare ID: an item here with that ID isn't it.
+    $deps = @($Packet.DependsOn | ForEach-Object { $it = if (Get-PwRemoteRepo -Config $Config -Id $_) { $null } else { $ItemsById[$_] }; if ($it) { "$_ ($(Get-PwItemRefLabel $it))" } else { $_ } })
     if ($deps.Count) {
         $body = [regex]::Replace($body, '(?m)^(?<pre>\s*[-*]\s+\*\*Depends on:\*\*\s*)(?<v>[^\r\n]*)$', { param($m) $m.Groups['pre'].Value + ($deps -join ', ') }, 'None', [TimeSpan]::FromSeconds(2))
     }
@@ -236,7 +237,7 @@ function Invoke-PwSync {
         foreach ($p in $packets) {
             $item = $itemsById[$p.Id]
             if (-not $item) { continue }
-            $deps = @($p.DependsOn | ForEach-Object { $itemsById[$_] } | Where-Object { $_ })
+            $deps = @($p.DependsOn | Where-Object { -not (Get-PwRemoteRepo -Config $Config -Id $_) } | ForEach-Object { $itemsById[$_] } | Where-Object { $_ })
             $n = Set-ProvDependencies -Item $item -DependencyItems $deps
             if ($n) { Write-Output "linked $($p.Id) to $n dependenc$(if ($n -eq 1) { 'y' } else { 'ies' })" }
             $ph = $phases[$p.Phase]
