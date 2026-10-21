@@ -32,6 +32,9 @@ $script:Defaults = @{
     locks         = @()
     stacking      = $false
     trustedAuthors = @()
+    # Other repositories' packets this repository's packets may depend on, by ID prefix:
+    # @{ API = @{ repo = 'acme/api'; label = 'packet' } } (label: that repository's packet label, default labels.packet).
+    remotes       = @{}
     claims        = @{ leaseMinutes = 30 }
     review        = @{
         maxRounds = 3; maxParallelLenses = 2; lensesPerReviewer = 1
@@ -150,6 +153,26 @@ function Get-PwConfig {
     foreach ($lens in @($cfg.review.lensPaths.Keys)) { Test-PwRegex "review.lensPaths.$lens" $cfg.review.lensPaths[$lens] }
     foreach ($lock in @($cfg.locks)) {
         if (-not $lock.name -or -not $lock.paths) { Stop-Pw 'config: every entry in locks needs a name and paths' }
+    }
+    # remotes: a dependency whose ID prefix is listed here is a packet of that repository (Get-PwRemoteItems).
+    if ($null -eq $cfg.remotes) { $cfg.remotes = @{} }
+    if ($cfg.remotes -isnot [System.Collections.IDictionary]) { Stop-Pw 'config: remotes must map packet ID prefixes to { "repo": "owner/name" }' }
+    # remotes as written: the merge above folds case, so a "Remotes" block, or an "api" key beside "API",
+    # would replace what a reader of the file sees, unchecked.
+    $rawNames = @(if ($user -is [System.Collections.IDictionary]) { $user.Keys | Where-Object { $_ -eq 'remotes' } })
+    if ($rawNames.Count -gt 1 -or ($rawNames.Count -eq 1 -and $rawNames[0] -cne 'remotes')) { Stop-Pw "config: write remotes once, in lower case (found $($rawNames -join ', '))" }
+    $rawRemotes = if ($rawNames.Count) { $user['remotes'] } else { $null }
+    if ($rawRemotes -is [System.Collections.IDictionary]) {
+        foreach ($prefix in @($rawRemotes.Keys)) {
+            if ($prefix -cnotmatch '^[A-Z][A-Z0-9]*$') { Stop-Pw "config: remotes key '$prefix' must be a packet ID prefix: upper-case letters and digits" }
+        }
+    }
+    foreach ($prefix in @($cfg.remotes.Keys)) {
+        $rm = $cfg.remotes[$prefix]
+        if ($prefix -eq $cfg.packetPrefix -or $prefix -eq $cfg.humanPrefix) { Stop-Pw "config: remotes.$prefix is this repository's own prefix" }
+        if ($rm -isnot [System.Collections.IDictionary] -or $rm.repo -isnot [string] -or $rm.repo -notmatch '^[\w.-]+/[\w.-]+$') { Stop-Pw "config: remotes.$prefix.repo must be the other GitHub repository as owner/name" }
+        if ($rm.repo -eq $cfg.repo) { Stop-Pw "config: remotes.$prefix names this repository ($($cfg.repo)); its own packets need no remote" }
+        if ($rm.Contains('label') -and ($rm.label -isnot [string] -or -not $rm.label.Trim())) { Stop-Pw "config: remotes.$prefix.label must be that repository's packet label" }
     }
     if ([int]$cfg.claims.leaseMinutes -lt 5) { Stop-Pw 'config: claims.leaseMinutes must be at least 5' }
     # The review limits, as whole numbers (a quoted "3" still counts). The table is copied first: without a
@@ -563,10 +586,25 @@ function Get-PwCriticalPath {
 #   STACK    (only with "stacking": true) exactly one dependency is Ready to merge with an open PR
 #            against the default branch, and the rest are Done: branch from that PR's head.
 #   BLOCKED  anything else; Reasons says which dependency and why.
+# A dependency in another repository (remotes) is an item from Get-PwRemoteItems: Done only when its issue
+# there was closed as completed, and never a STACK base.
+
+function Get-PwRemoteRepo {
+    <# The repository (owner/name) the config's remotes give a packet ID's prefix; $null for this repository's IDs. #>
+    param([Parameter(Mandatory)]$Config, [string]$Id)
+    $prefix = ($Id -split '-')[0]
+    if ($Config.remotes -and $Config.remotes.Contains($prefix)) { [string]$Config.remotes[$prefix].repo } else { $null }
+}
+
+function Test-PwRemoteItem {
+    param($Item)
+    [bool]($Item -and $Item.PSObject.Properties['Remote'] -and $Item.Remote)
+}
 
 function Test-PwItemDone {
     param($Item)
     if (-not $Item) { return $false }
+    if (Test-PwRemoteItem $Item) { return [bool]$Item.Done }
     if ($Item.Closed -and $Item.ClosedReason -ne 'not_planned') { return $true }
     $Item.Status -eq 'Done'
 }
@@ -584,6 +622,7 @@ function Get-PwVerdict {
         $item = $ItemsById[$d]
         if (-not $item) { $reasons.Add("$d is not on the board"); continue }
         if (Test-PwItemDone $item) { continue }
+        if (Test-PwRemoteItem $item) { $reasons.Add($item.Reason); continue }
         if ($item.Closed -and $item.ClosedReason -eq 'not_planned') { $reasons.Add("$d was closed as not planned"); continue }
         if ($item.Status -eq 'Ready to merge' -and $item.Kind -ne 'human') { $stackCandidates.Add($d); continue }
         $reasons.Add("$d is $($item.Status)")

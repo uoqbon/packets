@@ -8,6 +8,9 @@
   Reads every packet file under <plans>/<phase>/packets/ (all phases, so cross-phase dependencies
   resolve) and reports, for the phase asked for:
 
+  A dependency whose ID prefix the config's remotes lists is another repository's packet: it needs no
+  file here and isn't looked up (board.ps1 deps does that); the summary lists it.
+
   ERROR  a malformed packet; a duplicate ID; a dependency that doesn't exist; a cycle; two packets that
          can run at the same time (neither depends on the other) and own the same existing file; two
          such packets that hold the same lock; a packet that owns a lock's paths without declaring it.
@@ -50,11 +53,19 @@ try {
         $byId[$p.Id] = $p
     }
     $inScope = [System.Collections.Generic.HashSet[string]]::new([string[]]@($scope | Where-Object Id | ForEach-Object Id))
+    $remoteDeps = [System.Collections.Generic.List[object]]::new()
 
     # 1. Each packet on its own.
     foreach ($p in $scope) {
         foreach ($problem in (Test-PwPacket -Packet $p -Config $cfg)) { Add-Finding 'ERROR' $(if ($p.Id) { $p.Id } else { $p.Path }) $problem }
-        foreach ($d in $p.DependsOn) { if (-not $byId.ContainsKey($d)) { Add-Finding 'ERROR' $p.Id "depends on $d, which has no packet file" } }
+        foreach ($d in $p.DependsOn) {
+            $remoteRepo = Get-PwRemoteRepo -Config $cfg -Id $d
+            if ($remoteRepo) { $remoteDeps.Add([pscustomobject]@{ Id = $d; Repo = $remoteRepo; By = $p.Id }); continue }
+            if ($byId.ContainsKey($d)) { continue }
+            $prefix = ($d -split '-')[0]
+            $hint = if ($prefix -ne $cfg.packetPrefix -and $prefix -ne $cfg.humanPrefix) { " (a packet in another repository needs its prefix $prefix in the config's remotes)" } else { '' }
+            Add-Finding 'ERROR' $p.Id "depends on $d, which has no packet file$hint"
+        }
         if ($p.Kind -eq 'packet') {
             if ($p.Acceptance.Count -gt 8) { Add-Finding 'WARN' $p.Id "$($p.Acceptance.Count) acceptance criteria: one PR that big rarely clears review in three rounds; consider splitting" }
             if ($p.Owns.Count -gt 12) { Add-Finding 'WARN' $p.Id "owns $($p.Owns.Count) globs; a packet that wide is hard to keep apart from its neighbours" }
@@ -224,6 +235,7 @@ try {
         Waves        = @($waves | ForEach-Object { [pscustomobject]@{ Wave = $_.Name; Count = $_.Count; Packets = @($_.Group | ForEach-Object Id) } })
         Hubs         = $hubs
         CriticalPath = [pscustomobject]@{ Weight = $crit.Weight; Path = $crit.Path }
+        Remote       = @($remoteDeps | Group-Object Id | Sort-Object { ($_.Name -split '-')[0] }, { [int]($_.Name -split '-')[1] } | ForEach-Object { [pscustomobject]@{ Id = $_.Name; Repo = $_.Group[0].Repo; DependedOnBy = @($_.Group | ForEach-Object By) } })
         Errors       = @($findings | Where-Object Level -eq 'ERROR').Count
         Warnings     = @($findings | Where-Object Level -eq 'WARN').Count
     }
@@ -240,6 +252,7 @@ try {
         foreach ($w in $summary.Waves) { Write-Output ("  wave {0,-4} {1,2}: {2}" -f $w.Wave, $w.Count, ($w.Packets -join ', ')) }
         if ($hubs) { Write-Output "  land first (most dependents): $($hubs -join ', ')" }
         Write-Output "  critical path (weight $($crit.Weight)): $($crit.Path -join ' -> ')"
+        if ($summary.Remote) { Write-Output "  in other repositories: $(($summary.Remote | ForEach-Object { "$($_.Id) in $($_.Repo) (for $($_.DependedOnBy -join ', '))" }) -join ', ')" }
         Write-Output "  $($summary.Errors) error(s), $($summary.Warnings) warning(s)"
     }
     if ($summary.Errors -gt 0) { exit 1 }
