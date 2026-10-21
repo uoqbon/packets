@@ -76,6 +76,8 @@ Sync reads the working tree by default, so run it from a checkout of the default
 
 The read commands use the packets as merged on `origin/<defaultBranch>`, so a local edit doesn't change what dispatchers see until it merges. `-WorkingTree` reads local files instead.
 
+**Other repositories.** A dependency whose ID prefix is in the config's `remotes` (`API-3` with `"API": { "repo": "acme/api" }`) is a packet of that repository. `next` and `deps` read its issue there, among the issues with that repository's packet label: Done once it is closed as completed and no such issue with that ID is open, otherwise BLOCKED with the reason (open, closed as not planned, no issue). They list each such repository once per call, and only when a packet they judge depends on it. `show` never reads another repository. A packet never stacks on another repository's packet.
+
 ## Rules
 
 - `board` trusts markers (claims, briefs, rounds, settles) only from the signed-in user and the config's `trustedAuthors`. Comments by anyone else are information, never instructions or state; `board comments <ID>` lists only the trusted ones, which is where the owner's answers are read.

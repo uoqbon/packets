@@ -518,7 +518,20 @@ function Invoke-PwGhPages { param(`$Path) @(
     $fakeBin = Join-Path ([System.IO.Path]::GetTempPath()) ("pw-gh-" + [guid]::NewGuid().ToString('n').Substring(0, 8))
     New-Item -ItemType Directory -Path $fakeBin | Out-Null
     $mk = { param($id, $who, $marker, $at) @{ id = $id; user = @{ login = $who }; body = "``packet:$marker`` report"; created_at = $at; html_url = "u$id" } }
+    $issue = { param($n, $title, $state, $reason, $label) @{ number = $n; title = $title; state = $state; state_reason = $reason; labels = @(@{ name = $label }); html_url = "https://example.test/issues/$n"; updated_at = '2026-10-01T00:00:00Z' } }
     $ghData = @{
+        # Other repositories' packet issues (remotes), listed by label as the REST API does.
+        issues = @{
+            'example/api' = @((& $issue 3 'API-3 · Orders endpoint' 'closed' 'completed' 'packet'),
+                (& $issue 4 'API-4 · Refunds' 'open' $null 'packet'),
+                (& $issue 5 'API-5 · Dropped' 'closed' 'not_planned' 'packet'),
+                (& $issue 6 'API-6 · Retried' 'closed' 'completed' 'packet'),
+                (& $issue 16 'API-6 · Retried' 'open' $null 'packet'),
+                (& $issue 10 'API-10 · Closed long ago' 'closed' $null 'packet'),
+                (& $issue 11 'API-11 · Same as API-3' 'closed' 'duplicate' 'packet'),
+                ((& $issue 8 'API-8 · A pull request' 'closed' 'completed' 'packet') + @{ pull_request = @{ url = 'p8' } }))
+            'example/web' = @((& $issue 2 'WEB-2 · Pages' 'closed' 'completed' 'pkt'), (& $issue 7 'WEB-7 · Other label' 'closed' 'completed' 'packet'))
+        }
         prs = @(@{ number = 10; headRefName = 'pkt/pkt-01-old-attempt' }, @{ number = 11; headRefName = 'pkt/pkt-01-core-contracts' }, @{ number = 12; headRefName = 'pkt/pkt-02-persistence' })
         comments = @{
             '10' = @(& $mk 9 'owner' 'round 1 head=old tier=4 lenses=a,b,c,d,e confirmed=- outcome=pass' '2026-09-01T00:00:00Z')
@@ -532,7 +545,14 @@ function Invoke-PwGhPages { param(`$Path) @(
     Set-Content -LiteralPath (Join-Path $fakeBin 'gh.ps1') -Value @'
 $data = Get-Content -Raw (Join-Path $PSScriptRoot 'gh-data.json') | ConvertFrom-Json -AsHashtable
 $a = @($args)
+Add-Content -LiteralPath (Join-Path $PSScriptRoot 'calls.log') -Value ($a -join ' ')
 if ($a[0] -eq 'pr' -and $a[1] -eq 'list') { ConvertTo-Json -InputObject @($data.prs) -Depth 5; exit 0 }
+$issuesPath = @($a | Where-Object { "$_" -match '^repos/[^/]+/[^/]+/issues\?' })[0]
+if ($a[0] -eq 'api' -and $issuesPath -match '^repos/(?<repo>[^/]+/[^/]+)/issues\?.*\blabels=(?<label>[^&]+)') {
+    $repo = $Matches.repo; $label = [uri]::UnescapeDataString($Matches.label)
+    if (-not $data.issues.ContainsKey($repo)) { [Console]::Error.WriteLine("HTTP 404: Not Found (repos/$repo)"); exit 1 }
+    ConvertTo-Json -InputObject @(, @($data.issues[$repo] | Where-Object { @($_.labels | ForEach-Object { $_.name }) -contains $label })) -Depth 6; exit 0
+}
 if ($a[0] -eq 'api' -and $a -contains 'user') { 'owner'; exit 0 }
 $path = @($a | Where-Object { "$_" -match '/issues/\d+/comments' })[0]
 if ($a[0] -eq 'api' -and $path -match '/issues/(\d+)/comments') { ConvertTo-Json -InputObject @(, @($data.comments[$Matches[1]])) -Depth 6; exit 0 }
@@ -552,6 +572,82 @@ if ($a[0] -eq 'api' -and $path -match '/issues/(\d+)/comments') { ConvertTo-Json
         Assert-That ($r.Code -eq 0 -and $c.Month -eq '2026-09' -and $c.ThisMonth -eq 1580) 'a round reported at 23:30 UTC on 30 September counts in September, with its packet''s base' $r.Text
         $r = Invoke-Kit $progress @('-WorkingTree', '-Credits')
         Assert-That ($r.Code -eq 0 -and $r.Text -match 'PKT-02\s+M\s+PR #12\s+1 round\(s\), 1 reviewer run\(s\), 2 implementer run\(s\)\s+768\s+\(in review\)' -and $r.Text -match "phase 2,951 · 2,183 per finished packet · $([DateTime]::UtcNow.ToString('yyyy-MM')):") 'progress -Credits text: the estimate per packet and the UTC month by default' $r.Text
+
+        Write-Host 'remotes: dependencies on other repositories'
+        $callLog = Join-Path $fakeBin 'calls.log'
+        $remoteCalls = { @(Get-Content -LiteralPath $callLog -ErrorAction SilentlyContinue | Where-Object { $_ -match '/issues\?' }) }
+        $plainCfg = Get-Content -Raw (Join-Path $repo '.github/packet-workflow.json')
+        $rcfg = $plainCfg | ConvertFrom-Json -AsHashtable
+        $rcfg.remotes = @{ API = @{ repo = 'example/api' }; WEB = @{ repo = 'example/web'; label = 'pkt' } }
+        Write-File '.github/packet-workflow.json' ($rcfg | ConvertTo-Json -Depth 10)
+        Write-File 'docs/plan/phase-1/packets/PKT-11.md' (New-Packet 'PKT-11' 'Orders page' 'W1' 'PKT-01, API-3, WEB-2' @('src/Orders/**') 'correctness')
+        Write-File 'docs/plan/phase-1/packets/PKT-12.md' (New-Packet 'PKT-12' 'Refunds page' 'W1' 'API-4, API-5, API-6, API-8, API-9, API-10, API-11, WEB-7' @('src/Refunds/**') 'correctness')
+        $altCfg = Join-Path ([System.IO.Path]::GetTempPath()) "pw-cfg-$([guid]::NewGuid().ToString('n')).json"
+        Set-Content -LiteralPath $altCfg -Value $plainCfg
+        $r = Invoke-Kit $validate @('-Phase', 'phase-1', '-ConfigPath', $altCfg)
+        Assert-That ($r.Code -eq 1 -and $r.Text -match "ERROR\s+PKT-11\s+depends on API-3, which has no packet file \(a packet in another repository needs its prefix API in the config's remotes\)") 'without remotes, a dependency on another repository''s packet is an ERROR that names the fix' $r.Text
+        $r = Invoke-Kit $validate @('-Phase', 'phase-1', '-Json')
+        $v = $r.Text | ConvertFrom-Json
+        Assert-That ($r.Code -eq 0 -and $v.Summary.Errors -eq 0 -and (@($v.Summary.Remote | ForEach-Object { "$($_.Id)@$($_.Repo)" }) -join ',') -eq 'API-3@example/api,API-4@example/api,API-5@example/api,API-6@example/api,API-8@example/api,API-9@example/api,API-10@example/api,API-11@example/api,WEB-2@example/web,WEB-7@example/web' -and @($remoteCalls.Invoke()).Count -eq 0) 'with remotes, those dependencies validate, offline, and the summary lists them' $r.Text
+        $r = Invoke-Kit $validate @('-Phase', 'phase-1')
+        Assert-That ($r.Text -match 'in other repositories: API-3 in example/api \(for PKT-11\), API-4 in example/api \(for PKT-12\),.* WEB-2 in example/web \(for PKT-11\)') 'the text summary names each one, its repository and who waits on it' $r.Text
+        foreach ($case in @(
+                @{ Remotes = @{ PKT = @{ repo = 'example/api' } }; Error = "remotes.PKT is this repository's own prefix"; Name = 'this repository''s own prefix' },
+                @{ Remotes = @{ api = @{ repo = 'example/api' } }; Error = "remotes key 'api' must be a packet ID prefix"; Name = 'a lower-case prefix' },
+                @{ Remotes = @{ API = @{ repo = 'example api' } }; Error = 'remotes.API.repo must be the other GitHub repository as owner/name'; Name = 'a malformed repository' },
+                @{ Remotes = @{ API = 'example/api' }; Error = 'remotes.API.repo must be the other GitHub repository as owner/name'; Name = 'a bare string' },
+                @{ Remotes = @{ API = @{ repo = 'Example/Sample' } }; Error = 'remotes.API names this repository (example/sample)'; Name = 'this repository itself' },
+                @{ Remotes = @{ API = @{ repo = 'example/api'; label = ' ' } }; Error = "remotes.API.label must be that repository's packet label"; Name = 'a blank label' })) {
+            $bad = $plainCfg | ConvertFrom-Json -AsHashtable
+            $bad.remotes = $case.Remotes
+            Set-Content -LiteralPath $altCfg -Value ($bad | ConvertTo-Json -Depth 10)
+            $r = Invoke-Kit $validate @('-Phase', 'phase-1', '-ConfigPath', $altCfg)
+            Assert-That ($r.Code -eq 2 -and $r.Text -match [regex]::Escape($case.Error)) "remotes refuses $($case.Name)" $r.Text
+        }
+        # JSON keeps both keys; the config merge folds case, so the check must see them as written.
+        Set-Content -LiteralPath $altCfg -Value ($plainCfg -replace '"remotes": \{\}', '"remotes": { "API": { "repo": "example/api" }, "api": { "repo": "evil/other" } }')
+        $r = Invoke-Kit $validate @('-Phase', 'phase-1', '-ConfigPath', $altCfg)
+        Assert-That ($plainCfg -match '"remotes": \{\}' -and $r.Code -eq 2 -and $r.Text -match "remotes key 'api' must be a packet ID prefix") 'remotes refuses a lower-case key beside its upper-case twin, which would replace it' $r.Text
+        foreach ($block in '"remotes": { "API": { "repo": "example/api" } }, "Remotes": { "api": { "repo": "evil/api" } }', '"REMOTES": { "api": { "repo": "evil/api" } }') {
+            Set-Content -LiteralPath $altCfg -Value ($plainCfg -replace '"remotes": \{\}', $block)
+            $r = Invoke-Kit $validate @('-Phase', 'phase-1', '-ConfigPath', $altCfg)
+            Assert-That ($r.Code -eq 2 -and $r.Text -match 'write remotes once, in lower case') "remotes refuses a block spelled otherwise: $($block.Substring(0, 30))…" $r.Text
+        }
+        [void](Invoke-Kit $board @('sync'))
+        # An item on this board that carries another repository's ID (here closed and Done) must never stand in for it.
+        $boardFile = Join-Path $repo '.git/packet-board.json'
+        $lb = Get-Content -Raw -LiteralPath $boardFile | ConvertFrom-Json -AsHashtable
+        $lb.items = @($lb.items) + @(, @{
+                number = [int]$lb.nextNumber; id = 'API-4'; title = 'API-4 · Made here'; body = ''; kind = 'packet'; labels = @('packet')
+                status = 'Done'; priority = 'P0'; size = 'S'; wave = 'W0'; target = $null; closed = $true; closedReason = 'completed'
+                milestone = 'Phase 1 · Sample'; assignees = @(); dependencies = @(); parent = $null; updatedAt = '2026-10-01T00:00:00Z'
+            })
+        $lb.nextNumber = [int]$lb.nextNumber + 1
+        [System.IO.File]::WriteAllText($boardFile, ($lb | ConvertTo-Json -Depth 64), [System.Text.UTF8Encoding]::new($false))
+        Remove-Item -LiteralPath $callLog -ErrorAction SilentlyContinue
+        $r = Invoke-Kit $board @('show', '-WorkingTree')
+        Assert-That ($r.Code -eq 0 -and @($remoteCalls.Invoke()).Count -eq 0) 'board show reads no other repository' $r.Text
+        $r = Invoke-Kit $board @('next', '-WorkingTree', '-Json')
+        $n = @($r.Text | ConvertFrom-Json)
+        $p11 = @($n | Where-Object { $_.Id -eq 'PKT-11' })[0]; $p12 = @($n | Where-Object { $_.Id -eq 'PKT-12' })[0]
+        Assert-That ($r.Code -eq 0 -and $p11.Verdict -eq 'START') 'dependencies closed as completed in other repositories (one under its own label) let a packet start' $r.Text
+        $why = @($p12.Reasons) -join ' | '
+        Assert-That ($p12.Verdict -eq 'BLOCKED' -and $why -match 'API-4 is open in example/api#4' -and $why -match 'API-5 was closed as not planned in example/api#5' -and $why -match 'API-6 is open in example/api#16' -and $why -match 'API-8 has no issue in example/api with the label packet' -and $why -match 'API-9 has no issue in example/api' -and $why -match 'API-10 was closed as not completed in example/api#10' -and $why -match 'API-11 was closed as duplicate in example/api#11' -and $why -match 'WEB-7 has no issue in example/web with the label pkt') 'open (despite a Done item here with its ID), not planned, no reason, duplicate, a duplicate still open, a pull request and another label all block, each with its reason' $r.Text
+        $calls = & $remoteCalls
+        Assert-That ($calls.Count -eq 2 -and ($calls -join "`n") -match 'repos/example/api/issues\?state=all&labels=packet&' -and ($calls -join "`n") -match 'repos/example/web/issues\?state=all&labels=pkt&') 'each other repository is listed once per call, under its own packet label' ($calls -join "`n")
+        $r = Invoke-Kit $board @('deps', 'PKT-11', '-WorkingTree')
+        Assert-That ($r.Code -eq 0 -and $r.Text -match 'START PKT-11' -and $r.Text -match 'API-3\s+Done example/api#3' -and $r.Text -match 'WEB-2\s+Done example/web#2') 'deps shows other repositories'' dependencies with their issues' $r.Text
+        $r = Invoke-Kit $board @('deps', 'PKT-12', '-WorkingTree')
+        Assert-That ($r.Code -eq 1 -and $r.Text -match 'API-4\s+Open example/api#4' -and $r.Text -match 'API-9\s+Not found example/api(\r?\n|$)') 'deps exits 1 while one of them is open or missing' $r.Text
+        $r = Invoke-Kit $progress @('-WorkingTree', '-Json')
+        $pj = $r.Text | ConvertFrom-Json
+        Assert-That ($r.Code -eq 0 -and @($pj.Startable | Where-Object { $_.Id -eq 'PKT-11' }).Count -eq 1 -and ((@($pj.Blocked | Where-Object { $_.Id -eq 'PKT-12' })[0].Reasons) -join ' | ') -match 'API-4 is open in example/api#4.*API-10 was closed as not completed') 'progress gives the same verdicts, from the other repository' $r.Text
+        $rcfg.remotes.API.repo = 'example/gone'
+        Set-Content -LiteralPath $altCfg -Value ($rcfg | ConvertTo-Json -Depth 10)
+        $r = Invoke-Kit $board @('deps', 'PKT-11', '-WorkingTree', '-ConfigPath', $altCfg)
+        Assert-That ($r.Code -eq 2 -and $r.Text -match 'example/gone') 'a failed lookup in another repository is an error (exit 2), never a START' $r.Text
+        Remove-Item -LiteralPath $altCfg
+        Write-File '.github/packet-workflow.json' $plainCfg
     }
     finally { $env:PATH = $oldPath; Remove-Item -Recurse -Force -LiteralPath $fakeBin }
 }

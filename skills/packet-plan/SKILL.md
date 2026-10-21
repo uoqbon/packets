@@ -55,6 +55,8 @@ Good packets make parallel work safe. Bad ones make agents edit the same files, 
 
 **Dependencies.** Only real ones: "needs code from X merged". Keep the graph wide and shallow, so many packets can run at once; a deep chain is a schedule risk. No cycles. A human task can be a dependency (an approval, a key).
 
+**Other repositories.** A packet can depend on a packet in another repository by its ID (`API-3`), once that ID's prefix is in the config's `remotes`. Ask the owner to add it if it's missing. Such a dependency is done when that repository's issue for it is closed as completed. Depend on it only where the code truly needs it merged there. Otherwise, consume the contract the other repository publishes (a package version, a schema file, an endpoint), with a fake here, so only the packet that wires them together waits.
+
 **Locks.** An exclusive resource (migrations, a regenerated lockfile, a generated client, one shared schema) is a lock in the config. A packet that touches it lists the lock under **Locks**, and owns its paths. Packets holding the same lock must be ordered by dependencies. Prefer one packet per lock per phase (for example, one packet adds every table the phase needs).
 
 **Acceptance criteria.** Observable and testable, with the numbers that matter: "50 concurrent requests for distinct items create 50 rows and no duplicates", not "handles concurrency". Each one maps to an automated test, or for non-code packets to a command and its output. Write them as `- [ ] …`.

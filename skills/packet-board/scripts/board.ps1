@@ -9,7 +9,9 @@
   comes from .github/packet-workflow.json (board.provider) as merged on origin/<defaultBranch>, so a
   branch checked out here can't change who is trusted or which board is written. Packets are read from the packet files under
   paths.plans; by default the read commands use what is merged (origin/<defaultBranch>) and sync uses
-  the working tree. -WorkingTree or -Ref <commit> overrides either.
+  the working tree. -WorkingTree or -Ref <commit> overrides either. A dependency whose ID prefix the
+  config's remotes lists is another repository's packet: next and deps read its issue there (Done once it
+  is closed as completed), listing each such repository's packet issues once per call.
 
   board.ps1 setup [-DryRun]                 create the labels/fields the board needs; report what it can't create
   board.ps1 sync [-Phase p] [-DryRun] [-Force]
@@ -89,6 +91,14 @@ function Get-PwBoardState {
     @{ Packets = $packets; Items = $items; ItemsById = $byId; PacketsById = $pkById; Source = $(if ($src) { $src } else { 'working tree' }) }
 }
 
+function Add-PwRemoteItems {
+    <# Puts the other repositories' packets that these packets depend on (remotes) into the state's ItemsById,
+       for the verdicts. Such an ID is always read from its own repository, even if an item here carries it. #>
+    param($Config, $State, $Packets)
+    $remote = Get-PwRemoteItems -Config $Config -Ids @($Packets | ForEach-Object { $_.DependsOn })
+    foreach ($id in $remote.Keys) { $State.ItemsById[$id] = $remote[$id] }
+}
+
 function Get-PwOpenPrFinder {
     param($Config)
     $cache = @{}
@@ -113,6 +123,7 @@ function Resolve-PwItem {
 function Get-PwItemRefLabel {
     param($Item)
     if (-not $Item) { return '' }
+    if (Test-PwRemoteItem $Item) { return $(if ($Item.Number) { "$($Item.Repo)#$($Item.Number)" } else { $Item.Repo }) }
     if ((Get-ProvName) -eq 'azure-boards') { "AB#$($Item.Number)" } else { "#$($Item.Number)" }
 }
 
@@ -285,9 +296,10 @@ try {
         'next' {
             $st = Get-PwBoardState $cfg
             $finder = Get-PwOpenPrFinder $cfg
-            $rows = foreach ($p in ($st.Packets | Where-Object { $_.Kind -eq 'packet' } | Sort-Object { Get-PwSortKey $_ })) {
+            $ready = @($st.Packets | Where-Object { $_.Kind -eq 'packet' -and $st.ItemsById[$_.Id] -and $st.ItemsById[$_.Id].Status -eq 'Ready' } | Sort-Object { Get-PwSortKey $_ })
+            Add-PwRemoteItems $cfg $st $ready
+            $rows = foreach ($p in $ready) {
                 $it = $st.ItemsById[$p.Id]
-                if (-not $it -or $it.Status -ne 'Ready') { continue }
                 $v = Get-PwVerdict -Packet $p -ItemsById $st.ItemsById -Config $cfg -FindOpenPr $finder
                 [pscustomobject]@{ Id = $p.Id; Ref = Get-PwItemRefLabel $it; Verdict = $v.Verdict; Reasons = $v.Reasons; StackOn = $v.StackOn; StackPr = if ($v.StackPr) { $v.StackPr.number } else { $null }; Priority = $p.Priority; Wave = $p.Wave; Title = $p.Title }
             }
@@ -306,6 +318,7 @@ try {
             $id = ([string]$Rest[0]).ToUpperInvariant()
             $p = $st.PacketsById[$id]
             if (-not $p) { Stop-Pw "no packet file for $id (packets from $($st.Source))" }
+            Add-PwRemoteItems $cfg $st @($p)
             $it = $st.ItemsById[$id]
             $v = Get-PwVerdict -Packet $p -ItemsById $st.ItemsById -Config $cfg -FindOpenPr (Get-PwOpenPrFinder $cfg)
             $status = if ($it) { $it.Status } else { 'NOT ON BOARD' }

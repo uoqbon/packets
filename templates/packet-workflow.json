@@ -79,6 +79,7 @@
   ],
   "stacking": false,
   "trustedAuthors": [],
+  "remotes": {},
   "claims": { "leaseMinutes": 30 },
   "models": {
     "strong": ["GPT-6.1 Sol (copilot)", "Claude Sonnet 5.5 (copilot)"],

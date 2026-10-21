@@ -5,6 +5,7 @@
 $script:GhLabelCache = $null
 $script:GhMilestoneCache = $null
 $script:GhIssueCache = $null
+$script:GhRemoteIssueCache = @{}
 $script:GhDependencyApiWorks = $true
 $script:GhLogin = $null
 
@@ -93,6 +94,50 @@ function Get-PwGhIssues {
     $script:GhIssueCache = @(Invoke-PwGhPages "repos/$($Config.repo)/issues?state=all&labels=$label&per_page=100" |
             Where-Object { -not $_.ContainsKey('pull_request') -or -not $_.pull_request })
     $script:GhIssueCache
+}
+
+function Get-PwRemoteItems {
+    <# The dependencies among -Ids that are other repositories' packets (the config's remotes, by ID prefix),
+       as items keyed by ID for the verdicts. Each repository's packet issues are listed once, over REST, and
+       only when such a dependency is asked for. Only issues carrying that repository's packet label are
+       seen, as its own kit sees them. One is Done only when such an issue titled "<ID> · …" is closed as
+       completed and none is open; otherwise its Reason says why. Their state is all that is read there: no
+       comment, status or marker counts, so anyone who can close or label its issues can unblock a
+       dependent here. #>
+    param([Parameter(Mandatory)]$Config, [string[]]$Ids = @())
+    $found = @{}
+    foreach ($id in @($Ids | Where-Object { $_ } | Select-Object -Unique)) {
+        $repo = Get-PwRemoteRepo -Config $Config -Id $id
+        if (-not $repo) { continue }
+        $rm = $Config.remotes[($id -split '-')[0]]
+        $label = if ($rm.Contains('label')) { [string]$rm.label } else { [string]$Config.labels.packet }
+        $key = "$repo $label"
+        if (-not $script:GhRemoteIssueCache.ContainsKey($key)) {
+            $script:GhRemoteIssueCache[$key] = @(Invoke-PwGhPages "repos/$repo/issues?state=all&labels=$([uri]::EscapeDataString($label))&per_page=100" |
+                    Where-Object { -not $_.ContainsKey('pull_request') -or -not $_.pull_request })
+        }
+        $hits = @($script:GhRemoteIssueCache[$key] | Where-Object { (Get-PwGhPacketId $_.title) -eq $id } | Sort-Object { [int]$_.number })
+        $open = @($hits | Where-Object { $_.state -ne 'closed' })
+        $completed = @($hits | Where-Object { $_.state -eq 'closed' -and $_.state_reason -eq 'completed' })
+        $done = $completed.Count -gt 0 -and $open.Count -eq 0
+        $issue = if ($open) { $open[0] } elseif ($completed) { $completed[-1] } elseif ($hits) { $hits[-1] } else { $null }
+        $at = if ($issue) { "$repo#$($issue.number)" } else { $repo }
+        $status = 'Done'; $reason = ''
+        if (-not $done) {
+            if ($open) { $status = 'Open'; $reason = "$id is open in $at" }
+            elseif ($issue) { $status = 'Closed'; $reason = "$id was closed as $(if ($issue.state_reason) { ([string]$issue.state_reason).Replace('_', ' ') } else { 'not completed' }) in $at" }
+            else { $status = 'Not found'; $reason = "$id has no issue in $repo with the label $label" }
+        }
+        $found[$id] = [pscustomobject]@{
+            Id = $id; Remote = $true; Repo = $repo; Done = $done; Status = $status; Reason = $reason
+            Ref = if ($issue) { [string]$issue.number } else { $null }; Number = if ($issue) { [int]$issue.number } else { 0 }
+            Url = if ($issue) { $issue.html_url } else { $null }; Title = if ($issue) { $issue.title } else { $null }
+            Kind = if ($issue -and @($issue.labels | ForEach-Object { $_.name }) -contains $Config.labels.human) { 'human' } else { 'packet' }
+            Closed = [bool]($issue -and $issue.state -eq 'closed'); ClosedReason = if ($issue) { $issue.state_reason } else { $null }
+            UpdatedAt = if ($issue) { $issue.updated_at } else { $null }
+        }
+    }
+    $found
 }
 
 function Get-ProvComments {

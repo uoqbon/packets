@@ -89,7 +89,7 @@ The claim is a lease (`claims.leaseMinutes`, 30 by default). **Refresh** it with
 The packet says *what*. The brief adds the *current facts* an implementer needs to start without exploring. Fill [brief-template.md](./brief-template.md):
 
 - Read the packet file as it is at the base (`git show <base-sha>:<packet path>`), its phase plan, the decision records of its dependencies, and the repository instructions.
-- Read the merged code it **Consumes**. Copy the real namespaces, type names, signatures and file paths into the brief. Where the packet's suggested names differ from what merged, the merged code wins; say so.
+- Read the merged code it **Consumes**. Copy the real namespaces, type names, signatures and file paths into the brief. Where the packet's suggested names differ from what merged, the merged code wins; say so. A dependency in another repository (the config's `remotes`) has no code in this checkout. Copy what the packet says it consumes from there (a package version, a schema file, an endpoint) as written, and don't search this repository for it.
 - Search for every name you put in the brief at the base commit. A brief states facts, not guesses.
 - Point at existing files that show how this repository does the same kind of thing (a test fixture, a fake, an endpoint, a component).
 - Turn each acceptance criterion into the test or command that will prove it.
@@ -156,7 +156,7 @@ Refresh the claim before each round, then follow the [packet-review](../packet-r
 
 ## Stacked packets
 
-Only with `"stacking": true`. A packet may start before one dependency merges if that dependency is Ready to merge, its PR targets the default branch, and every other dependency is Done. It branches from the dependency's head and its PR targets the dependency's branch. Stacks are one deep.
+Only with `"stacking": true`. A packet may start before one dependency merges if that dependency is Ready to merge, its PR targets the default branch, and every other dependency is Done. It branches from the dependency's head and its PR targets the dependency's branch. Stacks are one deep. A dependency in another repository is never a stack base: it counts only once its issue there is closed as completed.
 
 When the dependency merges: merge `origin/<defaultBranch>` into the packet branch, push, and `gh pr edit <pr> --base <defaultBranch>`, so CI runs against the default branch; a conflict resolution gets a review round. Ready to merge waits for that CI run. If the dependency's PR closes without merging, the packet has no base: **Needs human**.
 
