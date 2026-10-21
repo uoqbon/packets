@@ -4,6 +4,8 @@ This page estimates what the packet workflow costs in GitHub AI Credits, and how
 
 The run counts per packet come from three sources: the kit's rules, the stage 5 end-to-end run, and 73 merged packets of the Drafter project, where the workflow started. The tokens per run are estimates. The end-to-end run used the owner's own API key, so Copilot billed nothing and nothing recorded tokens. [Calibrate](#calibrate) says how to replace the estimates with measurements.
 
+**Written for four review tiers.** The figures on this page were worked out for the four-tier panel (1 light, 2 standard, 3 deep, 4 max) on the Opus 5.5 and Sonnet 5.5 classes. The panel now has three tiers, all on GPT-6.1 Sol: 1 light (low effort), 2 standard (medium) and 3 deep (high, the top). Tier 3 takes every diff that went to tier 4, with its adversarial remit, so where this page says tier 4, read tier 3. `budget.creditsPerRun.reviewerByTier` now lists three numbers, tier 3 at this page's tier-4 rate (a four-number list from an older install still works: its third number is dropped), so a packet whose rounds ran at the old tier 3 estimates higher than the tables below. The tables haven't been recalculated.
+
 **In short.**
 
 - **Defaults.** A packet that takes the usual three review rounds costs about 1,900 credits (S), 3,500 (M) or 6,300 (L). Averaged over a phase that is about 3,700 credits a packet.
@@ -226,9 +228,9 @@ The profile keeps all four safety properties. Config values in `.github/packet-w
 ```json
 {
   "models": {
-    "strong": ["Claude Opus 5.5 (copilot)", "GPT-5.6 Sol (copilot)"],
-    "standard": ["Claude Sonnet 5.5 (copilot)", "GPT-6.1 Sol (copilot)"],
-    "light": ["Claude Sonnet 5.5 (copilot)", "GPT-5.6 Luna (copilot)"]
+    "strong": ["GPT-6.1 Sol (copilot)", "Claude Sonnet 5.5 (copilot)"],
+    "standard": ["GPT-6.1 Sol (copilot)", "Claude Sonnet 5.5 (copilot)"],
+    "light": ["GPT-6.1 Sol (copilot)", "Claude Sonnet 5.5 (copilot)"]
   },
   "review": {
     "maxRounds": 3,
@@ -244,7 +246,7 @@ The profile keeps all four safety properties. Config values in `.github/packet-w
       "dispatcher": 50, "dispatcherPerRound": { "S": 300, "M": 330, "L": 390 }, "dispatcherPerReviewerRun": 35,
       "implementer": { "S": 105, "M": 200, "L": 355 },
       "implementerFix": { "S": 40, "M": 55, "L": 75 },
-      "reviewerByTier": { "S": [20, 50, 110, 195], "M": [30, 70, 160, 280], "L": [40, 95, 225, 380] },
+      "reviewerByTier": { "S": [20, 50, 195], "M": [30, 70, 280], "L": [40, 95, 380] },
       "laterRoundFactor": 0.85
     }
   }

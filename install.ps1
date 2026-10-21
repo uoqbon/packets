@@ -16,8 +16,8 @@
   listed, unless -Force. Project-specific review lenses belong in .github/packet-lenses/, which the kit
   never touches.
 
-  Each agent's model: line comes from the config's models map (strong: the dispatcher and the deep and max
-  reviewers; standard: the implementer and the standard reviewer; light: the light reviewer). To use other
+  Each agent's model: line comes from the config's models map (strong: the dispatcher and the deep
+  reviewer; standard: the implementer and the standard reviewer; light: the light reviewer). To use other
   model names (your own API key, an organization's model list), edit models in .github/packet-workflow.json
   and run the installer again.
 
@@ -89,7 +89,6 @@ foreach ($class in 'strong', 'standard', 'light') {
 $agentModelClass = @{
     'packet-dispatcher.agent.md'        = 'strong'
     'packet-reviewer-deep.agent.md'     = 'strong'
-    'packet-reviewer-max.agent.md'      = 'strong'
     'packet-implementer.agent.md'       = 'standard'
     'packet-reviewer-standard.agent.md' = 'standard'
     'packet-reviewer-light.agent.md'    = 'light'
@@ -144,6 +143,11 @@ foreach ($gone in ($old.Keys | Where-Object { -not $installed.Contains($_) -and 
     if ((Test-Path -LiteralPath $dest) -and (Get-Sha $dest) -eq $old[$gone]) {
         Write-Step 'remove' "$gone (no longer in the kit)"
         if (-not $DryRun) { Remove-Item -LiteralPath $dest }
+    }
+    elseif (Test-Path -LiteralPath $dest) {
+        # Kept in the manifest, so every upgrade says so until it is deleted.
+        $installed[$gone] = $old[$gone]
+        Write-Step 'kept' "$gone (no longer in the kit, but changed locally: move what you still need into the kit's files, then delete it)"
     }
 }
 

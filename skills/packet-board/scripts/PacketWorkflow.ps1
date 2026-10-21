@@ -36,7 +36,7 @@ $script:Defaults = @{
     review        = @{
         maxRounds = 3; maxParallelLenses = 2; lensesPerReviewer = 1
         # shouldFixPassFromRound defaults to maxRounds (Get-PwConfig): only the last round passes on should-fix findings.
-        agents = @{ '1' = 'packet-reviewer-light'; '2' = 'packet-reviewer-standard'; '3' = 'packet-reviewer-deep'; '4' = 'packet-reviewer-max' }
+        agents = @{ '1' = 'packet-reviewer-light'; '2' = 'packet-reviewer-standard'; '3' = 'packet-reviewer-deep' }
         maxPaths = ''; deepPaths = ''; lensPaths = @{}; concurrencyPattern = ''
         lensOrder = @('security', 'data', 'concurrency', 'ai', 'integration', 'ops', 'architecture', 'correctness', 'ux', 'performance', 'tests')
     }
@@ -49,7 +49,7 @@ $script:Defaults = @{
             dispatcher = 50; dispatcherPerRound = @{ S = 300; M = 330; L = 390 }; dispatcherPerReviewerRun = 35
             implementer = @{ S = 105; M = 200; L = 355 }
             implementerFix = @{ S = 40; M = 55; L = 75 }
-            reviewerByTier = @{ S = @(20, 50, 110, 195); M = @(30, 70, 160, 280); L = @(40, 95, 225, 380) }
+            reviewerByTier = @{ S = @(20, 50, 195); M = @(30, 70, 280); L = @(40, 95, 380) }
             laterRoundFactor = 0.85
         }
     }
@@ -441,7 +441,8 @@ function Test-PwPacket {
     if ($p.Priority -notmatch '^P[0-3]$') { $problems.Add("Priority must be P0-P3 (got '$($p.Priority)')") }
     if ($p.Target -and $p.Target -notmatch '^\d{4}-\d{2}-\d{2}$') { $problems.Add("Target must be a date as yyyy-MM-dd (got '$($p.Target)')") }
     if ($p.InitialStatus -notin @('Backlog', 'Ready')) { $problems.Add("Initial status must be Backlog or Ready (got '$($p.InitialStatus)')") }
-    if ($p.ReviewTier -and $p.ReviewTier -notmatch '^[1-4]$') { $problems.Add("Review tier must be 1-4 (got '$($p.ReviewTier)')") }
+    # 4 is from before tiers 3 and 4 merged: still well formed (validate-packets warns; review-scope reads it as 3).
+    if ($p.ReviewTier -and $p.ReviewTier -notmatch '^[1-4]$') { $problems.Add("Review tier must be 1-3, 3 being the top tier (got '$($p.ReviewTier)')") }
     if ($p.DependsOn -contains $p.Id) { $problems.Add('depends on itself') }
     if ($p.Meta.Contains('Depends on') -and $p.DependsOn.Count -eq 0 -and $p.Meta['Depends on'] -notmatch '^\s*(none|n/a|-|–|—)?\s*$') {
         $problems.Add("Depends on names no packet ID ('$($p.Meta['Depends on'])'); write IDs such as $($Config.packetPrefix)-1, or none")
@@ -676,7 +677,10 @@ function Get-PwCreditEstimate {
          base   dispatcher + implementer (preflight, brief, PR, hand-off; the first implementer run)
          round  dispatcherPerRound + dispatcherPerReviewerRun × runs + reviewers + implementerFix if it was a fix
        Reviewers: reviewerByTier[size][tier] for each run, a run of n lenses counting 1 + 0.4 (n - 1),
-       times laterRoundFactor from round 2 on. A round without runs= ran one reviewer per lens. #>
+       times laterRoundFactor from round 2 on. A round without runs= ran one reviewer per lens; a round
+       without a tier, or with tier=4 (written before tiers 3 and 4 merged), is priced at tier 3. A
+       four-number reviewerByTier (an install from before the merge) drops its third: tier 3 now does
+       what its tier 4 did. #>
     param([Parameter(Mandatory)]$Config, [string]$Size, [object[]]$Rounds = @())
     $t = $Config.budget.creditsPerRun
     $sz = if ($Size -in 'S', 'M', 'L') { $Size } else { 'M' }
@@ -686,11 +690,13 @@ function Get-PwCreditEstimate {
     $later = Get-PwCreditRate $t 'laterRoundFactor' $sz 1
     $implementer = Get-PwCreditRate $t 'implementer' $sz
     $implementerFix = Get-PwCreditRate $t 'implementerFix' $sz
-    $byTier = @($t.reviewerByTier[$sz] | Where-Object { $_ -is [ValueType] -and $_ -isnot [bool] })
-    if ($byTier.Count -ne 4) { Stop-Pw "config: budget.creditsPerRun.reviewerByTier.$sz must list four numbers, tiers 1 to 4" }
+    $listed = @($t.reviewerByTier[$sz])
+    $byTier = @($listed | Where-Object { $_ -is [ValueType] -and $_ -isnot [bool] })
+    if ($listed.Count -eq 4 -and $byTier.Count -eq 4) { $byTier = @($byTier[0], $byTier[1], $byTier[3]) }
+    elseif ($listed.Count -ne 3 -or $byTier.Count -ne 3) { Stop-Pw "config: budget.creditsPerRun.reviewerByTier.$sz must list three numbers, tiers 1 to 3" }
     $rows = @(foreach ($r in (Get-PwRoundRows $Rounds)) {
-            $tier = 4
-            if ("$(Get-PwField $r 'Tier')" -match '^[1-4]$') { $tier = [int](Get-PwField $r 'Tier') }
+            $tier = 3
+            if ("$(Get-PwField $r 'Tier')" -match '^[1-4]$') { $tier = [Math]::Min(3, [int](Get-PwField $r 'Tier')) }
             $lenses = @("$(Get-PwField $r 'Lenses')" -split '[,\s]+' | Where-Object { $_ -and $_ -ne '-' })
             $n = [Math]::Max(1, $lenses.Count)
             $given = "$(Get-PwField $r 'Runs')"
