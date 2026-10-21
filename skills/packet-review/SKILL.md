@@ -37,14 +37,13 @@ pwsh -File <kit>/.github/skills/packet-review/scripts/review-scope.ps1 -Base ori
 
 For rounds 2 and later add what the previous round's report says: `-Since <its head> -PreviousTier <its tier>`, and, when its outcome was `fix`, `-Confirmed <its confirmed=, as written, e.g. security,data>` and `-FixedConfirmed` (the commits since then fix those findings). After a round that **passed** (a CI fix, a conflict resolution or a re-targeted stack brings the PR back), pass `-Confirmed -` and no `-FixedConfirmed`: its should-fix findings went to follow-up issues and were left unfixed on purpose, so the new round reviews what changed, not those findings.
 
-It returns `Tier`, `Agent`, `Reasons`, `Lenses` (riskiest first), `Runs` (the lenses each reviewer run covers), `Pairs` (the runs started together, each written as its lenses joined with `+`) and `Settings` (the limits above, from the config at the base). The tier is a **floor**: it measures the diff (size, files, subsystems, migrations, contracts, auth, infrastructure, concurrency, review machinery, the project's critical paths), applies the packet's **Review tier** line, and for later rounds keeps the previous tier, plus one after confirmed findings were fixed. You may raise it with a reason (say, the change can lose data or money); never lower it. Exit 3: nothing changed, so there is no round. Exit 2: stop and report; never guess a tier.
+It returns `Tier`, `Agent`, `Reasons`, `Lenses` (riskiest first), `Runs` (the lenses each reviewer run covers), `Pairs` (the runs started together, each written as its lenses joined with `+`) and `Settings` (the limits above, from the config at the base). The tier is a **floor**: it measures the diff (size, files, subsystems, migrations, contracts, auth, infrastructure, concurrency, review machinery, the project's critical paths), applies the packet's **Review tier** line, and for later rounds keeps the previous tier, plus one after confirmed findings were fixed, up to tier 3, the top. You may raise it with a reason (say, the change can lose data or money); never lower it. Exit 3: nothing changed, so there is no round. Exit 2: stop and report; never guess a tier.
 
-| Tier | Agent | Remit |
-| --- | --- | --- |
-| 1 light | `packet-reviewer-light` | docs, renames, config values, tests only |
-| 2 standard | `packet-reviewer-standard` | ordinary code in one area |
-| 3 deep | `packet-reviewer-deep` | large or cross-cutting; migrations, contracts, auth, infra, concurrency |
-| 4 max | `packet-reviewer-max` | the largest diffs, review machinery, critical paths; adversarial |
+| Tier | Agent | Effort | Remit |
+| --- | --- | --- | --- |
+| 1 light | `packet-reviewer-light` | low | light to standard: docs, renames, config values, tests only, each hunk read as a standard review would |
+| 2 standard | `packet-reviewer-standard` | medium | standard to deep: ordinary code in one area, traced into the code it calls and the code that calls it |
+| 3 deep | `packet-reviewer-deep` | high | deep to max, the top tier: large or cross-cutting; migrations, contracts, auth, infra, concurrency, review machinery, critical paths; adversarial |
 
 Round 1's lenses are the packet's **Review lenses** plus those the diff's paths call for (`review.lensPaths`, and concurrency patterns in added lines). Later rounds run only the lenses that confirmed a finding, plus those whose surface the new commits touched; a conflict resolution, or a merge of anything but the default branch, is always reviewed. A round never runs with no lens.
 

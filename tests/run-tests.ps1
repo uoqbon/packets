@@ -167,6 +167,13 @@ Click through it.
     Write-File 'docs/plan/phase-1/packets/PKT-09.md' ''
     $r = Invoke-Kit $validate @('-Phase', 'phase-1')
     Assert-That ($r.Code -eq 1 -and $r.Text -match 'ERROR\s+docs/plan/phase-1/packets/PKT-09\.md\s+no ID') 'an empty packet file is an ERROR naming the file' $r.Text
+    # Three tiers: a Review tier of 4 (from the four-tier kit) warns but doesn't stop the phase; 5 is an error.
+    Write-File 'docs/plan/phase-1/packets/PKT-09.md' (New-Packet 'PKT-09' 'Old tier' 'W2' 'PKT-03' @('src/OldTier/**') 'correctness' -Extra '- **Review tier:** 4')
+    $r = Invoke-Kit $validate @('-Phase', 'phase-1')
+    Assert-That ($r.Code -eq 0 -and $r.Text -match 'WARN\s+PKT-09\s+Review tier 4 is from before tiers 3 and 4 merged') 'a Review tier of 4 is a WARN, so an upgraded phase still validates and syncs' $r.Text
+    Write-File 'docs/plan/phase-1/packets/PKT-09.md' (New-Packet 'PKT-09' 'Old tier' 'W2' 'PKT-03' @('src/OldTier/**') 'correctness' -Extra '- **Review tier:** 5')
+    $r = Invoke-Kit $validate @('-Phase', 'phase-1')
+    Assert-That ($r.Code -eq 1 -and $r.Text -match "ERROR\s+PKT-09\s+Review tier must be 1-3, 3 being the top tier \(got '5'\)") 'a Review tier of 5 is an ERROR' $r.Text
     Remove-Item -LiteralPath (Join-Path $repo 'docs/plan/phase-1/packets/PKT-09.md')
     & git add -A; & git commit -qm 'fix overlaps' | Out-Null
 
@@ -309,9 +316,38 @@ Click through it.
     $r = Invoke-Kit $reviewScope @('-Base', 'HEAD~1', '-Json')
     $s = $r.Text | ConvertFrom-Json
     Assert-That ($s.Tier -eq 1) 'docs-only diff is tier 1' $r.Text
+    $r = Invoke-Kit $reviewScope @('-Base', 'HEAD~1', '-PreviousTier', '1', '-FixedConfirmed', '-Json')
+    $s = $r.Text | ConvertFrom-Json
+    Assert-That ($r.Code -eq 0 -and $s.Tier -eq 2 -and $s.Agent -eq 'packet-reviewer-standard') 'a round whose confirmed findings were fixed goes up a tier' $r.Text
+    $r = Invoke-Kit $reviewScope @('-Base', 'HEAD~1', '-PreviousTier', '4', '-Json')
+    $s = $r.Text | ConvertFrom-Json
+    Assert-That ($r.Code -eq 0 -and $s.Tier -eq 3 -and $s.Name -eq 'deep' -and $s.Agent -eq 'packet-reviewer-deep') 'a previous round at tier 4 (before tiers 3 and 4 merged) carries as tier 3, the top' $r.Text
+    Write-File 'docs/plan/phase-1/packets/PKT-10.md' (New-Packet 'PKT-10' 'Old tier' 'W3' 'PKT-03' @('docs/old-tier/**') 'correctness' -Extra '- **Review tier:** 4')
+    & git add -A; & git commit -qm 'packet with an old tier' | Out-Null
+    Write-File 'docs/old-tier/notes.md' "a note`n"
+    & git add -A; & git commit -qm 'old-tier note' | Out-Null
+    $r = Invoke-Kit $reviewScope @('-Base', 'HEAD~1', '-Packet', 'PKT-10', '-Json')
+    $s = $r.Text | ConvertFrom-Json
+    Assert-That ($r.Code -eq 0 -and $s.Tier -eq 3 -and $s.Floor -eq 1 -and $s.Agent -eq 'packet-reviewer-deep' -and ($s.Reasons -join ' ') -match "raised to 3 by PKT-10's Review tier line") 'a packet''s Review tier of 4 raises a docs diff to 3, the top, never to a tier with no agent' $r.Text
+    & git reset -q --hard HEAD~2
+    $agentsCfg = Join-Path ([System.IO.Path]::GetTempPath()) "pw-cfg-$([guid]::NewGuid().ToString('n')).json"
+    $old4 = $cfg.Clone(); $old4.review = $cfg.review.Clone(); $old4.review.agents = @{ '3' = 'packet-reviewer-deep'; '4' = 'packet-reviewer-max' }
+    Set-Content -LiteralPath $agentsCfg -Value ($old4 | ConvertTo-Json -Depth 10)
+    $r = Invoke-Kit $reviewScope @('-Base', 'main', '-Json', '-ConfigPath', $agentsCfg)
+    $s = $r.Text | ConvertFrom-Json
+    Assert-That ($r.Code -eq 0 -and $s.Tier -eq 3 -and $s.Agent -eq 'packet-reviewer-deep') 'the old template''s "4": "packet-reviewer-max" is ignored: tier 3 runs the deep reviewer' $r.Text
+    $old4.review.agents = @{ '3' = 'my-deep'; '4' = 'my-max' }
+    Set-Content -LiteralPath $agentsCfg -Value ($old4 | ConvertTo-Json -Depth 10)
+    $r = Invoke-Kit $reviewScope @('-Base', 'main', '-Json', '-ConfigPath', $agentsCfg)
+    $s = $r.Text | ConvertFrom-Json
+    Assert-That ($r.Code -eq 0 -and $s.Tier -eq 3 -and $s.Agent -eq 'my-max' -and ($s.Reasons -join ' ') -match 'review\.agents\.4 \(my-max\) runs tier 3') 'a project''s own tier-4 reviewer runs tier 3, never its weaker tier-3 one' $r.Text
+    $r = Invoke-Kit $reviewScope @('-Base', 'HEAD~1', '-Json', '-ConfigPath', $agentsCfg)
+    $s = $r.Text | ConvertFrom-Json
+    Assert-That ($r.Code -eq 0 -and $s.Tier -eq 1 -and $s.Agent -eq 'packet-reviewer-light') 'a project''s tier-4 reviewer changes nothing below tier 3' $r.Text
+    Remove-Item -LiteralPath $agentsCfg
     $r = Invoke-Kit $reviewScope @('-Base', 'main', '-Packet', 'PKT-03', '-Since', $apiSha, '-Confirmed', 'security,concurrency', '-PreviousTier', '3', '-FixedConfirmed', '-Json')
     $s = $r.Text | ConvertFrom-Json
-    Assert-That ($r.Code -eq 0 -and $s.Tier -eq 4 -and ($s.Lenses -contains 'security') -and ($s.Lenses -contains 'concurrency') -and -not ($s.Lenses | Where-Object { $_ -match ',' })) 'round 2: comma-separated -Confirmed splits, and a fixed round goes up a tier' $r.Text
+    Assert-That ($r.Code -eq 0 -and $s.Tier -eq 3 -and $s.Agent -eq 'packet-reviewer-deep' -and ($s.Lenses -contains 'security') -and ($s.Lenses -contains 'concurrency') -and -not ($s.Lenses | Where-Object { $_ -match ',' })) 'round 2: comma-separated -Confirmed splits, and a fixed round at tier 3 stays at the top' $r.Text
     $r = Invoke-Kit $reviewScope @('-Base', 'main', '-Packet', 'PKT-03', '-Since', $apiSha, '-Confirmed', '-', '-PreviousTier', '3', '-Json')
     $s = $r.Text | ConvertFrom-Json
     Assert-That (-not ($s.Lenses -contains '-') -and $s.Lenses.Count -ge 1) 'round 2 after a pass: "-" is not a lens, and a round never has none' $r.Text
@@ -321,11 +357,11 @@ Click through it.
     & git add -A; & git commit -qm 'core, and a config edit that drops the deep path' | Out-Null
     $r = Invoke-Kit $reviewScope @('-Base', 'HEAD~1', '-Json')
     $s = $r.Text | ConvertFrom-Json
-    Assert-That ($s.Tier -eq 4 -and ($s.Reasons -join ' ') -match 'project deep path') 'the base config decides: a branch dropping deepPaths still gets the raise (and the config edit is machinery)' $r.Text
+    Assert-That ($s.Tier -eq 3 -and ($s.Reasons -join ' ') -match 'project deep path' -and ($s.Reasons -join ' ') -match 'review machinery') 'the base config decides: a branch dropping deepPaths still gets the raise (and the config edit is machinery)' $r.Text
     Write-File '.github/packet-workflow.json' $cfgText
     & git add -A; & git commit -qm 'restore config' | Out-Null
     # review-tier.sh parity: async code is concurrency (tier 3); a NUL byte can't hide a file's lines;
-    # a project lens is review machinery (tier 4).
+    # a project lens is review machinery (tier 3, the top).
     Write-File 'src/Api/Svc.cs' "class Svc {`n  async Task Run() { await Task.Delay(10); }`n}`n"
     & git add -A; & git commit -qm 'async' | Out-Null
     $r = Invoke-Kit $reviewScope @('-Base', 'HEAD~1', '-Json'); $s = $r.Text | ConvertFrom-Json
@@ -334,18 +370,18 @@ Click through it.
     [System.IO.File]::WriteAllText((Join-Path $repo 'src/Api/app.js'), $js)
     & git add -A; & git commit -qm 'nul' | Out-Null
     $r = Invoke-Kit $reviewScope @('-Base', 'HEAD~1', '-Json'); $s = $r.Text | ConvertFrom-Json
-    Assert-That ($s.Tier -eq 4 -and $s.Lines -ge 1200) 'a NUL byte does not hide 1200 lines (read with NULs dropped)' $r.Text
+    Assert-That ($s.Tier -eq 3 -and $s.Lines -ge 1200 -and ($s.Reasons -join ' ') -match 'lines > 300') 'a NUL byte does not hide 1200 lines (read with NULs dropped)' $r.Text
     Write-File '.github/packet-lenses/data.md' "# Lens: data`n`nblocking: nothing`n"
     & git add -A; & git commit -qm 'lens' | Out-Null
     $r = Invoke-Kit $reviewScope @('-Base', 'HEAD~1', '-Json'); $s = $r.Text | ConvertFrom-Json
-    Assert-That ($s.Tier -eq 4 -and ($s.Reasons -join ' ') -match 'review machinery') 'a project lens edit is review machinery (tier 4)' $r.Text
+    Assert-That ($s.Tier -eq 3 -and $s.Agent -eq 'packet-reviewer-deep' -and ($s.Reasons -join ' ') -match 'review machinery') 'a project lens edit is review machinery (tier 3)' $r.Text
     $cfgText = Get-Content -Raw (Join-Path $repo '.github/packet-workflow.json')
     Write-File '.github/packet-workflow.json' ($cfgText -replace '"lenses": "\.github/packet-lenses"', '"lenses": "./review/lenses"')
     & git add -A; & git commit -qm 'move lenses' | Out-Null
     Write-File 'review/lenses/correctness.md' "# Lens: correctness`n`nblocking: nothing`n"
     & git add -A; & git commit -qm 'lens in configured dir' | Out-Null
     $r = Invoke-Kit $reviewScope @('-Base', 'HEAD~1', '-Json'); $s = $r.Text | ConvertFrom-Json
-    Assert-That ($s.Tier -eq 4 -and ($s.Reasons -join ' ') -match 'review machinery path: review/lenses/') 'a lens edit under a configured paths.lenses is review machinery too' $r.Text
+    Assert-That ($s.Tier -eq 3 -and ($s.Reasons -join ' ') -match 'review machinery path: review/lenses/') 'a lens edit under a configured paths.lenses is review machinery too' $r.Text
     & git reset -q --hard HEAD~5
 
     Write-Host 'check-scope'
@@ -391,7 +427,8 @@ function Confirm-PwGhLabel { param(`$Config, `$Name, `$Color, `$Description, [sw
 "labels=" + ((Initialize-PwGhLabels -Config @{ labels = @{ packet = 'packet'; human = 'human-task'; needsHuman = 'needs-human'; followUp = 'follow-up' } } -Keys 'needsHuman', 'followUp') -join ',')
 "claim=`$(New-PwClaimId)"
 "host=`$(([System.Net.Dns]::GetHostName() -split '\.')[0])"
-# Credit estimates: stage 5's PKT-1 (S, three tier-4 rounds of 4, 3 and 1 lenses, two fix rounds).
+# Credit estimates: stage 5's PKT-1 (S, three rounds of 4, 3 and 1 lenses, two fix rounds), its markers
+# written as tier=4 before tiers 3 and 4 merged: priced at tier 3.
 `$ec = Merge-PwHashtable `$script:Defaults @{}
 `$s5 = @(
     [pscustomobject]@{ Kind = 'round'; Round = 1; Tier = '4'; Lenses = 'ops,architecture,correctness,tests'; Runs = `$null; Outcome = 'fix'; CreatedAt = '2026-10-19T21:20:00Z' },
@@ -411,8 +448,14 @@ function Confirm-PwGhLabel { param(`$Config, `$Name, `$Color, `$Description, [sw
     [pscustomobject]@{ Id = 'PKT-02'; Size = 'M'; Pr = 8; Rounds = `$p2 },
     [pscustomobject]@{ Id = 'PKT-03'; Size = 'L'; Pr = 9; Rounds = @() })
 "summary=`$(`$sum.Total)|avg=`$(`$sum.PerFinishedPacket)|month=`$(`$sum.Month):`$(`$sum.ThisMonth)|left=`$(`$sum.Left)|more=`$(`$sum.PacketsLeft)|finished=`$((`$sum.Packets | ForEach-Object Finished) -join ',')|counted=`$(`$sum.Packets.Count)"
-`$bad = Merge-PwHashtable `$script:Defaults @{ budget = @{ creditsPerRun = @{ reviewerByTier = @{ M = @(30, 70, 160) } } } }
+`$bad = Merge-PwHashtable `$script:Defaults @{ budget = @{ creditsPerRun = @{ reviewerByTier = @{ M = @(30, 70) } } } }
 try { [void](Get-PwCreditEstimate -Config `$bad -Size 'M' -Rounds `$p2); 'budget-check=none' } catch { "budget-check=`$(`$_.Exception.Message)" }
+# An install from before tiers 3 and 4 merged lists four numbers: the third is dropped, the fourth prices tier 3.
+`$four = Merge-PwHashtable `$script:Defaults @{ budget = @{ creditsPerRun = @{ reviewerByTier = @{ M = @(30, 70, 160, 280) } } } }
+"four-tier=`$((Get-PwCreditEstimate -Config `$four -Size 'M' -Rounds `$p2).Credits)"
+# A quoted number in a four-entry list must not leave three numbers that pass as a three-tier list.
+`$quoted = Merge-PwHashtable `$script:Defaults @{ budget = @{ creditsPerRun = @{ reviewerByTier = @{ M = @(30, '70', 160, 280) } } } }
+try { [void](Get-PwCreditEstimate -Config `$quoted -Size 'M' -Rounds `$p2); 'quoted-check=none' } catch { "quoted-check=`$(`$_.Exception.Message)" }
 `$none = Get-PwCreditSummary -Config `$ec -Packets @()
 `$lastMonth = Get-PwCreditSummary -Config `$ec -Today ([DateTime]'2026-11-03') -Packets @([pscustomobject]@{ Id = 'PKT-01'; Size = 'S'; Pr = 7; Rounds = `$s5 })
 "empty=`$(`$none.Total)/`$(`$none.Packets.Count)|november=`$(`$lastMonth.Month):`$(`$lastMonth.ThisMonth)|left=`$(`$lastMonth.Left)"
@@ -443,9 +486,11 @@ function Invoke-PwGhPages { param(`$Path) @(
     # Base 50 + 105. Rounds: 300 + 4×35 + 4×195 + 40 = 1260; 300 + 3×35 + 0.85×3×195 + 40 = 942; 300 + 35 + 0.85×195 = 501.
     Assert-That ($r.Text -match 'estimate=2858\|runs=8\|impl=3\|rounds=3') 'credit estimate for stage 5: settle rows ignored, a row without Runs is one run per lens' $r.Text
     Assert-That ($r.Text -match 'grouped=1071\|runs=2') 'two runs of two lenses count 2.8 runs' $r.Text
-    # PKT-02 (M): 250 base and 775 in September (its round 1), 330 + 35 + 0.85×280 + 55 = 658 in October; only PKT-01 has finished.
-    Assert-That ($r.Text -match 'summary=4541\|avg=2858\|month=2026-10:3516\|left=8984\|more=3\|finished=True,False\|counted=2') 'credit summary: month by round date, average over finished packets, packets with no round left out' $r.Text
-    Assert-That ($r.Text -match 'budget-check=config: budget\.creditsPerRun\.reviewerByTier\.M must list four numbers') 'a malformed credits table stops the estimate with a clear message' $r.Text
+    # PKT-02 (M): 250 base and 330 + 2×35 + 2×280 + 55 = 1015 in September (its round 1), 330 + 35 + 0.85×280 + 55 = 658 in October; only PKT-01 has finished.
+    Assert-That ($r.Text -match 'summary=4781\|avg=2858\|month=2026-10:3516\|left=8984\|more=3\|finished=True,False\|counted=2') 'credit summary: month by round date, average over finished packets, packets with no round left out' $r.Text
+    Assert-That ($r.Text -match 'budget-check=config: budget\.creditsPerRun\.reviewerByTier\.M must list three numbers') 'a malformed credits table stops the estimate with a clear message' $r.Text
+    Assert-That ($r.Text -match 'four-tier=1923(\r?\n|$)') 'a four-number reviewerByTier from before the merge prices tier 3 at its fourth number' $r.Text
+    Assert-That ($r.Text -match 'quoted-check=config: budget\.creditsPerRun\.reviewerByTier\.M must list three numbers') 'a four-entry list with a quoted number stops the estimate, not misread as three tiers' $r.Text
     Assert-That ($r.Text -match 'empty=0/0\|november=2026-11:0\|left=12500') 'a phase with no round reports, and one whose rounds are all last month, are estimated without failing' $r.Text
     Assert-That ($r.Text -match 'defaults-untouched=True\|first=3') 'Get-PwConfig fills in shouldFixPassFromRound on a copy, not on the shared defaults' $r.Text
     Assert-That ($r.Text -match 'rounds=round:1::False,settle-request:1::True,round:2:1:False,settle-check:2::False(\r?\n|$)') 'the trusted round reader: untrusted rounds dropped, comment order, settle rounds, Consumed, runs=' $r.Text
@@ -501,12 +546,12 @@ if ($a[0] -eq 'api' -and $path -match '/issues/(\d+)/comments') { ConvertTo-Json
         $r = Invoke-Kit $progress @('-WorkingTree', '-Credits', '-Today', '2026-10-20', '-Json')
         $c = ($r.Text | ConvertFrom-Json).Credits
         $line = (@($c.Packets) | ForEach-Object { "$($_.Id):$($_.Pr):$($_.Credits):$($_.Finished)" }) -join ','
-        Assert-That ($r.Code -eq 0 -and $line -eq 'PKT-01:11:1823:True,PKT-02:12:768:False' -and $c.Total -eq 2591 -and $c.PerFinishedPacket -eq 1823 -and $c.Month -eq '2026-10' -and $c.ThisMonth -eq 1371) 'progress -Credits: newest PR per packet, untrusted rounds dropped, credits per packet, phase and month' $r.Text
+        Assert-That ($r.Code -eq 0 -and $line -eq 'PKT-01:11:2183:True,PKT-02:12:768:False' -and $c.Total -eq 2951 -and $c.PerFinishedPacket -eq 2183 -and $c.Month -eq '2026-10' -and $c.ThisMonth -eq 1371) 'progress -Credits: newest PR per packet, untrusted rounds dropped, credits per packet, phase and month' $r.Text
         $r = Invoke-Kit $progress @('-WorkingTree', '-Credits', '-Today', '2026-09-30', '-Json')
         $c = ($r.Text | ConvertFrom-Json).Credits
-        Assert-That ($r.Code -eq 0 -and $c.Month -eq '2026-09' -and $c.ThisMonth -eq 1220) 'a round reported at 23:30 UTC on 30 September counts in September, with its packet''s base' $r.Text
+        Assert-That ($r.Code -eq 0 -and $c.Month -eq '2026-09' -and $c.ThisMonth -eq 1580) 'a round reported at 23:30 UTC on 30 September counts in September, with its packet''s base' $r.Text
         $r = Invoke-Kit $progress @('-WorkingTree', '-Credits')
-        Assert-That ($r.Code -eq 0 -and $r.Text -match 'PKT-02\s+M\s+PR #12\s+1 round\(s\), 1 reviewer run\(s\), 2 implementer run\(s\)\s+768\s+\(in review\)' -and $r.Text -match "phase 2,591 · 1,823 per finished packet · $([DateTime]::UtcNow.ToString('yyyy-MM')):") 'progress -Credits text: the estimate per packet and the UTC month by default' $r.Text
+        Assert-That ($r.Code -eq 0 -and $r.Text -match 'PKT-02\s+M\s+PR #12\s+1 round\(s\), 1 reviewer run\(s\), 2 implementer run\(s\)\s+768\s+\(in review\)' -and $r.Text -match "phase 2,951 · 2,183 per finished packet · $([DateTime]::UtcNow.ToString('yyyy-MM')):") 'progress -Credits text: the estimate per packet and the UTC month by default' $r.Text
     }
     finally { $env:PATH = $oldPath; Remove-Item -Recurse -Force -LiteralPath $fakeBin }
 }
@@ -647,7 +692,7 @@ try {
     [System.IO.File]::WriteAllText($cfgPath, ($cfgIn | ConvertTo-Json -Depth 10), [System.Text.UTF8Encoding]::new($false))
     $r = Invoke-Kit $installer @('-Target', $target)
     $lightLine = (Get-Content (Join-Path $target '.github/agents/packet-reviewer-light.agent.md') | Where-Object { $_ -match '^model:' })
-    Assert-That ($lightLine -eq "model: ['Claude Sonnet 5.5 (Anthropic)', 'it''s fine']" -and $r.Text -match 'update\s+\.github/agents/packet-reviewer-light\.agent\.md' -and $r.Text -notmatch 'update\s+\.github/agents/packet-reviewer-max') 'models in the config rewrite only that class''s agents, quoted' $r.Text
+    Assert-That ($lightLine -eq "model: ['Claude Sonnet 5.5 (Anthropic)', 'it''s fine']" -and $r.Text -match 'update\s+\.github/agents/packet-reviewer-light\.agent\.md' -and $r.Text -notmatch 'update\s+\.github/agents/packet-reviewer-deep') 'models in the config rewrite only that class''s agents, quoted' $r.Text
     Assert-That ($r.Text -match '\d+ file\(s\) already up to date' -and $r.Text -match 'Agent models: .*light Claude Sonnet 5\.5 \(Anthropic\)') 'the installer reports unchanged files and the models it wrote' $r.Text
     $implementer = Join-Path $target '.github/agents/packet-implementer.agent.md'
     [System.IO.File]::WriteAllText($implementer, ((Get-Content -Raw $implementer) -replace '(?m)^model:.*$', "model: ['Hand Picked']"), [System.Text.UTF8Encoding]::new($false))
@@ -655,6 +700,20 @@ try {
     [System.IO.File]::WriteAllText($cfgPath, ($cfgIn | ConvertTo-Json -Depth 10), [System.Text.UTF8Encoding]::new($false))
     $r = Invoke-Kit $installer @('-Target', $target)
     Assert-That ($r.Text -match 'kept\s+\.github/agents/packet-implementer\.agent\.md' -and $r.Text -match 'except the kept packet-implementer, which keeps its own model: line' -and (Get-Content -Raw $implementer) -match "model: \['Hand Picked'\]") 'a hand-edited agent is kept, and the models summary says so' $r.Text
+    # A file the kit dropped (as packet-reviewer-max was) goes when unchanged; changed locally, it stays and is named every time.
+    $manifestFile = Join-Path $target '.github/packet-workflow.kit.json'
+    $manifest = Get-Content -Raw $manifestFile | ConvertFrom-Json -AsHashtable
+    $manifest.files['.github/agents/packet-reviewer-gone.agent.md'] = '0' * 64
+    $manifest.files['.github/agents/packet-reviewer-dropped.agent.md'] = (Get-FileHash -Algorithm SHA256 (Join-Path $kit 'agents/packet-reviewer-deep.agent.md')).Hash.ToLowerInvariant()
+    [System.IO.File]::WriteAllText($manifestFile, ($manifest | ConvertTo-Json -Depth 5), [System.Text.UTF8Encoding]::new($false))
+    Set-Content -LiteralPath (Join-Path $target '.github/agents/packet-reviewer-gone.agent.md') -Value 'a project rule'
+    Copy-Item -LiteralPath (Join-Path $kit 'agents/packet-reviewer-deep.agent.md') -Destination (Join-Path $target '.github/agents/packet-reviewer-dropped.agent.md')
+    $r = Invoke-Kit $installer @('-Target', $target)
+    Assert-That ($r.Text -match 'remove\s+\.github/agents/packet-reviewer-dropped\.agent\.md \(no longer in the kit\)' -and -not (Test-Path (Join-Path $target '.github/agents/packet-reviewer-dropped.agent.md'))) 'an unchanged file the kit dropped is removed' $r.Text
+    Assert-That ($r.Text -match 'kept\s+\.github/agents/packet-reviewer-gone\.agent\.md \(no longer in the kit, but changed locally' -and (Test-Path (Join-Path $target '.github/agents/packet-reviewer-gone.agent.md'))) 'a changed file the kit dropped is kept and named' $r.Text
+    $r = Invoke-Kit $installer @('-Target', $target)
+    Assert-That ($r.Text -match 'kept\s+\.github/agents/packet-reviewer-gone\.agent\.md') 'it is named again on the next upgrade, until it is deleted' $r.Text
+    Remove-Item -LiteralPath (Join-Path $target '.github/agents/packet-reviewer-gone.agent.md')
     $vendored = Join-Path $target 'packet-kit'
     New-Item -ItemType Directory -Path $vendored | Out-Null
     foreach ($item in 'install.ps1', 'VERSION', 'agents', 'skills', 'templates') { Copy-Item -Recurse -LiteralPath (Join-Path $kit $item) -Destination $vendored }

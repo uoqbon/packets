@@ -8,12 +8,13 @@
   Tier (a floor: raise it with a reason, never lower it), measured on the whole diff <Base>...<Head>:
     1 light     no code files, or <= 50 lines in <= 3 files with no added control flow
     2 standard  ordinary code (the default)
-    3 deep      > 300 lines, > 8 files, >= 2 subsystems, or a migration/schema, API contract, auth/secret,
-                infra/CI path, concurrency in added lines, or a review.deepPaths match
-    4 max       > 1000 lines, > 25 files, review machinery (agents, skills, prompts, instructions,
-                workflows, the kit's config), a .gitattributes change, or a review.maxPaths match
+    3 deep      the top tier: > 300 lines, > 8 files, >= 2 subsystems, a migration/schema, API contract,
+                auth/secret, infra/CI path, concurrency in added lines, review machinery (agents, skills,
+                prompts, instructions, workflows, the kit's config), a .gitattributes change, or a
+                review.deepPaths or review.maxPaths match
   then raised by the packet's **Review tier** line, and for rounds 2+ by -PreviousTier (plus one with
-  -FixedConfirmed, capped at 4). Project raises are matched on both sides of a rename, before the
+  -FixedConfirmed, capped at 3). A tier 4 from before tiers 3 and 4 merged (a packet's line, a previous
+  round's marker) counts as 3. Project raises are matched on both sides of a rename, before the
   ignore list (lockfiles, minified and generated output), so a project can always raise a path.
 
   Lenses:
@@ -64,7 +65,7 @@ $controlRe = '\b(if|elif|else|for|foreach|while|switch|case|match|try|catch|exce
 $tierConcurrencyRe = '\b(async|await|Thread|thread|mutex|Mutex|RLock|goroutine|go func|Promise\.all|asyncio|channel|semaphore|atomic)\b|\bLock\(|\bselect \{'
 # The concurrency lens's default when the config sets no review.concurrencyPattern.
 $defaultConcurrencyRe = '\b(async|await|Thread|Mutex|lock|SemaphoreSlim|Interlocked|ConcurrentDictionary|Task\.WhenAll|Parallel\.|Promise\.all|asyncio|goroutine|go func|sync\.Mutex|atomic|Channel<)\b'
-$tierNames = @{ 1 = 'light'; 2 = 'standard'; 3 = 'deep'; 4 = 'max' }
+$tierNames = @{ 1 = 'light'; 2 = 'standard'; 3 = 'deep' }
 
 function Test-Re([string]$Text, [string]$Pattern, [switch]$IgnoreCase) {
     if (-not $Pattern -or -not $Text) { return $false }
@@ -285,15 +286,13 @@ try {
         if ($subsystems.Count -ge 2) { & $raise 3 "$($subsystems.Count) subsystems touched: $(@($subsystems) -join ' ')" }
         foreach ($k in 'migration', 'contract', 'auth', 'infra', 'deep') { if ($flags.Contains($k)) { & $raise 3 $flags[$k] } }
         if ($concHit) { & $raise 3 "concurrency in added lines: $($concHit.Substring(0, [Math]::Min(80, $concHit.Length)).Trim())" }
-        if ($lines -gt 1000) { & $raise 4 "$lines lines > 1000" }
-        if ($files -gt 25) { & $raise 4 "$files files > 25" }
-        foreach ($k in 'machinery', 'attributes', 'max') { if ($flags.Contains($k)) { & $raise 4 $flags[$k] } }
+        foreach ($k in 'machinery', 'attributes', 'max') { if ($flags.Contains($k)) { & $raise 3 $flags[$k] } }
         $tier = $script:tierNow
     }
     $floor = $tier
-    if ($pk -and $pk.ReviewTier -and [int]$pk.ReviewTier -gt $tier) { $tier = [int]$pk.ReviewTier; $reasons.Add("raised to $tier by $($pk.Id)'s Review tier line") }
+    if ($pk -and $pk.ReviewTier -and [Math]::Min(3, [int]$pk.ReviewTier) -gt $tier) { $tier = [Math]::Min(3, [int]$pk.ReviewTier); $reasons.Add("raised to $tier by $($pk.Id)'s Review tier line") }
     if ($PreviousTier -gt 0) {
-        $carry = [Math]::Min(4, $PreviousTier + $(if ($FixedConfirmed) { 1 } else { 0 }))
+        $carry = [Math]::Min(3, $PreviousTier + $(if ($FixedConfirmed) { 1 } else { 0 }))
         if ($carry -gt $tier) { $tier = $carry; $reasons.Add("raised to ${tier}: the previous round ran at $PreviousTier$(if ($FixedConfirmed) { ', and its confirmed findings were fixed (+1)' })") }
     }
 
@@ -352,6 +351,13 @@ try {
     $ordered = @($lenses | Sort-Object { $i = [array]::IndexOf($order, $_); if ($i -lt 0) { 999 } else { $i } }, { $_ })
 
     $agent = $cfg.review.agents[[string]$tier]
+    # A project's own tier-4 reviewer (from before tiers 3 and 4 merged) runs tier 3, so its critical paths
+    # never go to a weaker agent; the old template's packet-reviewer-max is gone and is ignored.
+    $legacyMax = $cfg.review.agents['4']
+    if ($tier -eq 3 -and $legacyMax -is [string] -and $legacyMax.Trim() -and $legacyMax.Trim() -ne 'packet-reviewer-max') {
+        $agent = $legacyMax.Trim()
+        $reasons.Add("review.agents.4 ($agent) runs tier 3: tiers 3 and 4 merged, so move it to review.agents.3")
+    }
     # Reviewer runs: review.lensesPerReviewer lenses each, neighbours in lensOrder. Pairs: the runs started
     # together (review.maxParallelLenses at a time), each run written as its lenses joined with '+'.
     $per = [int]$cfg.review.lensesPerReviewer

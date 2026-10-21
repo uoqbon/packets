@@ -58,7 +58,8 @@ try {
         if ($p.Kind -eq 'packet') {
             if ($p.Acceptance.Count -gt 8) { Add-Finding 'WARN' $p.Id "$($p.Acceptance.Count) acceptance criteria: one PR that big rarely clears review in three rounds; consider splitting" }
             if ($p.Owns.Count -gt 12) { Add-Finding 'WARN' $p.Id "owns $($p.Owns.Count) globs; a packet that wide is hard to keep apart from its neighbours" }
-            if ($p.Size -eq 'L' -and $p.Lenses.Count -gt 5) { Add-Finding 'WARN' $p.Id "size L with $($p.Lenses.Count) lenses: expect a tier-3 or tier-4 review; consider splitting" }
+            if ($p.ReviewTier -eq '4') { Add-Finding 'WARN' $p.Id "Review tier 4 is from before tiers 3 and 4 merged; review-scope reads it as 3, the top tier: write 3" }
+            if ($p.Size -eq 'L' -and $p.Lenses.Count -gt 5) { Add-Finding 'WARN' $p.Id "size L with $($p.Lenses.Count) lenses: expect a tier-3 review; consider splitting" }
         }
     }
 

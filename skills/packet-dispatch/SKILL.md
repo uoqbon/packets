@@ -56,7 +56,7 @@ Every call runs this first, `resume` and `status` included.
 4. If this is the repository's main checkout (`git rev-parse --git-dir` equals `git rev-parse --git-common-dir`), tell the owner that only one dispatcher may run in a checkout, and suggest a worktree session for the next one.
 5. `board reconcile` (closed items become Done).
 6. Read `guardrails` from the config (`board` and the scripts use the config as merged on the default branch) and the repository instructions. They bind you and every agent you start.
-7. **Models** (not for `status`). The implementer and the reviewers run on the models their agent files pin (`model:`, written by the installer from `models` in the config). If your subagent tool asks you to choose a model, or doesn't offer an agent's pinned models, ask the owner once, now, which model to use for each class (*strong*: deep and max reviewers; *standard*: the implementer and the standard reviewer; *light*: the light reviewer), and keep those answers for the session. Never pick one per agent on your own, and never run a reviewer on a model weaker than its class.
+7. **Models** (not for `status`). The implementer and the reviewers run on the models their agent files pin (`model:`, written by the installer from `models` in the config). If your subagent tool asks you to choose a model, or doesn't offer an agent's pinned models, ask the owner once, now, which model to use for each class (*strong*: the deep reviewer; *standard*: the implementer and the standard reviewer; *light*: the light reviewer), and keep those answers for the session. Never pick one per agent on your own, and never run a reviewer on a model weaker than its class.
 
 ## 1 · Select
 
