@@ -15,7 +15,9 @@
 
   board.ps1 setup [-DryRun]                 create the labels/fields the board needs; report what it can't create
   board.ps1 sync [-Phase p] [-DryRun] [-Force]
-                                            create or update one item per packet file; never touches Status
+                                            create or update one item per packet file, linked under the
+                                            plan's root item; never touches Status. -Force: the files win
+                                            over board edits (bodies; on Azure Boards, an item's parent)
   board.ps1 show [-Phase p] [-Json]         every packet and human task with its board state
   board.ps1 next [-Phase p] [-Json]         Ready packets in dispatch order (priority, wave, id) with verdicts
   board.ps1 deps <ID> [-Json]               one packet's verdict: START, STACK or BLOCKED, with reasons
@@ -186,17 +188,26 @@ function Invoke-PwSync {
     }
     $packets = @($packets | Where-Object { $_.Id })
     if (Get-PwCycles $packets) { Write-Output "PROBLEM dependency cycle: $((Get-PwCycles $packets) -join '; ')"; $bad = $true }
+    $phases = [ordered]@{}
+    foreach ($slug in @($packets | ForEach-Object Phase | Select-Object -Unique | Sort-Object)) {
+        $ph = Get-PwPhaseInfo -Config $Config -Phase $slug -Ref $src
+        $phases[$slug] = $ph
+        if (@($ph.Roots).Count -gt 1) { Write-Output "PROBLEM $($ph.Path): more than one root item ($((@($ph.Roots) | ForEach-Object { "$($_.Line) $($_.Ref)" }) -join ', ')); keep one **Epic:**, **Feature:** or **User Story:** line"; $bad = $true }
+    }
     if ($bad) { Write-Output 'Nothing synced: fix the packets (validate-packets.ps1 has the full check) and run sync again.'; exit 1 }
 
     $itemsById = @{}
     foreach ($it in @(Get-ProvItems)) { if (-not $itemsById.ContainsKey($it.Id)) { $itemsById[$it.Id] = $it } }
-    $phases = @{}
+    $ordered = Get-PwTopoOrder $packets
+    # Each phase's tree under the root item its plan names (the provider decides the levels). Worked out
+    # first: a root that doesn't fit stops sync before anything is written.
+    $trees = [ordered]@{}
+    foreach ($slug in $phases.Keys) { $trees[$slug] = Resolve-ProvHierarchy -Phase $phases[$slug] -Packets @($ordered | Where-Object { $_.Phase -eq $slug }) }
     # Bodies come back as written on GitHub and (as Markdown) on Azure Boards, so an edit made on the board
     # shows as a hash mismatch and is kept from being overwritten. HTML descriptions don't round-trip.
     $roundTrips = -not ((Get-ProvName) -eq 'azure-boards' -and -not $Config.board.azureBoards.markdown)
     $counts = @{ created = 0; updated = 0; unchanged = 0; skipped = 0 }
-    foreach ($p in (Get-PwTopoOrder $packets)) {
-        if (-not $phases.ContainsKey($p.Phase)) { $phases[$p.Phase] = Get-PwPhaseInfo -Config $Config -Phase $p.Phase -Ref $src }
+    foreach ($p in $ordered) {
         $ph = $phases[$p.Phase]
         $fileText = if ($src) { (Invoke-PwGit show "${src}:$($p.Path)") -join "`n" } else { Get-Content -Raw -LiteralPath (Join-Path $Config.repoRoot $p.Path) }
         $title = "$($p.Id) · $($p.Title)"
@@ -220,12 +231,12 @@ function Invoke-PwSync {
         if ($roundTrips -and $split.Marker -and -not $Force) {
             $boardSha = (Get-PwSha256 $split.Content).Substring(0, 16)
             if ($boardSha -ne $split.Marker.Pairs['body']) {
-                Write-Output "skipped $($p.Id) $(Get-PwItemRefLabel $item): its body was edited on the board since the last sync. Move those edits into $($p.Path), then sync with -Force."
+                Write-Output "skipped $($p.Id) $(Get-PwItemRefLabel $item): its body was edited on the board since the last sync. Move those edits into $($p.Path), then sync -DryRun -Force, and sync -Force once the owner has seen what it changes."
                 $counts.skipped++; continue
             }
         }
         if (-not $split.Marker -and -not $Force) {
-            Write-Output "skipped $($p.Id) $(Get-PwItemRefLabel $item): the item wasn't created by sync (no source marker). Check it matches $($p.Path), then sync with -Force."
+            Write-Output "skipped $($p.Id) $(Get-PwItemRefLabel $item): the item wasn't created by sync (no source marker). Check it matches $($p.Path), then sync -DryRun -Force, and sync -Force once the owner has seen what it changes."
             $counts.skipped++; continue
         }
         if ($DryRun) { Write-Output "would update $($p.Id) $(Get-PwItemRefLabel $item)"; $counts.updated++; continue }
@@ -240,13 +251,9 @@ function Invoke-PwSync {
             $deps = @($p.DependsOn | Where-Object { -not (Get-PwRemoteRepo -Config $Config -Id $_) } | ForEach-Object { $itemsById[$_] } | Where-Object { $_ })
             $n = Set-ProvDependencies -Item $item -DependencyItems $deps
             if ($n) { Write-Output "linked $($p.Id) to $n dependenc$(if ($n -eq 1) { 'y' } else { 'ies' })" }
-            $ph = $phases[$p.Phase]
-            if ($ph.Epic) {
-                $epicRef = $ph.Epic -replace '^(AB)?#', ''
-                if (Set-ProvParent -Item $item -EpicRef $epicRef) { Write-Output "linked $($p.Id) under epic $($ph.Epic)" }
-            }
         }
     }
+    foreach ($tree in $trees.Values) { Set-ProvHierarchy -Tree $tree -ItemsById $itemsById -DryRun:$DryRun -Force:$Force | ForEach-Object { Write-Output $_ } }
     $known = [System.Collections.Generic.HashSet[string]]::new([string[]]@($packets | ForEach-Object Id))
     $phaseFilter = if ($Phase) { $Phase } else { $null }
     foreach ($it in $itemsById.Values) {

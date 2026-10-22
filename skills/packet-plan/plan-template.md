@@ -3,8 +3,11 @@
 Date · one line on what this phase delivers, cut into task packets that agents build in parallel.
 
 <!-- The heading is the phase's name on the board (the GitHub milestone). Optional lines, filled in by
-     the owner, not by sync: "- **Board:** <link>" and "- **Epic:** #<n>" (or AB#<n>) naming an issue or work
-     item that already exists; sync then makes each packet its sub-issue or child. Leave them out otherwise. -->
+     the owner, not by sync: "- **Board:** <link>", and one root line naming an issue or work item that
+     already exists, chosen by the plan's size: "- **Epic:** AB#<n>" (large: sync makes a Feature per
+     workstream, and the packets its User Stories), "- **Feature:** AB#<n>" (medium: the packets are its
+     User Stories) or "- **User Story:** AB#<n>" (small: the packets are its Tasks). On GitHub, "#<n>" on any
+     of them makes each packet its sub-issue. Leave them out otherwise. -->
 - **Source plan:** <link to the implementation plan this was cut from>
 
 ## Goal and constraints

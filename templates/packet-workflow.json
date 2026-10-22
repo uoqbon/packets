@@ -32,7 +32,10 @@
     "azureBoards": {
       "organization": "https://dev.azure.com/ORG",
       "project": "PROJECT",
+      "epicWorkItemType": "Epic",
+      "featureWorkItemType": "Feature",
       "workItemType": "User Story",
+      "taskWorkItemType": "Task",
       "humanWorkItemType": "Task",
       "areaPath": "",
       "iterationPath": "",
@@ -42,6 +45,15 @@
         "In progress": { "state": "Active" },
         "In review": { "state": "Active", "tag": "status:in-review" },
         "Ready to merge": { "state": "Resolved" },
+        "Needs human": { "state": "Active", "tag": "status:needs-human" },
+        "Done": { "state": "Closed" }
+      },
+      "taskStatusMap": {
+        "Backlog": { "state": "New" },
+        "Ready": { "state": "New", "tag": "status:ready" },
+        "In progress": { "state": "Active" },
+        "In review": { "state": "Active", "tag": "status:in-review" },
+        "Ready to merge": { "state": "Active", "tag": "status:ready-to-merge" },
         "Needs human": { "state": "Active", "tag": "status:needs-human" },
         "Done": { "state": "Closed" }
       },

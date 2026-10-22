@@ -65,4 +65,4 @@ At risk: <late, due soon, stale, inversions>
 
 Keep it short: the owner reads the first three lines. Don't invent numbers the script didn't give.
 
-If asked to **post** it: on GitHub, comment on the phase epic (`gh issue comment <epic> --body-file <file>`; the epic is the `**Epic:**` line of `plan.md`); otherwise write it to `<paths.plans>/<phase>/progress.md` only when the owner asks for a file. Never change board state from this skill.
+If asked to **post** it: on GitHub, comment on the phase's root issue (`gh issue comment <n> --body-file <file>`; the root is the `**Epic:**`, `**Feature:**` or `**User Story:**` line of `plan.md`); otherwise write it to `<paths.plans>/<phase>/progress.md` only when the owner asks for a file. Never change board state from this skill.

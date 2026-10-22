@@ -172,6 +172,7 @@ try {
     foreach ($ph in $phaseNames) {
         $info = Get-PwPhaseInfo -Config $cfg -Phase $ph -Ref $Ref
         if (-not $info.Exists) { Add-Finding 'WARN' $ph "no $($info.Path): the plan is the index of its packets"; continue }
+        if (@($info.Roots).Count -gt 1) { Add-Finding 'ERROR' $ph "$($info.Path) names more than one root item ($((@($info.Roots) | ForEach-Object { "$($_.Line) $($_.Ref)" }) -join ', ')): the board builds one tree per phase, so keep one **Epic:**, **Feature:** or **User Story:** line" }
         $planText = if ($Ref) { (Invoke-PwGit show "${Ref}:$($info.Path)") -join "`n" } else { Get-Content -Raw -LiteralPath (Join-Path $cfg.repoRoot $info.Path) }
         $allowed = $null
         $m = [regex]::Match($planText, '(?ms)^##+\s+[^\n]*[Tt]ouchpoint[^\n]*\n(?<body>.*?)(?=^##\s|\z)')

@@ -1,6 +1,6 @@
 ---
 name: packet-board
-description: "Set up and populate the project board for task packets (a GitHub Project, labelled GitHub issues, or Azure Boards work items) and read or update it. Creates one issue or work item per packet file, links dependencies and the phase epic, and keeps them in sync without touching their status. Use when asked to create, populate, sync, set up or inspect the board, issues or work items for packets, or when another packet skill needs board.ps1."
+description: "Set up and populate the project board for task packets (a GitHub Project, labelled GitHub issues, or Azure Boards work items) and read or update it. Creates one issue or work item per packet file, links dependencies, builds the tree under the plan's root item (on Azure Boards Epic > Feature > User Story > Task), and keeps them in sync without touching their status. Use when asked to create, populate, sync, set up or inspect the board, issues or work items for packets, or when another packet skill needs board.ps1."
 argument-hint: "setup | sync [phase] | show | next | reconcile"
 ---
 
@@ -27,7 +27,7 @@ Below, `board` means that command. Setting up and syncing run from a checkout of
 | `azure-boards` | the team tracks work in Azure DevOps (code stays on GitHub) | work item State plus a `status:*` tag where the process has no matching state |
 | `local` | trying the workflow, or the kit's own tests | a JSON file in the git directory |
 
-Choosing for a new repo: if the owner has a project, `gh project view <n> --owner <owner>` succeeds, and `gh auth status` lists `project`, use `github-project`. Otherwise use `github-issues` and say why. Ask before choosing `azure-boards`; it needs the organization, project and process (Agile, Scrum, Basic, CMMI) to fill `statusMap`.
+Choosing for a new repo: if the owner has a project, `gh project view <n> --owner <owner>` succeeds, and `gh auth status` lists `project`, use `github-project`. Otherwise use `github-issues` and say why. Ask before choosing `azure-boards`; it needs the organization, project and process (Agile, Scrum, Basic, CMMI) to fill the work item types, `statusMap` and `taskStatusMap`.
 
 ## Statuses
 
@@ -56,11 +56,21 @@ Agents never merge, so nothing but a merge moves a packet to Done.
 2. `board sync -Phase <phase> -DryRun`. Show the owner what it would create and update.
 3. `board sync -Phase <phase>`. For each packet, in dependency order, it:
    - creates the item if missing (title `<ID> · <title>`, body from the file, the packet label, the initial status, priority, size, wave, target; the phase as a milestone on GitHub or a `phase:` tag on Azure Boards), or updates its title, body and fields when the file changed;
-   - links its dependencies (GitHub "blocked by", Azure Boards Predecessor) and puts it under the phase epic if the plan has an `**Epic:**` line;
+   - links its dependencies (GitHub "blocked by", Azure Boards Predecessor);
+   - puts it under the plan's root item, if the plan names one (below);
    - **never changes Status**: the board owns state after creation.
 4. Read the result back: `board show -Phase <phase> -WorkingTree`.
 
-Sync reads the working tree by default, so run it from a checkout of the default branch after the phase's plan PR has merged. Each item body ends with a `packet:source` marker holding the file's and the body's hashes. If someone edited the body on the board, sync skips the item and says so: move those edits into the packet file (the file is the source of truth), then `board sync -Force`.
+Sync reads the working tree by default, so run it from a checkout of the default branch after the phase's plan PR has merged. Each item body ends with a `packet:source` marker holding the file's and the body's hashes. If someone edited the body on the board, sync skips the item and says so: move those edits into the packet file (the file is the source of truth), then `board sync -DryRun -Force`, and `board sync -Force` once the owner has seen what it changes. On Azure Boards `-Force` also moves every item that sits outside its place in the tree (below), in every phase the sync covers.
+
+### The tree under the plan's root
+
+The plan names the root of the phase's tree with one line, chosen by how big the plan is: `**Epic:**` for a large plan with several workstreams, `**Feature:**` for a medium one, `**User Story:**` for a small one. Each names an item that already exists (`AB#<n>` on Azure Boards, `#<n>` on GitHub); a plan with two such lines doesn't sync.
+
+- **Azure Boards** follows the process's levels, one at a time. Under an epic, sync makes one Feature per workstream (a packet's `**Workstream:**`; without one, a Feature named after the phase) and puts each packet under it as a User Story. Under a feature, the packets are its User Stories; under a user story, its Tasks. A human task is a Task under the story it unblocks (else the one it follows), or beside the packets under a user story. Phases under one epic share a workstream's Feature. Sync links an item that has no parent; one under another parent is named and left there, and `sync -Force` moves it. [providers.md](./providers.md#azure-boards) has the details.
+- **GitHub** has no levels: every packet and human task becomes a sub-issue of the root issue.
+
+Run `sync -DryRun` first and show the owner what it prints: on Azure Boards, the Features it would create, the items it would link, and the items it names as misplaced (a GitHub dry run links nothing and prints no tree). Move those only when the owner says so: `sync -DryRun -Force` lists the moves, `sync -Force` makes them. `-Force` also overwrites every body that sync skipped as edited on the board, so move those edits into the packet files first.
 
 ## Read the board
 
