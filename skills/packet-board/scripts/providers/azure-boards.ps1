@@ -11,8 +11,9 @@
 # can't be reordered). The phase's plan names its root, an existing epic, feature or story, and sync builds
 # the tree under it: under an epic, one feature per workstream holds that workstream's packets as stories;
 # under a feature, the packets are its stories; under a story, its tasks. A human task sits under the story
-# it unblocks (or, failing that, the one it follows), or beside the packets under a story root. Sync links
-# an item that has no parent; it moves one that has another parent only with -Force.
+# its Parent line names, else the one it unblocks (or, failing that, the one it follows), or beside the
+# packets under a story root. Sync links an item that has no parent; it moves one that has another parent
+# only with -Force.
 #
 # Auth: AZURE_DEVOPS_EXT_PAT (a PAT with Work Items read & write), else a token from `az login`.
 # Calls go to the REST API directly (api-version 7.1; comments 7.1-preview.4), so no az extension is needed.
@@ -423,14 +424,16 @@ function Resolve-ProvHierarchy {
        writes anything. The root must exist and be of the type its line names, or this stops sync. Each item
        sits one level below its parent: a packet under the root, or under its workstream's feature when the
        root is an epic; a human task (a task, unless humanWorkItemType is another level's type) under the
-       first packet that waits on it, else the first one it waits on. -Packets are the phase's packets and human tasks in dependency order. Returns the tree
+       packet its Parent line names, else the first packet that waits on it, else the first one it waits on.
+       -Packets are the phase's packets and human tasks in dependency order. Returns the tree
        for Set-ProvHierarchy, and keeps it for New-ProvItem, which creates packets of its PacketType. #>
     param([Parameter(Mandatory)]$Phase, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Packets)
     $cfg = $script:PwConfig
     $ab = $cfg.board.azureBoards
     $levels = Get-PwAbLevels
     $names = @($levels.Keys)
-    $tree = [pscustomobject]@{ Phase = $Phase; RootId = 0; RootType = $null; PacketType = $ab.workItemType; Places = @(); Features = @{} }
+    # PacketIds: the phase's packets, so a dry run knows the type another tree's new story gets.
+    $tree = [pscustomobject]@{ Phase = $Phase; RootId = 0; RootType = $null; PacketType = $ab.workItemType; PacketIds = @($Packets | Where-Object { $_.Kind -eq 'packet' } | ForEach-Object Id); Places = @(); Features = @{} }
     $script:AbTrees[$Phase.Slug] = $tree
     $root = $Phase.Root
     if (-not $root) { return $tree }
@@ -465,18 +468,21 @@ function Resolve-ProvHierarchy {
             $idx = $names.IndexOf($level)
             # A human task is created as humanWorkItemType, whatever level it sits at.
             $type = if ($p.Kind -eq 'human') { $ab.humanWorkItemType } else { $levels[$level] }
-            $place = [pscustomobject]@{ Id = $p.Id; Type = $type; Parent = $null; Feature = $null; Note = $null }
+            $place = [pscustomobject]@{ Id = $p.Id; Type = $type; Parent = $null; Feature = $null; Note = $null; Hint = $null }
+            $named = if ($p.Kind -eq 'human') { $p.Parent } else { $null }
             if ($idx -eq $rootIdx + 1) { $place.Parent = 'root' }
             elseif ($idx -gt $rootIdx + 1 -and $names[$idx - 1] -eq 'feature') {
                 $place.Parent = 'feature'
                 $place.Feature = if ($p.Workstream) { $p.Workstream.Trim() } else { $Phase.Title }
             }
             elseif ($idx -gt $rootIdx + 1 -and $names[$idx - 1] -eq 'story') {
-                $story = @(@($phasePackets | Where-Object { $_.DependsOn -contains $p.Id }) + @(foreach ($d in $p.DependsOn) { $phasePackets | Where-Object { $_.Id -eq $d } })) | Select-Object -First 1
-                if ($story) { $place.Parent = $story.Id }
-                else { $place.Note = "$($p.Id) (type $($place.Type)) has no $($levels.story) to sit under: no packet of $($Phase.Slug) waits on it or comes before it. Give it a Depends on, or link it by hand" }
+                # The packet a human task's Parent line names may be in another phase; Set-ProvHierarchy checks its type.
+                $story = if ($named) { $named } else { @(@($phasePackets | Where-Object { $_.DependsOn -contains $p.Id }) + @(foreach ($d in $p.DependsOn) { $phasePackets | Where-Object { $_.Id -eq $d } })) | Select-Object -First 1 | ForEach-Object Id }
+                if ($story) { $place.Parent = $story; $named = $null }
+                else { $place.Note = "$($p.Id) (type $($place.Type)) has no $($levels.story) to sit under: no packet of $($Phase.Slug) waits on it or comes before it. Give it a Parent or a Depends on, or link it by hand" }
             }
             else { $place.Note = "$($p.Id) (type $($place.Type)) can't sit under AB#$rootId (type $rootType); link it by hand" }
+            if ($named) { $place.Hint = "$($p.Id) names Parent $named, but under AB#$rootId (type $rootType) its $($place.Type) can't go under a packet's $($tree.PacketType), so that line has no effect here" }
             $place
         })
     $wanted = @($tree.Places | Where-Object { $_.Feature } | ForEach-Object { $_.Feature } | Select-Object -Unique)
@@ -509,8 +515,9 @@ function Set-ProvHierarchy {
        links each item that has no parent under its place. An item under another parent (an item has only
        one) was put there on the board, or by an older layout: it is named and left there, and -Force moves
        it, as -Force makes the packet files win over board edits elsewhere in sync. An item whose type
-       doesn't fit its place is named and left where it is. -DryRun says what it would do and writes nothing. #>
-    param([Parameter(Mandatory)]$Tree, [Parameter(Mandatory)][hashtable]$ItemsById, [switch]$DryRun, [switch]$Force)
+       doesn't fit its place is named and left where it is. -DryRun says what it would do and writes nothing;
+       -Creating are the IDs this sync creates, which a dry run calls "(new)". #>
+    param([Parameter(Mandatory)]$Tree, [Parameter(Mandatory)][hashtable]$ItemsById, [string[]]$Creating = @(), [switch]$DryRun, [switch]$Force)
     if (-not $Tree.RootId) { return }
     $cfg = $script:PwConfig
     $ab = $cfg.board.azureBoards
@@ -560,14 +567,23 @@ function Set-ProvHierarchy {
         "created $($ab.featureWorkItemType) '$name' AB#$($wi.id) under AB#$($Tree.RootId)"
     }
     foreach ($place in $Tree.Places) {
+        if ($place.Hint) { "note: $($place.Hint)" }
         if ($place.Note) { "note: $($place.Note)"; continue }
         # The parent: the root, a workstream feature, or the packet whose story a human task sits under.
         $story = if ($place.Parent -notin 'root', 'feature') { $ItemsById[$place.Parent] } else { $null }
+        # A story with no item is "(new)" only in a dry run of the sync that creates it. Any other (a Parent
+        # line naming a packet of a phase not synced, or with no file) is named the same way in every run.
+        if ($place.Parent -notin 'root', 'feature' -and -not $story -and -not ($DryRun -and $Creating -contains $place.Parent)) {
+            $it = $ItemsById[$place.Id]
+            "note: $(if ($it) { "$($place.Id) AB#$($it.Number) was left where it is" } else { "$($place.Id) (new) would get no parent" }): its Parent $($place.Parent) isn't on the board"; continue
+        }
         $target = if ($place.Parent -eq 'root') { $Tree.RootId } elseif ($place.Parent -eq 'feature') { [int]$Tree.Features[$place.Feature] } elseif ($story) { $story.Number } else { 0 }
         $label = if ($place.Parent -eq 'root') { "AB#$target" } else {
             $(if ($place.Parent -eq 'feature') { $title = $script:AbFeatureTitles["$($Tree.RootId)|$($place.Feature)"]; "$($ab.featureWorkItemType) '$(if ($title) { $title } else { $place.Feature })'" } else { $place.Parent }) + $(if ($target) { " AB#$target" } else { ' (new)' })
         }
-        if ($story -and $story.Type -and $story.Type -ine $Tree.PacketType) { "note: $($place.Id) was left where it is: $label, the story it belongs under, is of type $($story.Type), not $($Tree.PacketType)"; continue }
+        # A story a dry run would create gets its own phase's packet type (a Task under a story root).
+        $storyType = if ($story) { $story.Type } elseif ($place.Parent -notin 'root', 'feature') { $script:AbTrees.Values | Where-Object { $_.PacketIds -contains $place.Parent } | ForEach-Object PacketType | Select-Object -First 1 } else { $null }
+        if ($storyType -and $storyType -ine $Tree.PacketType) { "note: $($place.Id) was left where it is: $label, the story it belongs under, is of type $storyType, not $($Tree.PacketType)"; continue }
         $item = $ItemsById[$place.Id]
         if (-not $item) { if ($DryRun) { "would put $($place.Id) (new) under $label" }; continue }
         $wi = Get-PwAbWorkItem $item.Number

@@ -313,7 +313,8 @@ function Test-PwPacketOwnsPath {
 #   - **Locks:** none
 #   ## Goal / ## Spec / ## In scope / ## Out of scope / ## Owns / ## Shared touchpoints / ## Consumes /
 #   ## Provides / ## Acceptance criteria / ## Tests to run / ## Decision record / ## Dispatcher notes
-# A human task uses **Human task:** <ID> in place of **Packet:**.
+# A human task uses **Human task:** <ID> in place of **Packet:**, and may name **Parent:** <packet ID>: its
+# board item then sits under that packet's item (on Azure Boards, a Task under its User Story).
 
 function ConvertFrom-PwList {
     param([string]$Value)
@@ -328,7 +329,7 @@ function Read-PwPacketText {
     $p = [ordered]@{
         Id = $null; Title = $null; Kind = 'packet'; Path = $Path; Phase = $Phase
         Priority = $null; Size = $null; Wave = $null; Workstream = $null; Target = $null
-        DependsOn = @(); Lenses = @(); Locks = @(); InitialStatus = 'Ready'; ReviewTier = $null
+        DependsOn = @(); Parent = $null; Lenses = @(); Locks = @(); InitialStatus = 'Ready'; ReviewTier = $null
         Owns = @(); Excludes = @(); Touchpoints = @(); Acceptance = @(); Tests = @()
         Meta = [ordered]@{}; Sections = [ordered]@{}; HeadingId = $null; Body = ''
     }
@@ -367,6 +368,7 @@ function Read-PwPacketText {
     if ($meta.Contains('Initial status') -and $meta['Initial status']) { $p.InitialStatus = $meta['Initial status'] }
     if ($meta.Contains('Phase') -and $meta['Phase'] -and -not $p.Phase) { $p.Phase = $meta['Phase'] }
     if ($meta.Contains('Depends on')) { $p.DependsOn = @([regex]::Matches($meta['Depends on'], '[A-Za-z][A-Za-z0-9]*-\d+') | ForEach-Object { $_.Value.ToUpperInvariant() } | Select-Object -Unique) }
+    if ($meta.Contains('Parent')) { $p.Parent = [regex]::Matches($meta['Parent'], '[A-Za-z][A-Za-z0-9]*-\d+') | Select-Object -First 1 | ForEach-Object { $_.Value.ToUpperInvariant() } }
     if ($meta.Contains('Review lenses')) { $p.Lenses = @(ConvertFrom-PwList $meta['Review lenses'] | ForEach-Object { $_.ToLowerInvariant() }) }
     if ($meta.Contains('Locks')) { $p.Locks = @(ConvertFrom-PwList $meta['Locks']) }
 
@@ -486,6 +488,12 @@ function Test-PwPacket {
     if ($p.DependsOn -contains $p.Id) { $problems.Add('depends on itself') }
     if ($p.Meta.Contains('Depends on') -and $p.DependsOn.Count -eq 0 -and $p.Meta['Depends on'] -notmatch '^\s*(none|n/a|-|–|—)?\s*$') {
         $problems.Add("Depends on names no packet ID ('$($p.Meta['Depends on'])'); write IDs such as $($Config.packetPrefix)-1, or none")
+    }
+    if ($p.Meta.Contains('Parent') -and $p.Meta['Parent'] -notmatch '^\s*(none|n/a|-|–|—)?\s*$') {
+        $parents = @([regex]::Matches($p.Meta['Parent'], '[A-Za-z][A-Za-z0-9]*-\d+') | ForEach-Object { $_.Value.ToUpperInvariant() } | Select-Object -Unique)
+        if ($p.Kind -ne 'human') { $problems.Add("only a human task names a Parent: a packet's place on the board comes from the plan's root item") }
+        elseif ($parents.Count -ne 1) { $problems.Add("Parent must name one packet ID, such as $($Config.packetPrefix)-1 (got '$($p.Meta['Parent'])')") }
+        elseif ($p.Parent -notmatch "^$($Config.packetPrefix)-\d+$") { $problems.Add("Parent must be a packet of this repository, such as $($Config.packetPrefix)-1 (got $($p.Parent))") }
     }
     if ($p.Kind -eq 'human') {
         if ($p.Owns.Count -gt 0) { $problems.Add('a human task owns no paths') }

@@ -254,25 +254,52 @@ function Set-PwGhLabels {
 
 function Resolve-ProvHierarchy {
     <# A phase's tree on GitHub, which has no levels: every packet and human task becomes a sub-issue of the
-       plan's root issue (its **Epic:**, **Feature:** or **User Story:** line). #>
+       plan's root issue (its **Epic:**, **Feature:** or **User Story:** line), except a human task with a
+       Parent line, which becomes a sub-issue of that packet's issue. #>
     param([Parameter(Mandatory)]$Phase, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Packets)
     [pscustomobject]@{ Phase = $Phase; Packets = @($Packets) }
 }
 
 function Set-ProvHierarchy {
-    <# Makes each item of the tree a sub-issue of the root. Already linked is fine; a dry run links nothing,
-       and -Force changes nothing here. #>
-    param([Parameter(Mandatory)]$Tree, [Parameter(Mandatory)][hashtable]$ItemsById, [switch]$DryRun, [switch]$Force)
+    <# Makes each item of the tree a sub-issue of its place: the root, or the packet a human task's Parent
+       line names. Already linked is fine. An issue under another parent (an issue has only one) was put
+       there on the board: it is named and left there, and -Force moves it, as on Azure Boards. -DryRun
+       reads the same and says what it would link or move, writing nothing; -Creating are the IDs this sync
+       creates, which a dry run calls "(new)". #>
+    param([Parameter(Mandatory)]$Tree, [Parameter(Mandatory)][hashtable]$ItemsById, [string[]]$Creating = @(), [switch]$DryRun, [switch]$Force)
     $root = $Tree.Phase.Root
-    if (-not $root -or $DryRun) { return }
+    if (-not $root) { return }
     $cfg = $script:PwConfig
     $ref = $root.Ref -replace '^(AB)?#', ''
-    $existing = @(Invoke-PwGhPages "repos/$($cfg.repo)/issues/$ref/sub_issues?per_page=100" | ForEach-Object { [long]$_.id })
+    $subIssues = @{}
     foreach ($p in $Tree.Packets) {
         $item = $ItemsById[$p.Id]
-        if (-not $item -or $existing -contains $item.DbId) { continue }
-        [void](Invoke-PwGh api -X POST "repos/$($cfg.repo)/issues/$ref/sub_issues" -F "sub_issue_id=$($item.DbId)")
-        "linked $($p.Id) under $($root.Level) #$ref"
+        $target = $ref; $label = "$($root.Level) #$ref"
+        if ($p.Kind -eq 'human' -and $p.Parent) {
+            $parentItem = $ItemsById[$p.Parent]
+            # A packet with no issue yet is "(new)" only in a dry run of the sync that creates it.
+            if ($parentItem) { $target = [string]$parentItem.Number; $label = "$($p.Parent) #$target" }
+            elseif ($DryRun -and $Creating -contains $p.Parent) { $target = ''; $label = "$($p.Parent) (new)" }
+            else { "note: $(if ($item) { "$($p.Id) #$($item.Number) was left where it is" } else { "$($p.Id) (new) would get no parent" }): its Parent $($p.Parent) isn't on the board"; continue }
+        }
+        if (-not $item) { if ($DryRun) { "would put $($p.Id) (new) under $label" }; continue }
+        if ($target) {
+            if (-not $subIssues.ContainsKey($target)) { $subIssues[$target] = @(Invoke-PwGhPages "repos/$($cfg.repo)/issues/$target/sub_issues?per_page=100" | ForEach-Object { [long]$_.id }) }
+            if ($subIssues[$target] -contains $item.DbId) { continue }
+        }
+        # Not under its place: where is it? A 404 is no parent (and a server without this endpoint, where
+        # adding fails as it always did if the issue has one).
+        $from = $null
+        try {
+            $parent = Invoke-PwGhJson api "repos/$($cfg.repo)/issues/$($item.Number)/parent"
+            $from = if ([string]$parent.repository_url -like "*/repos/$($cfg.repo)") { "#$($parent.number)" } else { "$(([string]$parent.repository_url) -replace '^.*/repos/', '')#$($parent.number)" }
+        }
+        catch { if ($_.Exception.Message -notmatch 'HTTP 404') { throw } }
+        if ($from -and -not $Force) { "note: $($p.Id) #$($item.Number) is under $from, and its place is under ${label}: sync -Phase $($Tree.Phase.Slug) -Force moves it, and also overwrites any body this sync skipped as edited on the board, so move those edits into the packet files first (with -DryRun, it shows every change)"; continue }
+        if ($DryRun) { "would $(if ($from) { 'move' } else { 'put' }) $($p.Id) #$($item.Number) under $label$(if ($from) { " (now under $from)" })"; continue }
+        $replace = @(if ($from) { '-F', 'replace_parent=true' })
+        [void](Invoke-PwGh api -X POST "repos/$($cfg.repo)/issues/$target/sub_issues" -F "sub_issue_id=$($item.DbId)" @replace)
+        "$(if ($from) { 'moved' } else { 'linked' }) $($p.Id) under $label$(if ($from) { " (was under $from)" })"
     }
 }
 

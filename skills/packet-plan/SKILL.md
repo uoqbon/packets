@@ -89,7 +89,7 @@ A project can add its own lenses (for domain rules) as `<paths.lenses>/<name>.md
 
 **Priority, waves, targets.** P0: the phase fails without it. P1: planned. P2: behind the cut line, so `**Initial status:** Backlog` until the owner promotes it. P3: nice to have. Wave W0 is the foundation; a packet's wave is one more than its latest dependency's. Its **Target** (yyyy-MM-dd) is the date it should reach Ready to merge.
 
-**Human tasks.** Approvals, secrets, purchases, production checks and judgement calls on real data are human tasks (`**Human task:** H-1`), never folded into a packet. Agents don't do them; packets can wait on them.
+**Human tasks.** Approvals, secrets, purchases, production checks and judgement calls on real data are human tasks (`**Human task:** H-1`), never folded into a packet. Agents don't do them; packets can wait on them. A human task that belongs to one packet (its design sign-off, a key it needs, a check of what it shipped) names it on its Parent line (`**Parent:** PKT-3`; otherwise `none`): when the plan names a root item, the task sits on the board under that packet's item (on Azure Boards, a Task under its User Story; on GitHub, a sub-issue of its issue). Without one, it goes under the story it unblocks on Azure Boards, and under the root item on GitHub. On Azure Boards under a User Story root, where the packets are Tasks themselves, the line has no effect. Parent only places the item; it orders nothing, so put the packet in Depends on too when the task must wait for it, or the task in the packet's Depends on when the packet must wait.
 
 **Out of scope** names who does each excluded thing ("the UI: PKT-14"). **Dispatcher notes** say what the dispatcher must know: a fake to use, an order of work, a stop condition.
 

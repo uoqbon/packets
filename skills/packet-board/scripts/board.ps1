@@ -17,7 +17,7 @@
   board.ps1 sync [-Phase p] [-DryRun] [-Force]
                                             create or update one item per packet file, linked under the
                                             plan's root item; never touches Status. -Force: the files win
-                                            over board edits (bodies; on Azure Boards, an item's parent)
+                                            over board edits (bodies, and an item's parent)
   board.ps1 show [-Phase p] [-Json]         every packet and human task with its board state
   board.ps1 next [-Phase p] [-Json]         Ready packets in dispatch order (priority, wave, id) with verdicts
   board.ps1 deps <ID> [-Json]               one packet's verdict: START, STACK or BLOCKED, with reasons
@@ -199,6 +199,9 @@ function Invoke-PwSync {
     $itemsById = @{}
     foreach ($it in @(Get-ProvItems)) { if (-not $itemsById.ContainsKey($it.Id)) { $itemsById[$it.Id] = $it } }
     $ordered = Get-PwTopoOrder $packets
+    # The items this sync creates: in a dry run they don't exist yet, so placement calls them "(new)", and
+    # any other missing item is not on the board.
+    $creating = @($ordered | Where-Object { -not $itemsById.ContainsKey($_.Id) } | ForEach-Object Id)
     # Each phase's tree under the root item its plan names (the provider decides the levels). Worked out
     # first: a root that doesn't fit stops sync before anything is written.
     $trees = [ordered]@{}
@@ -253,7 +256,7 @@ function Invoke-PwSync {
             if ($n) { Write-Output "linked $($p.Id) to $n dependenc$(if ($n -eq 1) { 'y' } else { 'ies' })" }
         }
     }
-    foreach ($tree in $trees.Values) { Set-ProvHierarchy -Tree $tree -ItemsById $itemsById -DryRun:$DryRun -Force:$Force | ForEach-Object { Write-Output $_ } }
+    foreach ($tree in $trees.Values) { Set-ProvHierarchy -Tree $tree -ItemsById $itemsById -Creating $creating -DryRun:$DryRun -Force:$Force | ForEach-Object { Write-Output $_ } }
     $known = [System.Collections.Generic.HashSet[string]]::new([string[]]@($packets | ForEach-Object Id))
     $phaseFilter = if ($Phase) { $Phase } else { $null }
     foreach ($it in $itemsById.Values) {
