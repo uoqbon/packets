@@ -189,6 +189,14 @@ Click through it.
     $r = Invoke-Kit $validate @('-Phase', 'phase-1')
     Assert-That ($r.Code -eq 0 -and $r.Text -cnotmatch 'ERROR') 'a lower-case Parent naming a packet, or none, validates' $r.Text
     Remove-Item -LiteralPath (Join-Path $repo 'docs/plan/phase-1/packets/H-2.md'), (Join-Path $repo 'docs/plan/phase-1/packets/H-3.md')
+    # Under -Phase, another phase's files aren't checked: one marked as a human task with a packet's ID is
+    # still no Parent.
+    Write-File 'docs/plan/phase-1/packets/H-2.md' (& $humanTask 'H-2' 'PKT-31')
+    Write-File 'docs/plan/phase-9/packets/PKT-31.md' "# PKT-31 · Misfiled`n`n- **Human task:** PKT-31 · **Priority:** P1`n`n## Goal`n`nOops.`n"
+    $r = Invoke-Kit $validate @('-Phase', 'phase-1')
+    Assert-That ($r.Code -eq 1 -and $r.Text -match 'ERROR\s+H-2\s+Parent PKT-31 is a human task') 'a Parent that is another phase''s human task is an ERROR, even under -Phase' $r.Text
+    Remove-Item -LiteralPath (Join-Path $repo 'docs/plan/phase-1/packets/H-2.md')
+    Remove-Item -Recurse -LiteralPath (Join-Path $repo 'docs/plan/phase-9')
     & git add -A; & git commit -qm 'fix overlaps' | Out-Null
 
     Write-Host 'board: sync, show, next, deps'
@@ -304,8 +312,26 @@ Click through it.
     Assert-That ($r.Code -eq 0 -and $r.Text -match "linked H-1 under PKT-03 #$($pkt03.Number)" -and $r.Text -match 'note: PKT-02 #\d+ is under #77, and its place is under epic #99' -and [string]$g.Parent -eq [string]$pkt03.Number -and $p2.Parent -eq '77') 'a human task with no parent is linked under its Parent packet; a parent set on the board is named and kept' $r.Text
     & $setBoardParents @{ 'PKT-02' = '99' }
     & $setH1Parent 'PKT-09'
+    $missing = "note: H-1 #$($h1.Number) was left where it is: its Parent PKT-09 isn't on the board"
+    $dry = Invoke-Kit $board @('sync', '-DryRun', '-Force')
     $r = Invoke-Kit $board @('sync')
-    Assert-That ($r.Code -eq 0 -and $r.Text -match "note: H-1 #$($h1.Number) was left where it is: its Parent PKT-09 isn't on the board") 'a Parent packet with no item is named, and the task left where it is' $r.Text
+    Assert-That ($r.Code -eq 0 -and $r.Text -match $missing -and $dry.Text -match $missing -and $dry.Text -notmatch 'PKT-09 \(new\)') 'a Parent packet with no item that sync won''t create is named, the same in a dry run, and the task left where it is' "$($dry.Text)`n$($r.Text)"
+    Write-File 'docs/plan/phase-1/packets/H-5.md' (& $humanTask 'H-5' 'PKT-09')
+    $r = Invoke-Kit $board @('sync', '-DryRun')
+    Assert-That ($r.Code -eq 0 -and $r.Text -match 'would create H-5' -and $r.Text -match "note: H-5 \(new\) would get no parent: its Parent PKT-09 isn't on the board") 'and a new task with such a Parent is told it would get no parent' $r.Text
+    Remove-Item -LiteralPath (Join-Path $repo 'docs/plan/phase-1/packets/H-5.md')
+    # A Parent packet this sync would create is (new) in its dry run: H-1 with no parent would go under it,
+    # and H-1 under the epic is named. Nothing is created.
+    Write-File 'docs/plan/phase-1/packets/PKT-08.md' (New-Packet 'PKT-08' 'Sign-off home' 'W2' 'PKT-03' @('src/SignOff/**') 'correctness')
+    & $setH1Parent 'PKT-08'
+    & $setBoardParents @{ 'H-1' = $null }
+    $r = Invoke-Kit $board @('sync', '-DryRun')
+    Assert-That ($r.Code -eq 0 -and $r.Text -match 'would create PKT-08' -and $r.Text -match "would put H-1 #$($h1.Number) under PKT-08 \(new\)") 'in a dry run, a task with no parent would go under a Parent packet this sync creates' $r.Text
+    & $setBoardParents @{ 'H-1' = '99' }
+    $r = Invoke-Kit $board @('sync', '-DryRun')
+    Assert-That ($r.Code -eq 0 -and $r.Text -match "note: H-1 #$($h1.Number) is under #99, and its place is under PKT-08 \(new\)") 'and a task under the root is named against it' $r.Text
+    Remove-Item -LiteralPath (Join-Path $repo 'docs/plan/phase-1/packets/PKT-08.md')
+    & $setBoardParents @{ 'H-1' = [string]$pkt03.Number }
     & $setH1Parent 'PKT-03'
     & git add -A; & git commit -qm 'H-1 under PKT-03' | Out-Null
 
@@ -839,10 +865,12 @@ param([string]$Kit)
 . (Join-Path $Kit 'skills/packet-board/scripts/providers/github-common.ps1')
 $script:PwConfig = @{ repo = 'example/sample' }
 # Sub-issue lists by issue number (DbIds), and each issue's parent: an issue object, or an error text.
-$script:Subs = @{ '99' = @(1001, 1003) }
-$script:Parents = @{ '2' = @{ number = 57; repository_url = 'https://api.github.com/repos/Example/Sample' }; '4' = @{ number = 12; repository_url = 'https://api.github.com/repos/example/other' } }
+$script:Subs = @{ '99' = @(1001, 1003, 1008) }
+$script:Parents = @{ '2' = @{ number = 57; repository_url = 'https://api.github.com/repos/Example/Sample' }; '4' = @{ number = 12; repository_url = 'https://api.github.com/repos/example/other' }; '8' = @{ number = 99; repository_url = 'https://api.github.com/repos/example/sample' } }
 function Invoke-PwGh {
     $line = @($args) -join ' '; $script:GhCalls += , $line
+    # As on GitHub, an issue path without a number is not found.
+    if ($line -match 'issues//') { Stop-Pw "gh api $line failed: gh: Not Found (HTTP 404)" }
     if ($line -match 'issues/(\d+)/sub_issues\?per_page') { return '[[' + ((@($script:Subs[$Matches[1]]) | Where-Object { $_ } | ForEach-Object { "{`"id`":$_}" }) -join ',') + ']]' }
     if ($line -match 'issues/(\d+)/parent$') {
         $p = $script:Parents[$Matches[1]]
@@ -850,35 +878,41 @@ function Invoke-PwGh {
         if ($p -is [string]) { Stop-Pw "gh api $line failed: gh: $p" }
         return ($p | ConvertTo-Json)
     }
-    '' }
+    if ($line -match '^api -X POST repos/example/sample/issues/\d+/sub_issues ') { return '' }
+    Stop-Pw "unexpected gh call: $line" }
 function I([string]$Id, [int]$N) { [pscustomobject]@{ Id = $Id; Number = $N; DbId = 1000 + $N } }
 function P([string]$Id, [string]$Parent = '') { [pscustomobject]@{ Id = $Id; Kind = $(if ($Id -like 'H-*') { 'human' } else { 'packet' }); Parent = $(if ($Parent) { $Parent } else { $null }) } }
-$items = @{ 'PKT-01' = (I 'PKT-01' 1); 'PKT-02' = (I 'PKT-02' 2); 'PKT-03' = (I 'PKT-03' 3); 'PKT-04' = (I 'PKT-04' 4); 'H-1' = (I 'H-1' 6); 'H-2' = (I 'H-2' 7) }
-$tree = [pscustomobject]@{ Phase = [pscustomobject]@{ Slug = 'phase-1'; Root = [pscustomobject]@{ Level = 'epic'; Ref = '#99' } }; Packets = @((P 'PKT-01'), (P 'PKT-02'), (P 'PKT-03'), (P 'PKT-04'), (P 'H-1' 'PKT-03'), (P 'H-2' 'PKT-09')) }
+$items = @{ 'PKT-01' = (I 'PKT-01' 1); 'PKT-02' = (I 'PKT-02' 2); 'PKT-03' = (I 'PKT-03' 3); 'PKT-04' = (I 'PKT-04' 4); 'H-1' = (I 'H-1' 6); 'H-2' = (I 'H-2' 7); 'H-3' = (I 'H-3' 8) }
+# PKT-08 is a packet this sync creates (so a dry run calls it new); PKT-09 has no item and won't get one.
+$tree = [pscustomobject]@{ Phase = [pscustomobject]@{ Slug = 'phase-1'; Root = [pscustomobject]@{ Level = 'epic'; Ref = '#99' } }; Packets = @((P 'PKT-01'), (P 'PKT-02'), (P 'PKT-03'), (P 'PKT-04'), (P 'H-1' 'PKT-03'), (P 'H-2' 'PKT-09'), (P 'H-3' 'PKT-08'), (P 'H-4' 'PKT-09')) }
+$creating = @('PKT-08')
 function Show([string]$Name, [scriptblock]$Run) {
     $script:GhCalls = @()
-    try { $out = @(& $Run); "$Name=$($out -join ' | ')|posts=$((@($script:GhCalls | Where-Object { $_ -match 'POST' })) -join ' ; ')|reads=$((@($script:GhCalls | Where-Object { $_ -match '/parent$' } | ForEach-Object { ($_ -split '/')[-2] })) -join ',')" }
+    try { $out = @(& $Run); "$Name=$($out -join ' | ')|posts=$((@($script:GhCalls | Where-Object { $_ -match '-X ' })) -join ' ; ')|reads=$((@($script:GhCalls | Where-Object { $_ -match '/parent$' } | ForEach-Object { ($_ -split '/')[-2] })) -join ',')" }
     catch { "$Name=error:$($_.Exception.Message)" }
 }
-Show 'gh-dry' { Set-ProvHierarchy -Tree $tree -ItemsById $items -DryRun }
-Show 'gh-dry-force' { Set-ProvHierarchy -Tree $tree -ItemsById $items -DryRun -Force }
+Show 'gh-dry' { Set-ProvHierarchy -Tree $tree -ItemsById $items -Creating $creating -DryRun }
+Show 'gh-dry-force' { Set-ProvHierarchy -Tree $tree -ItemsById $items -Creating $creating -DryRun -Force }
 Show 'gh' { Set-ProvHierarchy -Tree $tree -ItemsById $items }
 Show 'gh-force' { Set-ProvHierarchy -Tree $tree -ItemsById $items -Force }
 $script:Parents['2'] = 'Server Error (HTTP 502)'
 Show 'gh-502' { Set-ProvHierarchy -Tree $tree -ItemsById $items }
 # Everything in its place: H-1 already a sub-issue of PKT-03's issue, nothing read but the lists.
-$script:Subs = @{ '99' = @(1001, 1002, 1003, 1004); '3' = @(1006) }
+$script:Subs = @{ '99' = @(1001, 1002, 1003, 1004, 1008); '3' = @(1006) }
 Show 'gh-again' { Set-ProvHierarchy -Tree $tree -ItemsById $items }
 '@
 $r = Invoke-Kit $ghTest @('-Kit', $kit)
 $gh = @{}; foreach ($line in ($r.Text -split "`n")) { if ($line -match '^(?<k>gh[\w-]*)=(?<v>.*)$') { $gh[$Matches.k] = $Matches.v } }
 $ghGet = { param($k) if ($gh.ContainsKey($k)) { $gh[$k] } else { '' } }
-Assert-That ($r.Code -eq 0 -and (& $ghGet 'gh-dry') -match 'note: PKT-02 #2 is under #57, and its place is under epic #99' -and (& $ghGet 'gh-dry') -match 'would put H-1 #6 under PKT-03 #3' -and (& $ghGet 'gh-dry') -match 'would put H-2 #7 under PKT-09 \(new\)' -and (& $ghGet 'gh-dry') -notmatch 'would move' -and (& $ghGet 'gh-dry') -match '\|posts=\|') 'GitHub: a dry run says what it would link and names misplaced issues, writing nothing' $r.Text
-Assert-That ((& $ghGet 'gh-dry-force') -match 'would move PKT-02 #2 under epic #99 \(now under #57\)' -and (& $ghGet 'gh-dry-force') -match 'would move PKT-04 #4 under epic #99 \(now under example/other#12\)' -and (& $ghGet 'gh-dry-force') -match '\|posts=\|') 'GitHub: a dry run with -Force lists every move, writing nothing' (& $ghGet 'gh-dry-force')
+Assert-That ($r.Code -eq 0 -and (& $ghGet 'gh-dry') -match 'note: PKT-02 #2 is under #57, and its place is under epic #99' -and (& $ghGet 'gh-dry') -match 'would put H-1 #6 under PKT-03 #3' -and (& $ghGet 'gh-dry') -match 'note: H-3 #8 is under #99, and its place is under PKT-08 \(new\)' -and (& $ghGet 'gh-dry') -notmatch 'would move' -and (& $ghGet 'gh-dry') -match '\|posts=\|') 'GitHub: a dry run says what it would link and names misplaced issues, a Parent this sync creates as (new), writing nothing' $r.Text
+Assert-That ((& $ghGet 'gh-dry-force') -match 'would move PKT-02 #2 under epic #99 \(now under #57\)' -and (& $ghGet 'gh-dry-force') -match 'would move PKT-04 #4 under epic #99 \(now under example/other#12\)' -and (& $ghGet 'gh-dry-force') -match 'would move H-3 #8 under PKT-08 \(new\) \(now under #99\)' -and (& $ghGet 'gh-dry-force') -match '\|posts=\|') 'GitHub: a dry run with -Force lists every move, writing nothing' (& $ghGet 'gh-dry-force')
+$missing = "note: H-2 #7 was left where it is: its Parent PKT-09 isn't on the board"
+Assert-That ((& $ghGet 'gh-dry') -match "note: H-4 \(new\) would get no parent: its Parent PKT-09 isn't on the board") 'GitHub: a dry run tells a new task whose Parent has no issue that it would get no parent' (& $ghGet 'gh-dry')
+Assert-That ((@('gh-dry', 'gh-dry-force', 'gh', 'gh-force') | Where-Object { (& $ghGet $_) -match [regex]::Escape($missing) -and (& $ghGet $_) -notmatch 'PKT-09 \(new\)' }).Count -eq 4) 'GitHub: a Parent packet sync won''t create is named the same way in a dry run, with -Force, and in a real run' $r.Text
 Assert-That ((& $ghGet 'gh') -match 'note: PKT-02 #2 is under #57, and its place is under epic #99: sync -Phase phase-1 -Force moves it' -and (& $ghGet 'gh') -match 'note: PKT-04 #4 is under example/other#12' -and (& $ghGet 'gh') -match 'linked H-1 under PKT-03 #3' -and (& $ghGet 'gh') -match "note: H-2 #7 was left where it is: its Parent PKT-09 isn't on the board" -and (& $ghGet 'gh') -match '\|posts=api -X POST repos/example/sample/issues/3/sub_issues -F sub_issue_id=1006\|') 'GitHub: a human task becomes a sub-issue of its Parent packet; an issue under another parent is named, not re-parented, so sync no longer fails on it' (& $ghGet 'gh')
 Assert-That ((& $ghGet 'gh-force') -match 'moved PKT-02 under epic #99 \(was under #57\)' -and (& $ghGet 'gh-force') -match 'moved PKT-04 under epic #99 \(was under example/other#12\)' -and (& $ghGet 'gh-force') -match 'issues/99/sub_issues -F sub_issue_id=1002 -F replace_parent=true') 'GitHub: sync -Force moves it, with replace_parent' (& $ghGet 'gh-force')
 Assert-That ((& $ghGet 'gh-502') -match '^error:.*HTTP 502') 'GitHub: an error other than 404 reading a parent stops sync' (& $ghGet 'gh-502')
-Assert-That ((& $ghGet 'gh-again') -eq "note: H-2 #7 was left where it is: its Parent PKT-09 isn't on the board|posts=|reads=") 'GitHub: a human task already under its Parent packet''s issue is left alone, and no parent is read' (& $ghGet 'gh-again')
+Assert-That ((& $ghGet 'gh-again') -eq "note: H-2 #7 was left where it is: its Parent PKT-09 isn't on the board | note: H-3 #8 was left where it is: its Parent PKT-08 isn't on the board | note: H-4 (new) would get no parent: its Parent PKT-09 isn't on the board|posts=|reads=") 'GitHub: a human task already under its Parent packet''s issue is left alone, and no parent is read' (& $ghGet 'gh-again')
 Remove-Item -LiteralPath $ghTest
 
 Write-Host 'azure-boards hierarchy (against an in-memory Azure DevOps)'
@@ -916,11 +950,12 @@ function Invoke-TestSync {
     param($Phase, $Packets, [object[]]$Phases, [switch]$DryRun, [switch]$Force)
     if (-not $Phases) { $Phases = @(, @($Phase, $Packets)) }
     $items = @{}; foreach ($it in @(Get-ProvItems -Refresh)) { $items[$it.Id] = $it }
+    $creating = @(foreach ($pair in $Phases) { foreach ($p in $pair[1]) { if (-not $items[$p.Id]) { $p.Id } } })
     $trees = @(foreach ($pair in $Phases) { Resolve-ProvHierarchy -Phase $pair[0] -Packets $pair[1] })
     if (-not $DryRun) {
         foreach ($pair in $Phases) { foreach ($p in $pair[1]) { if (-not $items[$p.Id]) { $items[$p.Id] = New-ProvItem -Packet $p -Title "$($p.Id) · $($p.Title)" -Body "Packet $($p.Id)" -PhaseSlug $pair[0].Slug -PhaseTitle $pair[0].Title } } }
     }
-    @(foreach ($tree in $trees) { Set-ProvHierarchy -Tree $tree -ItemsById $items -DryRun:$DryRun -Force:$Force })
+    @(foreach ($tree in $trees) { Set-ProvHierarchy -Tree $tree -ItemsById $items -Creating $creating -DryRun:$DryRun -Force:$Force })
 }
 function Get-Tree { param([string[]]$Ids) ($Ids | ForEach-Object { $n = Find-FakeAbItem $_; "$($_)>$(Get-FakeAbParent $n):$($script:FakeAb.Items[$n].fields['System.WorkItemType'])" }) -join ',' }
 function Get-ParentId { param([int]$Id) Get-FakeAbTarget (@($script:FakeAb.Items[$Id].relations | Where-Object { $_.rel -eq 'System.LinkTypes.Hierarchy-Reverse' })[0]) }
@@ -1066,6 +1101,30 @@ $story = New-FakeAbItem 'User Story' 'Small'
 $out = Invoke-TestSync (Phase 'User Story' "AB#$story" 'phase-2' 'Small') @((P 'PKT-05'), (P 'H-5' '' @('PKT-05') 'PKT-05'))
 "s7-story=$(Get-Tree 'H-5')|$($out -join ' | ')"
 
+# 7b. A Parent packet with no item that this sync won't create (another phase, or no file): a dry run, a
+# plain sync and -Force all leave the task and say why, the same way. One this sync creates is "(new)".
+Reset-Board (New-TestConfig)
+$feature = New-FakeAbItem 'Feature' 'Search'
+$ph7b = Phase 'Feature' "AB#$feature"
+[void](Invoke-TestSync $ph7b @((P 'PKT-01'), (P 'H-1' '' @('PKT-01'))))
+$gone = @((P 'PKT-01'), (P 'H-1' '' @('PKT-01') 'PKT-20'), (P 'H-2' '' @() 'PKT-20'))
+$dry = Invoke-TestSync $ph7b $gone -DryRun -Force
+$plain = Invoke-TestSync $ph7b $gone
+$forced = Invoke-TestSync $ph7b $gone -Force
+"s7b=$(Get-Tree 'H-1')|$($dry -join ' | ')||$($plain -join ' | ')||$($forced -join ' | ')"
+$coming = @((P 'PKT-01'), (P 'PKT-21'), (P 'H-1' '' @('PKT-01') 'PKT-21'))
+"s7b-new=$((Invoke-TestSync $ph7b $coming -DryRun -Force) -join ' | ')"
+# 7c. A Parent packet another phase creates in this sync, under a story root, so as a Task: the dry run
+# refuses the move the way the real run does, rather than promising it.
+Reset-Board (New-TestConfig)
+$feature = New-FakeAbItem 'Feature' 'Search'
+$small = New-FakeAbItem 'User Story' 'Small'
+[void](Invoke-TestSync (Phase 'Feature' "AB#$feature") @((P 'PKT-01'), (P 'H-1' '' @('PKT-01'))))
+$two = @(@((Phase 'Feature' "AB#$feature"), @((P 'PKT-01'), (P 'H-1' '' @('PKT-01') 'PKT-20'))), @((Phase 'User Story' "AB#$small" 'phase-2' 'Small'), @((P 'PKT-20'))))
+$dry = Invoke-TestSync -Phases $two -DryRun -Force
+$forced = Invoke-TestSync -Phases $two -Force
+"s7c=$(Get-Tree 'H-1')|$($dry -join ' | ')||$($forced -join ' | ')"
+
 # 5. Setup checks each level's type, and the task type against its own map.
 Reset-Board (New-TestConfig)
 "setup=$((Initialize-ProvBoard) -join ' | ')"
@@ -1112,6 +1171,10 @@ Assert-That ((& $abGet 's4-old-basic') -match "no work item type 'Feature'" -and
 Assert-That ((& $abGet 's4-approval') -match '^PKT-01>Search:User Story,H-1>PKT-01:Approval\|' -and (& $abGet 's4-approval') -notmatch 'note:') 'a human task type outside the levels sits under the story it unblocks' (& $abGet 's4-approval')
 Assert-That ((& $abGet 's7') -match '^PKT-01>Search:User Story,PKT-02>Search:User Story,H-1>PKT-02:Task,H-2>PKT-01:Task\|' -and (& $abGet 's7') -notmatch 'note:') 'a Parent line puts a human task under that story, over the one it unblocks, and gives a task with no dependencies a place' (& $abGet 's7')
 Assert-That ((& $abGet 's7-plain') -match '^H-1>PKT-02:Task\|note: H-1 AB#\d+ is under AB#\d+, and its place is under PKT-01 AB#\d+: sync -Phase phase-1 -Force moves it' -and (& $abGet 's7-force') -match '^H-1>PKT-01:Task\|moved H-1 AB#\d+ under PKT-01 AB#\d+ \(was under AB#\d+\)') 'a changed Parent line moves the task only with -Force' "$(& $abGet 's7-plain')`n$(& $abGet 's7-force')"
+Assert-That ((& $abGet 's7b') -match '^H-1>PKT-01:Task\|' -and ([regex]::Matches((& $abGet 's7b'), "note: H-1 AB#\d+ was left where it is: its Parent PKT-20 isn't on the board")).Count -eq 3 -and (& $abGet 's7b') -notmatch 'Force moves it|PKT-20 \(new\)|would move') 'a Parent packet sync won''t create: the dry run, a plain sync and -Force all say it isn''t on the board, and promise no move' (& $abGet 's7b')
+Assert-That ((& $abGet 's7b') -match "note: H-2 \(new\) would get no parent: its Parent PKT-20 isn't on the board") 'a dry run tells a new task whose Parent has no item that it would get no parent' (& $abGet 's7b')
+Assert-That ((& $abGet 's7c') -match '^H-1>PKT-01:Task\|' -and (& $abGet 's7c') -match 'note: H-1 was left where it is: PKT-20 \(new\), the story it belongs under, is of type Task, not User Story' -and (& $abGet 's7c') -match 'note: H-1 was left where it is: PKT-20 AB#\d+, the story it belongs under, is of type Task, not User Story' -and (& $abGet 's7c') -notmatch 'would move H-1') 'a Parent packet another phase creates as a Task: the dry run names the type clash the real run hits, and promises no move' (& $abGet 's7c')
+Assert-That ((& $abGet 's7b-new') -match 'would put PKT-21 \(new\) under AB#\d+' -and (& $abGet 's7b-new') -match 'would move H-1 AB#\d+ under PKT-21 \(new\) \(now under AB#\d+\)') 'a Parent packet this sync creates is (new) in its dry run' (& $abGet 's7b-new')
 Assert-That ((& $abGet 's7-story') -match '^H-5>Small:Task\|' -and (& $abGet 's7-story') -match "note: H-5 names Parent PKT-05, but under AB#\d+ \(type User Story\) its Task can't go under a packet's Task, so that line has no effect here") 'under a story root the Parent line has no effect, and sync says so' (& $abGet 's7-story')
 Assert-That ((& $abGet 'setup') -match 'hierarchy: Epic > Feature > User Story > Task' -and (& $abGet 'setup') -match "'Task' has every mapped state \(New, Active, Closed\)" -and (& $abGet 'setup') -match "'User Story' has every mapped state \(New, Active, Resolved, Closed\)") 'setup checks the hierarchy''s types, the task type against taskStatusMap' (& $abGet 'setup')
 Assert-That ((& $abGet 'setup-nomap') -match "MISSING states on 'Task': Resolved .*give the task type its own taskStatusMap") 'without taskStatusMap, setup names the missing task state and the fix' (& $abGet 'setup-nomap')

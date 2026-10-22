@@ -69,6 +69,7 @@ try {
         }
         if ($p.Kind -eq 'human' -and $p.Parent -match "^$($cfg.packetPrefix)-\d+$") {
             if (-not $byId.ContainsKey($p.Parent)) { Add-Finding 'ERROR' $p.Id "Parent $($p.Parent) has no packet file" }
+            # Under -Phase, files outside the phase aren't checked, so one may be a human task with a packet's ID.
             elseif ($byId[$p.Parent].Kind -ne 'packet') { Add-Finding 'ERROR' $p.Id "Parent $($p.Parent) is a human task; a human task goes under a packet" }
         }
         if ($p.Kind -eq 'packet') {

@@ -264,8 +264,9 @@ function Set-ProvHierarchy {
     <# Makes each item of the tree a sub-issue of its place: the root, or the packet a human task's Parent
        line names. Already linked is fine. An issue under another parent (an issue has only one) was put
        there on the board: it is named and left there, and -Force moves it, as on Azure Boards. -DryRun
-       reads the same and says what it would link or move, writing nothing. #>
-    param([Parameter(Mandatory)]$Tree, [Parameter(Mandatory)][hashtable]$ItemsById, [switch]$DryRun, [switch]$Force)
+       reads the same and says what it would link or move, writing nothing; -Creating are the IDs this sync
+       creates, which a dry run calls "(new)". #>
+    param([Parameter(Mandatory)]$Tree, [Parameter(Mandatory)][hashtable]$ItemsById, [string[]]$Creating = @(), [switch]$DryRun, [switch]$Force)
     $root = $Tree.Phase.Root
     if (-not $root) { return }
     $cfg = $script:PwConfig
@@ -276,10 +277,10 @@ function Set-ProvHierarchy {
         $target = $ref; $label = "$($root.Level) #$ref"
         if ($p.Kind -eq 'human' -and $p.Parent) {
             $parentItem = $ItemsById[$p.Parent]
-            # In a dry run, a packet with no issue yet may be one this sync would create.
+            # A packet with no issue yet is "(new)" only in a dry run of the sync that creates it.
             if ($parentItem) { $target = [string]$parentItem.Number; $label = "$($p.Parent) #$target" }
-            elseif ($DryRun) { $target = ''; $label = "$($p.Parent) (new)" }
-            else { if ($item) { "note: $($p.Id) #$($item.Number) was left where it is: its Parent $($p.Parent) isn't on the board" }; continue }
+            elseif ($DryRun -and $Creating -contains $p.Parent) { $target = ''; $label = "$($p.Parent) (new)" }
+            else { "note: $(if ($item) { "$($p.Id) #$($item.Number) was left where it is" } else { "$($p.Id) (new) would get no parent" }): its Parent $($p.Parent) isn't on the board"; continue }
         }
         if (-not $item) { if ($DryRun) { "would put $($p.Id) (new) under $label" }; continue }
         if ($target) {

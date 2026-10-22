@@ -432,7 +432,8 @@ function Resolve-ProvHierarchy {
     $ab = $cfg.board.azureBoards
     $levels = Get-PwAbLevels
     $names = @($levels.Keys)
-    $tree = [pscustomobject]@{ Phase = $Phase; RootId = 0; RootType = $null; PacketType = $ab.workItemType; Places = @(); Features = @{} }
+    # PacketIds: the phase's packets, so a dry run knows the type another tree's new story gets.
+    $tree = [pscustomobject]@{ Phase = $Phase; RootId = 0; RootType = $null; PacketType = $ab.workItemType; PacketIds = @($Packets | Where-Object { $_.Kind -eq 'packet' } | ForEach-Object Id); Places = @(); Features = @{} }
     $script:AbTrees[$Phase.Slug] = $tree
     $root = $Phase.Root
     if (-not $root) { return $tree }
@@ -514,8 +515,9 @@ function Set-ProvHierarchy {
        links each item that has no parent under its place. An item under another parent (an item has only
        one) was put there on the board, or by an older layout: it is named and left there, and -Force moves
        it, as -Force makes the packet files win over board edits elsewhere in sync. An item whose type
-       doesn't fit its place is named and left where it is. -DryRun says what it would do and writes nothing. #>
-    param([Parameter(Mandatory)]$Tree, [Parameter(Mandatory)][hashtable]$ItemsById, [switch]$DryRun, [switch]$Force)
+       doesn't fit its place is named and left where it is. -DryRun says what it would do and writes nothing;
+       -Creating are the IDs this sync creates, which a dry run calls "(new)". #>
+    param([Parameter(Mandatory)]$Tree, [Parameter(Mandatory)][hashtable]$ItemsById, [string[]]$Creating = @(), [switch]$DryRun, [switch]$Force)
     if (-not $Tree.RootId) { return }
     $cfg = $script:PwConfig
     $ab = $cfg.board.azureBoards
@@ -569,11 +571,19 @@ function Set-ProvHierarchy {
         if ($place.Note) { "note: $($place.Note)"; continue }
         # The parent: the root, a workstream feature, or the packet whose story a human task sits under.
         $story = if ($place.Parent -notin 'root', 'feature') { $ItemsById[$place.Parent] } else { $null }
+        # A story with no item is "(new)" only in a dry run of the sync that creates it. Any other (a Parent
+        # line naming a packet of a phase not synced, or with no file) is named the same way in every run.
+        if ($place.Parent -notin 'root', 'feature' -and -not $story -and -not ($DryRun -and $Creating -contains $place.Parent)) {
+            $it = $ItemsById[$place.Id]
+            "note: $(if ($it) { "$($place.Id) AB#$($it.Number) was left where it is" } else { "$($place.Id) (new) would get no parent" }): its Parent $($place.Parent) isn't on the board"; continue
+        }
         $target = if ($place.Parent -eq 'root') { $Tree.RootId } elseif ($place.Parent -eq 'feature') { [int]$Tree.Features[$place.Feature] } elseif ($story) { $story.Number } else { 0 }
         $label = if ($place.Parent -eq 'root') { "AB#$target" } else {
             $(if ($place.Parent -eq 'feature') { $title = $script:AbFeatureTitles["$($Tree.RootId)|$($place.Feature)"]; "$($ab.featureWorkItemType) '$(if ($title) { $title } else { $place.Feature })'" } else { $place.Parent }) + $(if ($target) { " AB#$target" } else { ' (new)' })
         }
-        if ($story -and $story.Type -and $story.Type -ine $Tree.PacketType) { "note: $($place.Id) was left where it is: $label, the story it belongs under, is of type $($story.Type), not $($Tree.PacketType)"; continue }
+        # A story a dry run would create gets its own phase's packet type (a Task under a story root).
+        $storyType = if ($story) { $story.Type } elseif ($place.Parent -notin 'root', 'feature') { $script:AbTrees.Values | Where-Object { $_.PacketIds -contains $place.Parent } | ForEach-Object PacketType | Select-Object -First 1 } else { $null }
+        if ($storyType -and $storyType -ine $Tree.PacketType) { "note: $($place.Id) was left where it is: $label, the story it belongs under, is of type $storyType, not $($Tree.PacketType)"; continue }
         $item = $ItemsById[$place.Id]
         if (-not $item) { if ($DryRun) { "would put $($place.Id) (new) under $label" }; continue }
         $wi = Get-PwAbWorkItem $item.Number

@@ -149,7 +149,7 @@ function Resolve-ProvHierarchy {
 }
 
 function Set-ProvHierarchy {
-    param([Parameter(Mandatory)]$Tree, [Parameter(Mandatory)][hashtable]$ItemsById, [switch]$DryRun, [switch]$Force)
+    param([Parameter(Mandatory)]$Tree, [Parameter(Mandatory)][hashtable]$ItemsById, [string[]]$Creating = @(), [switch]$DryRun, [switch]$Force)
     $root = $Tree.Phase.Root
     if (-not $root) { return }
     $ref = $root.Ref -replace '^(AB)?#', ''
@@ -159,8 +159,8 @@ function Set-ProvHierarchy {
         if ($p.Kind -eq 'human' -and $p.Parent) {
             $parentItem = $ItemsById[$p.Parent]
             if ($parentItem) { $target = [string]$parentItem.Number; $label = "$($p.Parent) #$target" }
-            elseif ($DryRun) { $target = ''; $label = "$($p.Parent) (new)" }
-            else { if ($item) { "note: $($p.Id) #$($item.Number) was left where it is: its Parent $($p.Parent) isn't on the board" }; continue }
+            elseif ($DryRun -and $Creating -contains $p.Parent) { $target = ''; $label = "$($p.Parent) (new)" }
+            else { "note: $(if ($item) { "$($p.Id) #$($item.Number) was left where it is" } else { "$($p.Id) (new) would get no parent" }): its Parent $($p.Parent) isn't on the board"; continue }
         }
         if (-not $item) { if ($DryRun) { "would put $($p.Id) (new) under $label" }; continue }
         $from = [string]$item.Parent
