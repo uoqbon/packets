@@ -70,7 +70,7 @@ The plan names the root of the phase's tree with one line, chosen by how big the
 - **Azure Boards** follows the process's levels, one at a time. Under an epic, sync makes one Feature per workstream (a packet's `**Workstream:**`; without one, a Feature named after the phase) and puts each packet under it as a User Story. Under a feature, the packets are its User Stories; under a user story, its Tasks. A human task is a Task under the story it unblocks (else the one it follows), or beside the packets under a user story. Phases under one epic share a workstream's Feature. Sync links an item that has no parent; one under another parent is named and left there, and `sync -Force` moves it. [providers.md](./providers.md#azure-boards) has the details.
 - **GitHub** has no levels: every packet and human task becomes a sub-issue of the root issue.
 
-Run `sync -DryRun` first and show the owner what it prints: on Azure Boards, the Features it would create, the items it would link, and the items it names as misplaced (a GitHub dry run links nothing and prints no tree). Move those only when the owner says so: `sync -DryRun -Force` lists the moves, `sync -Force` makes them.
+Run `sync -DryRun` first and show the owner what it prints: on Azure Boards, the Features it would create, the items it would link, and the items it names as misplaced (a GitHub dry run links nothing and prints no tree). Move those only when the owner says so: `sync -DryRun -Force` lists the moves, `sync -Force` makes them. `-Force` also overwrites every body that sync skipped as edited on the board, so move those edits into the packet files first.
 
 ## Read the board
 

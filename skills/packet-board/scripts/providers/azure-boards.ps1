@@ -23,8 +23,10 @@ $script:AbCommentsApi = '7.1-preview.4'
 # Each phase's tree (Resolve-ProvHierarchy), by phase slug: New-ProvItem reads the packets' type from it.
 $script:AbTrees = @{}
 # The Features found or created under each epic, by "<epic id>|<name>" (keys ignore case), shared by every
-# phase's tree: phases under one epic share a workstream's Feature. Planned holds those a dry run would create.
+# phase's tree: phases under one epic share a workstream's Feature. Titles holds a reused Feature's own title
+# (for messages); Planned holds those a dry run would create.
 $script:AbFeatures = @{}
+$script:AbFeatureTitles = @{}
 $script:AbFeaturesPlanned = @{}
 
 function Initialize-Prov {
@@ -494,7 +496,7 @@ function Resolve-ProvHierarchy {
             $key = "$rootId|$name"
             if (-not $script:AbFeatures[$key]) {
                 $hit = $kids | Where-Object { ([string]$_.fields['System.Title']).Trim() -ieq $name } | Select-Object -First 1
-                if ($hit) { $script:AbFeatures[$key] = [int]$hit.id }
+                if ($hit) { $script:AbFeatures[$key] = [int]$hit.id; $script:AbFeatureTitles[$key] = ([string]$hit.fields['System.Title']).Trim() }
             }
             $tree.Features[$name] = [int]$script:AbFeatures[$key]
         }
@@ -515,17 +517,19 @@ function Set-ProvHierarchy {
     $org = $ab.organization.TrimEnd('/')
     $ph = $Tree.Phase
     $parentRel = 'System.LinkTypes.Hierarchy-Reverse'
-    # A Feature is created only for an item this run puts under it: a new item, one with no parent, or any
-    # item with -Force. Without that, a board kept in another layout would get empty Features, again each
-    # sync after the owner removes them.
+    # A Feature is created only for an item this run puts under it: a new item, or an existing one of the
+    # right type that has no parent (or any parent, with -Force). Without that, a board kept in another
+    # layout, or holding items of an older type, would get empty Features, again each sync after the owner
+    # removes them. A Feature that already exists needs no such check, so its items aren't read twice.
     $needed = @{}
     foreach ($place in $Tree.Places) {
         if ($place.Parent -ne 'feature' -or $place.Note -or $needed[$place.Feature]) { continue }
+        if ($Tree.Features[$place.Feature] -or $script:AbFeatures["$($Tree.RootId)|$($place.Feature)"]) { continue }
         $item = $ItemsById[$place.Id]
-        if ($Force -or -not $item) { $needed[$place.Feature] = $true; continue }
+        if (-not $item) { $needed[$place.Feature] = $true; continue }
         $w = Get-PwAbWorkItem $item.Number
         if ([string]$w.fields['System.WorkItemType'] -ine $place.Type) { continue }
-        if (-not @($w['relations'] | Where-Object { $_ -and $_.rel -eq $parentRel }).Count) { $needed[$place.Feature] = $true }
+        if ($Force -or -not @($w['relations'] | Where-Object { $_ -and $_.rel -eq $parentRel }).Count) { $needed[$place.Feature] = $true }
     }
     foreach ($name in @($Tree.Features.Keys | Sort-Object)) {
         if ($Tree.Features[$name]) { continue }
@@ -561,7 +565,7 @@ function Set-ProvHierarchy {
         $story = if ($place.Parent -notin 'root', 'feature') { $ItemsById[$place.Parent] } else { $null }
         $target = if ($place.Parent -eq 'root') { $Tree.RootId } elseif ($place.Parent -eq 'feature') { [int]$Tree.Features[$place.Feature] } elseif ($story) { $story.Number } else { 0 }
         $label = if ($place.Parent -eq 'root') { "AB#$target" } else {
-            $(if ($place.Parent -eq 'feature') { "$($ab.featureWorkItemType) '$($place.Feature)'" } else { $place.Parent }) + $(if ($target) { " AB#$target" } else { ' (new)' })
+            $(if ($place.Parent -eq 'feature') { $title = $script:AbFeatureTitles["$($Tree.RootId)|$($place.Feature)"]; "$($ab.featureWorkItemType) '$(if ($title) { $title } else { $place.Feature })'" } else { $place.Parent }) + $(if ($target) { " AB#$target" } else { ' (new)' })
         }
         if ($story -and $story.Type -and $story.Type -ine $Tree.PacketType) { "note: $($place.Id) was left where it is: $label, the story it belongs under, is of type $($story.Type), not $($Tree.PacketType)"; continue }
         $item = $ItemsById[$place.Id]
@@ -575,7 +579,7 @@ function Set-ProvHierarchy {
             })
         if ($target -and $parents.Count -eq 1 -and $parents[0].Id -eq $target) { continue }
         $from = ($parents | ForEach-Object { "AB#$($_.Id)" }) -join ', '
-        if ($from -and -not $Force) { "note: $($place.Id) AB#$($item.Number) is under $from, and its place is under ${label}: sync -Phase $($ph.Slug) -Force moves it (with -DryRun, it shows every move first)"; continue }
+        if ($from -and -not $Force) { "note: $($place.Id) AB#$($item.Number) is under $from, and its place is under ${label}: sync -Phase $($ph.Slug) -Force moves it, and also overwrites any body this sync skipped as edited on the board, so move those edits into the packet files first (with -DryRun, it shows every change)"; continue }
         $verb = if ($parents.Count) { 'move' } else { 'put' }
         if ($DryRun) { "would $verb $($place.Id) AB#$($item.Number) under $label$(if ($from) { " (now under $from)" })"; continue }
         # Outside a dry run every feature and item exists by now.

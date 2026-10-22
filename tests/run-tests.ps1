@@ -796,7 +796,7 @@ function New-TestConfig {
     $ab = Merge-PwHashtable $tpl.board.azureBoards (Merge-PwHashtable @{ organization = 'https://dev.azure.com/fake'; project = 'Sample' } $Azure)
     Merge-PwHashtable $script:Defaults @{ repo = 'example/sample'; board = @{ provider = 'azure-boards'; azureBoards = $ab } }
 }
-function Reset-Board { param($Config) $script:FakeAb.Items = @{}; $script:FakeAb.Next = 1; $script:FakeAbCalls.Clear(); $script:AbTrees = @{}; $script:AbFeatures = @{}; $script:AbFeaturesPlanned = @{}; $script:AbItemCache = $null; Initialize-Prov -Config $Config }
+function Reset-Board { param($Config) $script:FakeAb.Items = @{}; $script:FakeAb.Next = 1; $script:FakeAbCalls.Clear(); $script:AbTrees = @{}; $script:AbFeatures = @{}; $script:AbFeatureTitles = @{}; $script:AbFeaturesPlanned = @{}; $script:AbItemCache = $null; Initialize-Prov -Config $Config }
 function P {
     param([string]$Id, [string]$Workstream = '', [string[]]$Deps = @())
     $human = $Id -like 'H-*'
@@ -874,6 +874,16 @@ $plain = Invoke-TestSync (Phase 'Epic' "AB#$epic") $kept
 "s1k=$($plain -join ' | ')|writes=$(@(Get-FakeAbWrites $mark).Count)"
 $forced = Invoke-TestSync (Phase 'Epic' "AB#$epic") $kept -Force
 "s1k-force=$(Get-Tree 'PKT-01', 'PKT-02')|$($forced -join ' | ')"
+
+# 1b''. An item of an older type (a packet made a Task) with no parent: neither a plain sync nor -Force
+# creates the Feature it can't go under.
+Reset-Board (New-TestConfig)
+$epic = New-FakeAbItem 'Epic' 'Old types'
+[void](New-FakeAbItem 'Task' 'PKT-01 · Api' -Tags 'packet')
+$mark = $script:FakeAbCalls.Count
+$plain = Invoke-TestSync (Phase 'Epic' "AB#$epic") @((P 'PKT-01' 'Backend'))
+$forced = Invoke-TestSync (Phase 'Epic' "AB#$epic") @((P 'PKT-01' 'Backend')) -Force
+"s1t=$($plain -join ' | ')|$($forced -join ' | ')|writes=$(@(Get-FakeAbWrites $mark).Count)"
 
 # 1c. An item changed on the board between sync's read and its write is not overwritten: the move fails.
 Reset-Board (New-TestConfig)
@@ -963,15 +973,16 @@ $r = Invoke-Kit $abTest @('-Kit', $kit)
 $ab = @{}; foreach ($line in ($r.Text -split "`n")) { if ($line -match '^(?<k>[\w-]+)=(?<v>.*)$') { $ab[$Matches.k] = $Matches.v } }
 $abGet = { param($k) if ($ab.ContainsKey($k)) { $ab[$k] } else { '' } }
 Assert-That ($r.Code -eq 0) 'the hierarchy scenarios run' $r.Text
-Assert-That ((& $abGet 's1-dry') -match "would create Feature 'Checkout' under AB#1" -and (& $abGet 's1-dry') -match "would create Feature 'Storefront' under AB#1" -and (& $abGet 's1-dry') -match 'would put PKT-02 \(new\) under Feature ''Checkout'' \(new\)' -and (& $abGet 's1-dry') -match "note: PKT-01 AB#5 is under AB#1, and its place is under Feature 'payments' AB#3: sync -Phase phase-1 -Force moves it" -and (& $abGet 's1-dry') -notmatch 'would move' -and (& $abGet 's1-dry') -match '\|writes=0$') 'a dry run says which features it would create and what it would link, names misplaced items, and writes nothing' (& $abGet 's1-dry')
+Assert-That ((& $abGet 's1-dry') -match "would create Feature 'Checkout' under AB#1" -and (& $abGet 's1-dry') -match "would create Feature 'Storefront' under AB#1" -and (& $abGet 's1-dry') -match 'would put PKT-02 \(new\) under Feature ''Checkout'' \(new\)' -and (& $abGet 's1-dry') -match "note: PKT-01 AB#5 is under AB#1, and its place is under Feature 'Payments' AB#3: sync -Phase phase-1 -Force moves it" -and (& $abGet 's1-dry') -notmatch 'would move' -and (& $abGet 's1-dry') -match '\|writes=0$') 'a dry run says which features it would create and what it would link, names misplaced items, and writes nothing' (& $abGet 's1-dry')
 Assert-That ((& $abGet 's1-plain') -match '\|tree=PKT-01>Storefront revamp:User Story,PKT-02>Checkout:User Story,H-1>Storefront revamp:Task$' -and (& $abGet 's1-plain') -match 'note: H-1 AB#6 is under AB#1' -and (& $abGet 's1-plain') -notmatch 'moved') 'without -Force, sync moves nothing (the dispatcher''s sync never moves an item): it links new items and names the misplaced' (& $abGet 's1-plain')
-Assert-That ((& $abGet 's1-dry-force') -match "would move PKT-01 AB#5 under Feature 'payments' AB#3 \(now under AB#1\)" -and (& $abGet 's1-dry-force') -match 'would move H-1 AB#6 under PKT-03 AB#\d+ \(now under AB#1\)' -and (& $abGet 's1-dry-force') -match '\|writes=0$') 'a dry run with -Force lists every move, and writes nothing' (& $abGet 's1-dry-force')
+Assert-That ((& $abGet 's1-dry-force') -match "would move PKT-01 AB#5 under Feature 'Payments' AB#3 \(now under AB#1\)" -and (& $abGet 's1-dry-force') -match 'would move H-1 AB#6 under PKT-03 AB#\d+ \(now under AB#1\)' -and (& $abGet 's1-dry-force') -match '\|writes=0$') 'a dry run with -Force lists every move, and writes nothing' (& $abGet 's1-dry-force')
 Assert-That ((& $abGet 's1-tree') -eq 'PKT-01>Payments:User Story,PKT-02>Checkout:User Story,PKT-03>Storefront:User Story,H-1>PKT-03:Task,H-2>PKT-02:Task,H-3>none:Task') 'under an epic: a feature per workstream (none: the phase''s name), packets as its stories, a human task under the story it unblocks or follows' "$(& $abGet 's1-tree')`n$(& $abGet 's1')"
 Assert-That ((& $abGet 's1-reused') -eq 'True' -and (& $abGet 's1-epic') -eq 'Feature:Checkout,Feature:Checkout,Feature:Payments,Feature:Payments,Feature:Storefront') 'an open feature under the epic with the workstream''s name is reused (not a closed one, a Removed one, nor one elsewhere), and only features are left under the epic' "$(& $abGet 's1-reused') $(& $abGet 's1-epic')"
-Assert-That ((& $abGet 's1') -match 'moved PKT-01 AB#5 under Feature ''payments'' AB#3 \(was under AB#1\)' -and (& $abGet 's1') -match 'moved H-1 AB#6 under PKT-03 AB#\d+ \(was under AB#1\)' -and (& $abGet 's1') -match 'note: H-3 \(type Task\) has no User Story to sit under') 'sync -Force says what it moved, and why a human task has no place' (& $abGet 's1')
+Assert-That ((& $abGet 's1') -match 'moved PKT-01 AB#5 under Feature ''Payments'' AB#3 \(was under AB#1\)' -and (& $abGet 's1') -match 'moved H-1 AB#6 under PKT-03 AB#\d+ \(was under AB#1\)' -and (& $abGet 's1') -match 'note: H-3 \(type Task\) has no User Story to sit under') 'sync -Force says what it moved, and why a human task has no place' (& $abGet 's1')
 Assert-That ((& $abGet 's1-again') -match '^note: H-3 [^|]*\|writes=0$') 'a second sync changes nothing' (& $abGet 's1-again')
 Assert-That ((& $abGet 's1b') -eq 'PKT-01>Backend:User Story,PKT-02>Backend:User Story,PKT-03>Beta:User Story|features=Backend[],Beta[phase:phase-2]|again=0/0' -and ([regex]::Matches((& $abGet 's1b-dry'), "would create Feature 'Backend'")).Count -eq 1) 'phases under one epic share a workstream''s Feature (one, untagged; a dry run plans it once), and the next sync changes nothing' "$(& $abGet 's1b')`n$(& $abGet 's1b-dry')"
 Assert-That ((& $abGet 's1k') -match "note: PKT-01 AB#2 is under AB#1, and its place is under Feature 'Backend' \(new\)" -and (& $abGet 's1k') -notmatch 'created' -and (& $abGet 's1k') -match '\|writes=0$' -and (& $abGet 's1k-force') -match '^PKT-01>Backend:User Story,PKT-02>Storefront:User Story\|created Feature') 'on a board kept in another layout, a plain sync creates no empty Feature and writes nothing; -Force builds the tree' "$(& $abGet 's1k')`n$(& $abGet 's1k-force')"
+Assert-That ((& $abGet 's1t') -match '^note: PKT-01 AB#2 is of type Task, but its place under Feature ''Backend'' \(new\) takes a work item of type User Story' -and (& $abGet 's1t') -notmatch 'created' -and (& $abGet 's1t') -match '\|writes=0$') 'an item of an older type gets no empty Feature, with or without -Force' (& $abGet 's1t')
 Assert-That ((& $abGet 's1c') -match 'TF26071' -and (& $abGet 's1c') -match '\|parent=Stale$') 'a move whose revision test fails stops sync and leaves the item where it was' (& $abGet 's1c')
 Assert-That ((& $abGet 's2-tree') -eq 'PKT-01>Export orders as CSV:Task,PKT-02>Export orders as CSV:Task,H-1>Export orders as CSV:Task') 'under a story: the packets and human tasks are its tasks' "$(& $abGet 's2-tree')`n$(& $abGet 's2')"
 Assert-That ((& $abGet 's2-status') -match '^Ready to merge\|state=Active\|tags=[^|]*status:ready-to-merge' -and (& $abGet 's2-status') -notmatch 'status:ready(;|$)') 'a task packet moves through the task states (taskStatusMap): Ready to merge is Active plus its tag' (& $abGet 's2-status')
