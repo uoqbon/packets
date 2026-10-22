@@ -11,9 +11,10 @@
   A dependency whose ID prefix the config's remotes lists is another repository's packet: it needs no
   file here and isn't looked up (board.ps1 deps does that); the summary lists it.
 
-  ERROR  a malformed packet; a duplicate ID; a dependency that doesn't exist; a cycle; two packets that
-         can run at the same time (neither depends on the other) and own the same existing file; two
-         such packets that hold the same lock; a packet that owns a lock's paths without declaring it.
+  ERROR  a malformed packet; a duplicate ID; a dependency or Parent that doesn't exist; a cycle; two
+         packets that can run at the same time (neither depends on the other) and own the same existing
+         file; two such packets that hold the same lock; a packet that owns a lock's paths without
+         declaring it.
   WARN   globs of two concurrent packets that may overlap on files not yet written; a shared touchpoint
          one concurrent packet owns outright; a touchpoint missing from the plan's touchpoint table;
          a packet scheduled in a wave no later than one of its dependencies; an unknown lens; a packet
@@ -65,6 +66,10 @@ try {
             $prefix = ($d -split '-')[0]
             $hint = if ($prefix -ne $cfg.packetPrefix -and $prefix -ne $cfg.humanPrefix) { " (a packet in another repository needs its prefix $prefix in the config's remotes)" } else { '' }
             Add-Finding 'ERROR' $p.Id "depends on $d, which has no packet file$hint"
+        }
+        if ($p.Kind -eq 'human' -and $p.Parent -match "^$($cfg.packetPrefix)-\d+$") {
+            if (-not $byId.ContainsKey($p.Parent)) { Add-Finding 'ERROR' $p.Id "Parent $($p.Parent) has no packet file" }
+            elseif ($byId[$p.Parent].Kind -ne 'packet') { Add-Finding 'ERROR' $p.Id "Parent $($p.Parent) is a human task; a human task goes under a packet" }
         }
         if ($p.Kind -eq 'packet') {
             if ($p.Acceptance.Count -gt 8) { Add-Finding 'WARN' $p.Id "$($p.Acceptance.Count) acceptance criteria: one PR that big rarely clears review in three rounds; consider splitting" }

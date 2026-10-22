@@ -17,7 +17,7 @@
   board.ps1 sync [-Phase p] [-DryRun] [-Force]
                                             create or update one item per packet file, linked under the
                                             plan's root item; never touches Status. -Force: the files win
-                                            over board edits (bodies; on Azure Boards, an item's parent)
+                                            over board edits (bodies, and an item's parent)
   board.ps1 show [-Phase p] [-Json]         every packet and human task with its board state
   board.ps1 next [-Phase p] [-Json]         Ready packets in dispatch order (priority, wave, id) with verdicts
   board.ps1 deps <ID> [-Json]               one packet's verdict: START, STACK or BLOCKED, with reasons

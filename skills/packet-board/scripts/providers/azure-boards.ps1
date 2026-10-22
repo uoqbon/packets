@@ -11,8 +11,9 @@
 # can't be reordered). The phase's plan names its root, an existing epic, feature or story, and sync builds
 # the tree under it: under an epic, one feature per workstream holds that workstream's packets as stories;
 # under a feature, the packets are its stories; under a story, its tasks. A human task sits under the story
-# it unblocks (or, failing that, the one it follows), or beside the packets under a story root. Sync links
-# an item that has no parent; it moves one that has another parent only with -Force.
+# its Parent line names, else the one it unblocks (or, failing that, the one it follows), or beside the
+# packets under a story root. Sync links an item that has no parent; it moves one that has another parent
+# only with -Force.
 #
 # Auth: AZURE_DEVOPS_EXT_PAT (a PAT with Work Items read & write), else a token from `az login`.
 # Calls go to the REST API directly (api-version 7.1; comments 7.1-preview.4), so no az extension is needed.
@@ -423,7 +424,8 @@ function Resolve-ProvHierarchy {
        writes anything. The root must exist and be of the type its line names, or this stops sync. Each item
        sits one level below its parent: a packet under the root, or under its workstream's feature when the
        root is an epic; a human task (a task, unless humanWorkItemType is another level's type) under the
-       first packet that waits on it, else the first one it waits on. -Packets are the phase's packets and human tasks in dependency order. Returns the tree
+       packet its Parent line names, else the first packet that waits on it, else the first one it waits on.
+       -Packets are the phase's packets and human tasks in dependency order. Returns the tree
        for Set-ProvHierarchy, and keeps it for New-ProvItem, which creates packets of its PacketType. #>
     param([Parameter(Mandatory)]$Phase, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Packets)
     $cfg = $script:PwConfig
@@ -465,18 +467,21 @@ function Resolve-ProvHierarchy {
             $idx = $names.IndexOf($level)
             # A human task is created as humanWorkItemType, whatever level it sits at.
             $type = if ($p.Kind -eq 'human') { $ab.humanWorkItemType } else { $levels[$level] }
-            $place = [pscustomobject]@{ Id = $p.Id; Type = $type; Parent = $null; Feature = $null; Note = $null }
+            $place = [pscustomobject]@{ Id = $p.Id; Type = $type; Parent = $null; Feature = $null; Note = $null; Hint = $null }
+            $named = if ($p.Kind -eq 'human') { $p.Parent } else { $null }
             if ($idx -eq $rootIdx + 1) { $place.Parent = 'root' }
             elseif ($idx -gt $rootIdx + 1 -and $names[$idx - 1] -eq 'feature') {
                 $place.Parent = 'feature'
                 $place.Feature = if ($p.Workstream) { $p.Workstream.Trim() } else { $Phase.Title }
             }
             elseif ($idx -gt $rootIdx + 1 -and $names[$idx - 1] -eq 'story') {
-                $story = @(@($phasePackets | Where-Object { $_.DependsOn -contains $p.Id }) + @(foreach ($d in $p.DependsOn) { $phasePackets | Where-Object { $_.Id -eq $d } })) | Select-Object -First 1
-                if ($story) { $place.Parent = $story.Id }
-                else { $place.Note = "$($p.Id) (type $($place.Type)) has no $($levels.story) to sit under: no packet of $($Phase.Slug) waits on it or comes before it. Give it a Depends on, or link it by hand" }
+                # The packet a human task's Parent line names may be in another phase; Set-ProvHierarchy checks its type.
+                $story = if ($named) { $named } else { @(@($phasePackets | Where-Object { $_.DependsOn -contains $p.Id }) + @(foreach ($d in $p.DependsOn) { $phasePackets | Where-Object { $_.Id -eq $d } })) | Select-Object -First 1 | ForEach-Object Id }
+                if ($story) { $place.Parent = $story; $named = $null }
+                else { $place.Note = "$($p.Id) (type $($place.Type)) has no $($levels.story) to sit under: no packet of $($Phase.Slug) waits on it or comes before it. Give it a Parent or a Depends on, or link it by hand" }
             }
             else { $place.Note = "$($p.Id) (type $($place.Type)) can't sit under AB#$rootId (type $rootType); link it by hand" }
+            if ($named) { $place.Hint = "$($p.Id) names Parent $named, but under AB#$rootId (type $rootType) its $($place.Type) can't go under a packet's $($tree.PacketType), so that line has no effect here" }
             $place
         })
     $wanted = @($tree.Places | Where-Object { $_.Feature } | ForEach-Object { $_.Feature } | Select-Object -Unique)
@@ -560,6 +565,7 @@ function Set-ProvHierarchy {
         "created $($ab.featureWorkItemType) '$name' AB#$($wi.id) under AB#$($Tree.RootId)"
     }
     foreach ($place in $Tree.Places) {
+        if ($place.Hint) { "note: $($place.Hint)" }
         if ($place.Note) { "note: $($place.Note)"; continue }
         # The parent: the root, a workstream feature, or the packet whose story a human task sits under.
         $story = if ($place.Parent -notin 'root', 'feature') { $ItemsById[$place.Parent] } else { $null }

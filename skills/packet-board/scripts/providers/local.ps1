@@ -142,7 +142,8 @@ function Get-ProvRefText { param([Parameter(Mandatory)]$Item) "Packet $($Item.Id
 function Set-ProvAssignee { param([Parameter(Mandatory)][string]$Ref) }
 
 function Resolve-ProvHierarchy {
-    <# As on GitHub: every packet and human task of the phase sits under the plan's root item. #>
+    <# As on GitHub: every packet and human task of the phase sits under the plan's root item, a human task
+       with a Parent line under that packet's item. #>
     param([Parameter(Mandatory)]$Phase, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Packets)
     [pscustomobject]@{ Phase = $Phase; Packets = @($Packets) }
 }
@@ -150,13 +151,25 @@ function Resolve-ProvHierarchy {
 function Set-ProvHierarchy {
     param([Parameter(Mandatory)]$Tree, [Parameter(Mandatory)][hashtable]$ItemsById, [switch]$DryRun, [switch]$Force)
     $root = $Tree.Phase.Root
-    if (-not $root -or $DryRun) { return }
+    if (-not $root) { return }
     $ref = $root.Ref -replace '^(AB)?#', ''
     foreach ($p in $Tree.Packets) {
         $item = $ItemsById[$p.Id]
-        if (-not $item -or $item.Parent -eq $ref) { continue }
-        [void](Update-PwLocalRow -Number $item.Number -Change { param($row) $row.parent = $ref })
-        "linked $($p.Id) under $($root.Level) #$ref"
+        $target = $ref; $label = "$($root.Level) #$ref"
+        if ($p.Kind -eq 'human' -and $p.Parent) {
+            $parentItem = $ItemsById[$p.Parent]
+            if ($parentItem) { $target = [string]$parentItem.Number; $label = "$($p.Parent) #$target" }
+            elseif ($DryRun) { $target = ''; $label = "$($p.Parent) (new)" }
+            else { if ($item) { "note: $($p.Id) #$($item.Number) was left where it is: its Parent $($p.Parent) isn't on the board" }; continue }
+        }
+        if (-not $item) { if ($DryRun) { "would put $($p.Id) (new) under $label" }; continue }
+        $from = [string]$item.Parent
+        if ($target -and $from -eq $target) { continue }
+        # As on GitHub and Azure Boards: an item under another parent is named, and -Force moves it.
+        if ($from -and -not $Force) { "note: $($p.Id) #$($item.Number) is under #$from, and its place is under ${label}: sync -Phase $($Tree.Phase.Slug) -Force moves it, and also overwrites any body this sync skipped as edited on the board, so move those edits into the packet files first (with -DryRun, it shows every change)"; continue }
+        if ($DryRun) { "would $(if ($from) { 'move' } else { 'put' }) $($p.Id) #$($item.Number) under $label$(if ($from) { " (now under #$from)" })"; continue }
+        [void](Update-PwLocalRow -Number $item.Number -Change { param($row) $row.parent = $target })
+        "$(if ($from) { 'moved' } else { 'linked' }) $($p.Id) under $label$(if ($from) { " (was under #$from)" })"
     }
 }
 

@@ -2,6 +2,7 @@
 
 - **Human task:** H-0 · **Priority:** P0 · **Target:** 2026-11-02
 - **Depends on:** PKT-03, PKT-04
+- **Parent:** none
 
 ## Goal
 
