@@ -634,6 +634,9 @@ function Invoke-PwGhPages { param(`$Path) @(
     }
     Set-Content -LiteralPath (Join-Path $fakeBin 'gh-data.json') -Value ($ghData | ConvertTo-Json -Depth 8)
     Set-Content -LiteralPath (Join-Path $fakeBin 'gh.ps1') -Value @'
+# On Windows pwsh resolves gh to this file ahead of gh.cmd and runs it in the caller's process, under the
+# kit's strict mode; run as the separate process it is elsewhere.
+Set-StrictMode -Off; $ErrorActionPreference = 'Continue'
 $data = Get-Content -Raw (Join-Path $PSScriptRoot 'gh-data.json') | ConvertFrom-Json -AsHashtable
 $a = @($args)
 Add-Content -LiteralPath (Join-Path $PSScriptRoot 'calls.log') -Value ($a -join ' ')
@@ -1205,7 +1208,7 @@ try {
     Assert-That ($r.Text -match 'update\s+\.github/skills/packet-plan/SKILL\.md' -and -not ((Get-Content -Raw $edited) -match 'local note')) '-Force replaces it' $r.Text
     $sameAsSource = @(Get-ChildItem -LiteralPath (Join-Path $kit 'agents') -Filter '*.agent.md' | Where-Object { (Get-FileHash $_.FullName).Hash -ne (Get-FileHash (Join-Path $target ".github/agents/$($_.Name)")).Hash })
     Assert-That ($sameAsSource.Count -eq 0) 'with the default models, installed agents equal their sources (the model lines and the template agree)' (($sameAsSource | ForEach-Object Name) -join ', ')
-    Assert-That ((Get-Content -Raw (Join-Path $target '.github/agents/packet-dispatcher.agent.md')) -match '(?m)^disable-model-invocation: true$') 'the dispatcher cannot be started as a subagent' ''
+    Assert-That ((Get-Content -Raw (Join-Path $target '.github/agents/packet-dispatcher.agent.md')) -match '(?m)^disable-model-invocation: true\r?$') 'the dispatcher cannot be started as a subagent' ''
     $cfgPath = Join-Path $target '.github/packet-workflow.json'
     $cfgIn = Get-Content -Raw $cfgPath | ConvertFrom-Json -AsHashtable
     $cfgIn.models.light = @("Claude Sonnet 5.5 (Anthropic)", "it's fine")

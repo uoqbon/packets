@@ -1,0 +1,3 @@
+# @uoqbon owns every path. While the main-pr ruleset requires review from Code Owners, a pull request
+# needs their approval to merge, unless someone on the ruleset's bypass list merges it.
+* @uoqbon
