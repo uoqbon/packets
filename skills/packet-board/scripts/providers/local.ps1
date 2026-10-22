@@ -141,11 +141,23 @@ function Get-ProvCurrentUser { 'local' }
 function Get-ProvRefText { param([Parameter(Mandatory)]$Item) "Packet $($Item.Id) (local board item $($Item.Number))" }
 function Set-ProvAssignee { param([Parameter(Mandatory)][string]$Ref) }
 
-function Set-ProvParent {
-    param([Parameter(Mandatory)]$Item, [Parameter(Mandatory)][string]$EpicRef)
-    if ($Item.Parent -eq $EpicRef) { return $false }
-    [void](Update-PwLocalRow -Number $Item.Number -Change { param($row) $row.parent = $EpicRef })
-    $true
+function Resolve-ProvHierarchy {
+    <# As on GitHub: every packet and human task of the phase sits under the plan's root item. #>
+    param([Parameter(Mandatory)]$Phase, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Packets)
+    [pscustomobject]@{ Phase = $Phase; Packets = @($Packets) }
+}
+
+function Set-ProvHierarchy {
+    param([Parameter(Mandatory)]$Tree, [Parameter(Mandatory)][hashtable]$ItemsById, [switch]$DryRun, [switch]$Force)
+    $root = $Tree.Phase.Root
+    if (-not $root -or $DryRun) { return }
+    $ref = $root.Ref -replace '^(AB)?#', ''
+    foreach ($p in $Tree.Packets) {
+        $item = $ItemsById[$p.Id]
+        if (-not $item -or $item.Parent -eq $ref) { continue }
+        [void](Update-PwLocalRow -Number $item.Number -Change { param($row) $row.parent = $ref })
+        "linked $($p.Id) under $($root.Level) #$ref"
+    }
 }
 
 function Set-ProvDependencies {

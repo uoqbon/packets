@@ -38,7 +38,15 @@ Good packets make parallel work safe. Bad ones make agents edit the same files, 
    ```
 
    ERRORs block the board: overlapping ownership between packets that can run at the same time, a shared lock without an order, a cycle, a missing dependency, a malformed file. Fix each WARN too, or say in the plan why it stands. The summary gives the waves, the packets most others depend on and the critical path; use them in the plan.
-6. **Write the plan file**: its heading is the phase's name, which becomes the board's milestone. Then goal and constraints, milestones, the packet index table, a Mermaid dependency graph, the critical path, the schedule by wave, a `## Shared touchpoints` section with its table (the validator checks packets against it, and warns when packets use touchpoints but the plan has no such section), locks, and the cut line. Add the optional **Board** and **Epic** lines only when the owner gives you a link or an existing epic issue; nothing fills them in later.
+6. **Write the plan file**: its heading is the phase's name, which becomes the board's milestone. Then goal and constraints, milestones, the packet index table, a Mermaid dependency graph, the critical path, the schedule by wave, a `## Shared touchpoints` section with its table (the validator checks packets against it, and warns when packets use touchpoints but the plan has no such section), locks, and the cut line. Add the optional **Board** line only when the owner gives you a link, and a root line only when the owner names an existing item; nothing fills them in later. The root line places the phase on the board, so choose it by the plan's size and ask the owner for the item:
+
+   | Plan | Line | On Azure Boards each packet becomes |
+   | --- | --- | --- |
+   | large: several workstreams, many packets | `**Epic:** AB#<n>` | a User Story under its workstream's Feature (sync creates the Features) |
+   | medium: one deliverable | `**Feature:** AB#<n>` | a User Story under the feature |
+   | small: a few packets toward one story | `**User Story:** AB#<n>` | a Task under the story |
+
+   One root line per plan (the validator refuses two). On GitHub (`#<n>`) the root issue is each packet's parent, at any of the three. Under an epic, give every packet a **Workstream** named as its Feature should read; a packet without one goes under a Feature named after the phase.
 7. **Hand off.** Tell the owner: the number of packets per priority and wave, the critical path, what must merge first, the human tasks and when they're due, and any judgement call you made. Recommend reviewing the phase as a pull request before the board is populated (`/packet-board sync`), because every later step trusts these files.
 
 ## Rules for a good packet

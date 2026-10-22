@@ -103,7 +103,7 @@ Commit what it installs in a pull request; Copilot reads the files from the chec
 ## Use
 
 1. **Plan.** In Copilot Chat (Agent): `/packet-plan docs/specs/checkout.md phase-2-checkout`. It writes the phase plan and packet files and runs the validator until it reports no errors. Review them as a pull request and merge it.
-2. **Board.** `/packet-board setup`, then `/packet-board sync phase-2-checkout`. Each packet becomes an issue or work item, with its dependencies linked and its status set from the packet's `Initial status`.
+2. **Board.** `/packet-board setup`, then `/packet-board sync phase-2-checkout`. Each packet becomes an issue or work item, with its dependencies linked and its status set from the packet's `Initial status`. If the plan names a root item (an `**Epic:**`, `**Feature:**` or `**User Story:**` line, by the plan's size), each packet goes under it: on Azure Boards as a tree that follows the process's levels, Epic > Feature > User Story > Task; on GitHub as sub-issues.
 3. **Dispatch.** Open one agent session per packet, each in its own worktree (in the Agents view, *New Worktree*; or `git worktree add ../repo-pkt-03 origin/main` and open that folder). Pick **packet-dispatcher** and say `dispatch` (it takes the next startable packet) or `dispatch PKT-03`. It claims the packet, briefs and runs the implementer, checks scope and tests, opens the PR and runs the review panel, then sets Ready to merge once CI passes on the reviewed head.
 4. **Merge.** You merge. The item closes; `board reconcile` (run by every dispatcher's preflight) marks it Done.
 5. **Track.** `/packet-progress` anytime (ask about cost, and it adds `-Credits`: an estimate of each packet's AI credits against `budget.monthlyCredits`): health, the merge order that unblocks the most, what can start, what waits on you, the critical path, late and stale work.
@@ -147,7 +147,7 @@ When a dispatcher needs you, the packet goes to **Needs human** with a question 
 pwsh -File tests/run-tests.ps1
 ```
 
-It builds a throwaway repository with a sample phase and exercises the validator, the board (local provider: sync, verdicts, claims, markers, reconcile), review scope, tiers and lens grouping, scope checks, progress, the credit estimates and the installer. It needs no network.
+It builds a throwaway repository with a sample phase and exercises the validator, the board (local provider: sync, verdicts, claims, markers, reconcile), review scope, tiers and lens grouping, scope checks, progress, the credit estimates and the installer. It runs the Azure Boards provider's tree building and status mapping against an in-memory Azure DevOps ([tests/azure-boards-fake.ps1](tests/azure-boards-fake.ps1)), which keeps links, revisions and states per type the way the service does. It needs no network.
 
 **Inside Copilot**, [tests/copilot-e2e.prompt.md](tests/copilot-e2e.prompt.md) is a staged end-to-end test plan for a sandbox repository. It runs discovery and static checks, the offline suite and the installer, then `/packet-plan` on a mini spec, board setup and sync, a single dispatch, two parallel dispatches with a merge conflict, the Needs human and resume path, and safety probes, and ends with a report. Paste it into Copilot Chat (Agent), or copy it to the sandbox's `.github/prompts/` to run it as `/packet-kit-e2e <stage>`. It stops at each step that needs you (opening dispatcher sessions, merging) and keeps its state in `.packet-e2e/`, which it excludes from git.
 

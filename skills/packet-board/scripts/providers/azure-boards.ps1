@@ -1,9 +1,18 @@
 # azure-boards.ps1: the board as Azure Boards work items, while code and pull requests stay on GitHub
 # (PR bodies say "Fixes AB#<id>", which the Azure Boards GitHub app links and transitions on merge).
 #
-# Statuses map to a work item State plus an optional tag (board.azureBoards.statusMap), because the
-# stock processes have fewer states than the workflow. Size, wave, phase and the packet marker are
-# tags; Priority is the Priority field (P0 = 1 … P3 = 4). Dependencies become Predecessor links.
+# Statuses map to a work item State plus an optional tag (board.azureBoards.statusMap, and taskStatusMap
+# for the task type, whose states differ), because the stock processes have fewer states than the
+# workflow. Size, wave, phase and the packet marker are tags; Priority is the Priority field (P0 = 1 …
+# P3 = 4). Dependencies become Predecessor links.
+#
+# Items form the process's hierarchy, Epic > Feature > User Story > Task, one level at a time, as Azure
+# Boards advises (under a link between items of one level, only the leaf shows on boards, and the backlog
+# can't be reordered). The phase's plan names its root, an existing epic, feature or story, and sync builds
+# the tree under it: under an epic, one feature per workstream holds that workstream's packets as stories;
+# under a feature, the packets are its stories; under a story, its tasks. A human task sits under the story
+# it unblocks (or, failing that, the one it follows), or beside the packets under a story root. Sync links
+# an item that has no parent; it moves one that has another parent only with -Force.
 #
 # Auth: AZURE_DEVOPS_EXT_PAT (a PAT with Work Items read & write), else a token from `az login`.
 # Calls go to the REST API directly (api-version 7.1; comments 7.1-preview.4), so no az extension is needed.
@@ -11,6 +20,12 @@
 $script:AbHeaders = $null
 $script:AbItemCache = $null
 $script:AbCommentsApi = '7.1-preview.4'
+# Each phase's tree (Resolve-ProvHierarchy), by phase slug: New-ProvItem reads the packets' type from it.
+$script:AbTrees = @{}
+# The Features found or created under each epic, by "<epic id>|<name>" (keys ignore case), shared by every
+# phase's tree: phases under one epic share a workstream's Feature. Planned holds those a dry run would create.
+$script:AbFeatures = @{}
+$script:AbFeaturesPlanned = @{}
 
 function Initialize-Prov {
     param([Parameter(Mandatory)]$Config)
@@ -69,17 +84,27 @@ function Get-PwAbTagValue {
     if ($hit) { $hit.Substring($Prefix.Length) } else { $null }
 }
 
+function Get-PwAbStatusMap {
+    <# The status map for a work item type: taskStatusMap for the task type when the config sets one (a
+       task's states differ from a story's in every stock process), else statusMap. #>
+    param([string]$Type)
+    $ab = $script:PwConfig.board.azureBoards
+    if ($Type -and $Type -ieq $ab.taskWorkItemType -and $ab.Contains('taskStatusMap') -and $ab.taskStatusMap) { return $ab.taskStatusMap }
+    $ab.statusMap
+}
+
 function Get-PwAbStatus {
     <# The workflow status of a work item: a mapped tag wins; else the first status mapped to its state
-       without a tag. #>
-    param([string]$State, [string[]]$Tags)
-    $map = $script:PwConfig.board.azureBoards.statusMap
+       without a tag. Optional keys (a status's tag, a work item's relations) are read by index: under
+       strict mode, a dot on a missing key throws. #>
+    param([string]$State, [string[]]$Tags, [string]$Type)
+    $map = Get-PwAbStatusMap $Type
     foreach ($s in $script:Statuses) {
-        $tag = $map[$s].tag
+        $tag = $map[$s]['tag']
         if ($tag -and ($Tags | Where-Object { $_ -ieq $tag })) { return $s }
     }
     foreach ($s in $script:Statuses) {
-        if (-not $map[$s].tag -and $map[$s].state -ieq $State) { return $s }
+        if (-not $map[$s]['tag'] -and $map[$s].state -ieq $State) { return $s }
     }
     if ($script:PwConfig.board.azureBoards.doneStates -contains $State) { return 'Done' }
     'Backlog'
@@ -92,6 +117,7 @@ function ConvertTo-PwAbItem {
     $f = $WorkItem.fields
     $tags = Get-PwAbTags $f
     $state = [string]$f['System.State']
+    $type = if ($f.Contains('System.WorkItemType')) { [string]$f['System.WorkItemType'] } else { '' }
     $title = [string]$f['System.Title']
     $id = if ($title -match "^(?<id>$script:IdPattern)\s*·") { $Matches.id } else { $null }
     $prio = $null
@@ -117,15 +143,28 @@ function ConvertTo-PwAbItem {
         UpdatedAt     = $f['System.ChangedDate']
         Milestone     = Get-PwAbTagValue $tags 'phase:'
         Assignees     = @()
-        Status        = Get-PwAbStatus -State $state -Tags $tags
+        Status        = Get-PwAbStatus -State $state -Tags $tags -Type $type
         Priority      = $prio
         Size          = Get-PwAbTagValue $tags 'size:'
         Wave          = Get-PwAbTagValue $tags 'wave:'
         Target        = $target
         ProjectItemId = $null
         State         = $state
+        Type          = $type
         Relations     = @()
     }
+}
+
+function Get-PwAbWorkItems {
+    <# Work items by id with the named fields, 200 to a call; ids that no longer exist are left out. #>
+    param([int[]]$Ids = @(), [Parameter(Mandatory)][string[]]$Fields)
+    $found = [System.Collections.Generic.List[object]]::new()
+    for ($i = 0; $i -lt $Ids.Count; $i += 200) {
+        $batch = $Ids[$i..([Math]::Min($i + 199, $Ids.Count - 1))]
+        $res = Invoke-PwAb -Method POST -Path '_apis/wit/workitemsbatch' -Body @{ ids = @($batch); fields = $Fields; errorPolicy = 'omit' }
+        foreach ($wi in @($res.value)) { if ($wi) { $found.Add($wi) } }
+    }
+    @($found)
 }
 
 function Get-ProvItems {
@@ -141,11 +180,7 @@ function Get-ProvItems {
     if ($ab.priorityField) { $fields += $ab.priorityField }
     if ($ab.targetDateField) { $fields += $ab.targetDateField }
     $items = [System.Collections.Generic.List[object]]::new()
-    for ($i = 0; $i -lt $ids.Count; $i += 200) {
-        $batch = $ids[$i..([Math]::Min($i + 199, $ids.Count - 1))]
-        $res = Invoke-PwAb -Method POST -Path '_apis/wit/workitemsbatch' -Body @{ ids = @($batch); fields = $fields; errorPolicy = 'omit' }
-        foreach ($wi in @($res.value)) { if ($wi) { $it = ConvertTo-PwAbItem $wi; if ($it.Id) { $items.Add($it) } } }
-    }
+    foreach ($wi in (Get-PwAbWorkItems -Ids $ids -Fields $fields)) { $it = ConvertTo-PwAbItem $wi; if ($it.Id) { $items.Add($it) } }
     $script:AbItemCache = @($items)
     $script:AbItemCache
 }
@@ -162,20 +197,22 @@ function Update-PwAbWorkItem {
 }
 
 function Get-PwAbFresh {
-    <# The work item's current revision and tags, read just before a write that rewrites the tags. #>
+    <# The work item's current revision, tags and type, read just before a write that rewrites the tags. #>
     param([Parameter(Mandatory)][int]$Id)
-    $wi = Invoke-PwAb -Path "_apis/wit/workitems/${Id}?fields=System.Tags"
-    @{ Rev = [int]$wi.rev; Tags = @(Get-PwAbTags $wi.fields) }
+    $wi = Invoke-PwAb -Path "_apis/wit/workitems/${Id}?fields=System.Tags,System.WorkItemType"
+    @{ Rev = [int]$wi.rev; Tags = @(Get-PwAbTags $wi.fields); Type = [string]$wi.fields['System.WorkItemType'] }
 }
 
 function Get-PwAbStatusTags {
-    $map = $script:PwConfig.board.azureBoards.statusMap
-    @($script:Statuses | ForEach-Object { $map[$_].tag } | Where-Object { $_ })
+    <# Every status tag of both maps, so a status change clears one the other map set. #>
+    $ab = $script:PwConfig.board.azureBoards
+    $maps = @($ab.statusMap) + @(if ($ab.Contains('taskStatusMap') -and $ab.taskStatusMap) { $ab.taskStatusMap })
+    @(foreach ($map in $maps) { foreach ($s in $script:Statuses) { $map[$s]['tag'] } }) | Where-Object { $_ } | Select-Object -Unique
 }
 
 function Get-PwAbFieldOps {
-    <# JSON-patch operations for Status, Priority, Size, Wave and Target on an item with these tags. #>
-    param([Parameter(Mandatory)][hashtable]$Fields, [string[]]$Tags = @(), [switch]$ForceTags)
+    <# JSON-patch operations for Status, Priority, Size, Wave and Target on an item of this type with these tags. #>
+    param([Parameter(Mandatory)][hashtable]$Fields, [string[]]$Tags = @(), [string]$Type, [switch]$ForceTags)
     $ab = $script:PwConfig.board.azureBoards
     $ops = [System.Collections.Generic.List[object]]::new()
     $newTags = [System.Collections.Generic.List[string]]::new()
@@ -186,10 +223,10 @@ function Get-PwAbFieldOps {
         if (-not $value) { continue }
         if ($name -eq 'Status') {
             if ($script:Statuses -notcontains $value) { Stop-Pw "unknown status '$value' (one of: $($script:Statuses -join ', '))" }
-            $m = $ab.statusMap[$value]
+            $m = (Get-PwAbStatusMap $Type)[$value]
             $ops.Add(@{ op = 'add'; path = '/fields/System.State'; value = $m.state })
             foreach ($st in (Get-PwAbStatusTags)) { [void]$newTags.RemoveAll([Predicate[string]] { param($x) $x -ieq $st }) }
-            if ($m.tag) { $newTags.Add($m.tag) }
+            if ($m['tag']) { $newTags.Add($m['tag']) }
             $tagsChanged = $true
         }
         elseif ($name -eq 'Priority') {
@@ -214,7 +251,7 @@ function Get-PwAbFieldOps {
 function Set-ProvFields {
     param([Parameter(Mandatory)]$Item, [Parameter(Mandatory)][hashtable]$Fields)
     $fresh = Get-PwAbFresh $Item.Number
-    $ops = Get-PwAbFieldOps -Fields $Fields -Tags $fresh.Tags
+    $ops = Get-PwAbFieldOps -Fields $Fields -Tags $fresh.Tags -Type $fresh.Type
     if ($ops.Count) { [void](Update-PwAbWorkItem -Id $Item.Number -Ops $ops -Rev $fresh.Rev) }
 }
 
@@ -235,7 +272,9 @@ function New-ProvItem {
     param([Parameter(Mandatory)]$Packet, [Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)][string]$Body, [string]$PhaseSlug = '', [string]$PhaseTitle = '')
     $cfg = $script:PwConfig
     $ab = $cfg.board.azureBoards
-    $type = if ($Packet.Kind -eq 'human') { $ab.humanWorkItemType } else { $ab.workItemType }
+    # A packet is a story, or a task under a story root: the phase's tree says which.
+    $tree = $script:AbTrees[$PhaseSlug]
+    $type = if ($Packet.Kind -eq 'human') { $ab.humanWorkItemType } elseif ($tree) { $tree.PacketType } else { $ab.workItemType }
     $tags = @($cfg.labels.packet)
     if ($Packet.Kind -eq 'human') { $tags += $cfg.labels.human }
     if ($PhaseSlug) { $tags += "phase:$PhaseSlug" }
@@ -276,7 +315,7 @@ function Update-ProvItem {
     $ops = [System.Collections.Generic.List[object]]::new()
     $ops.Add(@{ op = 'add'; path = '/fields/System.Title'; value = $Title })
     foreach ($o in (Get-PwAbDescriptionOps $Body)) { $ops.Add($o) }
-    foreach ($o in (Get-PwAbFieldOps -Fields $f -Tags $tags -ForceTags:$retag)) { $ops.Add($o) }
+    foreach ($o in (Get-PwAbFieldOps -Fields $f -Tags $tags -Type $fresh.Type -ForceTags:$retag)) { $ops.Add($o) }
     [void](Update-PwAbWorkItem -Id $Item.Number -Ops $ops -Rev $fresh.Rev)
 }
 
@@ -331,10 +370,15 @@ function Set-ProvAssignee {
     [void](Update-PwAbWorkItem -Id ([int]$Ref) -Ops @(@{ op = 'add'; path = '/fields/System.AssignedTo'; value = $account }))
 }
 
+function Get-PwAbWorkItem {
+    <# One work item with all its fields and its relations. #>
+    param([Parameter(Mandatory)][int]$Id)
+    Invoke-PwAb -Path "_apis/wit/workitems/${Id}?`$expand=relations"
+}
+
 function Get-PwAbRelations {
     param([Parameter(Mandatory)][int]$Id)
-    $wi = Invoke-PwAb -Path "_apis/wit/workitems/${Id}?`$expand=relations"
-    @($wi.relations | Where-Object { $_ })
+    @((Get-PwAbWorkItem $Id)['relations'] | Where-Object { $_ })
 }
 
 function Add-PwAbLinks {
@@ -349,10 +393,199 @@ function Add-PwAbLinks {
     $ops.Count
 }
 
-function Set-ProvParent {
-    param([Parameter(Mandatory)]$Item, [Parameter(Mandatory)][string]$EpicRef)
-    $id = [int]($EpicRef -replace '^AB#', '')
-    (Add-PwAbLinks -Id $Item.Number -Rel 'System.LinkTypes.Hierarchy-Reverse' -Targets @($id)) -gt 0
+function Get-PwAbTypeStates {
+    <# The state names of a work item type, and why there are none: Azure DevOps answers a type the project
+       doesn't have with an error, or with no states. #>
+    param([Parameter(Mandatory)][string]$Type)
+    try {
+        $r = Invoke-PwAb -Path "_apis/wit/workitemtypes/$([uri]::EscapeDataString($Type))/states"
+        $names = @($r['value'] | Where-Object { $_ } | ForEach-Object { $_['name'] })
+        @{ Names = $names; Error = $(if ($names.Count) { $null } else { 'no states' }) }
+    }
+    catch [PwError] { @{ Names = @(); Error = $_.Exception.Message } }
+}
+
+function Get-PwAbLevels {
+    <# The hierarchy's levels, top down, each with its work item type. A process without features (Basic:
+       Epic > Issue > Task) has no feature level. #>
+    $ab = $script:PwConfig.board.azureBoards
+    $levels = [ordered]@{ epic = $ab.epicWorkItemType }
+    if ($ab.featureWorkItemType) { $levels.feature = $ab.featureWorkItemType }
+    $levels.story = $ab.workItemType
+    $levels.task = $ab.taskWorkItemType
+    $levels
+}
+
+function Resolve-ProvHierarchy {
+    <# Where each packet and human task of a phase goes under the plan's root item, worked out before sync
+       writes anything. The root must exist and be of the type its line names, or this stops sync. Each item
+       sits one level below its parent: a packet under the root, or under its workstream's feature when the
+       root is an epic; a human task (a task, unless humanWorkItemType is another level's type) under the
+       first packet that waits on it, else the first one it waits on. -Packets are the phase's packets and human tasks in dependency order. Returns the tree
+       for Set-ProvHierarchy, and keeps it for New-ProvItem, which creates packets of its PacketType. #>
+    param([Parameter(Mandatory)]$Phase, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Packets)
+    $cfg = $script:PwConfig
+    $ab = $cfg.board.azureBoards
+    $levels = Get-PwAbLevels
+    $names = @($levels.Keys)
+    $tree = [pscustomobject]@{ Phase = $Phase; RootId = 0; RootType = $null; PacketType = $ab.workItemType; Places = @(); Features = @{} }
+    $script:AbTrees[$Phase.Slug] = $tree
+    $root = $Phase.Root
+    if (-not $root) { return $tree }
+    # Checked here, not with the config: a board without a root line never builds a tree, and a config from
+    # before the hierarchy (packets as tasks, say) keeps working until a plan names a root.
+    $types = @($levels.Values)
+    if (@($types | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique).Count -ne $types.Count) { Stop-Pw "$($Phase.Path) names a root, and the tree under it needs a different work item type at each level (board.azureBoards epic, feature, story and task types; got $($types -join ', '))" }
+    if (-not $levels.Contains($root.Level)) { Stop-Pw "$($Phase.Path) names a feature as its root (**$($root.Line):** $($root.Ref)), but board.azureBoards.featureWorkItemType is empty: this process has no features, so name an epic or a story" }
+    $rootId = [int]($root.Ref -replace '^(AB)?#', '')
+    $wi = Get-PwAbWorkItem $rootId
+    $rootType = [string]$wi.fields['System.WorkItemType']
+    if ($rootType -ine $levels[$root.Level]) { Stop-Pw "$($Phase.Path) says **$($root.Line):** $($root.Ref), but AB#$rootId is of type ${rootType}: name a work item of type $($levels[$root.Level]) there, or use the line for AB#${rootId}'s type (**Epic:**, **Feature:** or **User Story:**)" }
+    if (@(Get-PwAbTags $wi.fields) | Where-Object { $_ -ieq $cfg.labels.packet }) { Stop-Pw "$($Phase.Path) names AB#$rootId as its root, but AB#$rootId is a packet's own item: the root is the epic, feature or story the phase belongs to" }
+    $tree.RootId = $rootId
+    $tree.RootType = $rootType
+    $rootIdx = $names.IndexOf($root.Level)
+    $packetLevel = if ($root.Level -eq 'story') { 'task' } else { 'story' }
+    $tree.PacketType = $levels[$packetLevel]
+    $humanLevel = $names | Where-Object { $levels[$_] -ieq $ab.humanWorkItemType } | Select-Object -First 1
+    if (-not $humanLevel) { $humanLevel = 'task' }
+    if ($packetLevel -eq 'task') {
+        # Packets move through every status; task states differ from story states, so check them now
+        # rather than fail at Ready to merge.
+        $map = Get-PwAbStatusMap $tree.PacketType
+        $have = @((Get-PwAbTypeStates $tree.PacketType).Names)
+        $missing = @($script:Statuses | ForEach-Object { $map[$_].state } | Select-Object -Unique | Where-Object { $have -notcontains $_ })
+        if ($missing.Count) { Stop-Pw "under AB#$rootId (type $rootType) the packets are of type $($tree.PacketType), which has no state $($missing -join ', ') (it has: $($have -join ', ')): set board.azureBoards.taskStatusMap (providers.md has starting points)" }
+    }
+    $phasePackets = @($Packets | Where-Object { $_.Kind -eq 'packet' })
+    $tree.Places = @(foreach ($p in $Packets) {
+            $level = if ($p.Kind -eq 'human') { $humanLevel } else { $packetLevel }
+            $idx = $names.IndexOf($level)
+            # A human task is created as humanWorkItemType, whatever level it sits at.
+            $type = if ($p.Kind -eq 'human') { $ab.humanWorkItemType } else { $levels[$level] }
+            $place = [pscustomobject]@{ Id = $p.Id; Type = $type; Parent = $null; Feature = $null; Note = $null }
+            if ($idx -eq $rootIdx + 1) { $place.Parent = 'root' }
+            elseif ($idx -gt $rootIdx + 1 -and $names[$idx - 1] -eq 'feature') {
+                $place.Parent = 'feature'
+                $place.Feature = if ($p.Workstream) { $p.Workstream.Trim() } else { $Phase.Title }
+            }
+            elseif ($idx -gt $rootIdx + 1 -and $names[$idx - 1] -eq 'story') {
+                $story = @(@($phasePackets | Where-Object { $_.DependsOn -contains $p.Id }) + @(foreach ($d in $p.DependsOn) { $phasePackets | Where-Object { $_.Id -eq $d } })) | Select-Object -First 1
+                if ($story) { $place.Parent = $story.Id }
+                else { $place.Note = "$($p.Id) (type $($place.Type)) has no $($levels.story) to sit under: no packet of $($Phase.Slug) waits on it or comes before it. Give it a Depends on, or link it by hand" }
+            }
+            else { $place.Note = "$($p.Id) (type $($place.Type)) can't sit under AB#$rootId (type $rootType); link it by hand" }
+            $place
+        })
+    $wanted = @($tree.Places | Where-Object { $_.Feature } | ForEach-Object { $_.Feature } | Select-Object -Unique)
+    if ($wanted.Count) {
+        # A config from before the hierarchy fills in the Feature level by default, which a Basic project
+        # doesn't have: stop here, before any write, rather than when the first Feature is created.
+        $featureStates = Get-PwAbTypeStates $ab.featureWorkItemType
+        if (-not $featureStates.Names.Count) { Stop-Pw "under the $rootType AB#$rootId sync puts a $($ab.featureWorkItemType) per workstream, but the project has no work item type '$($ab.featureWorkItemType)' ($($featureStates.Error)): set board.azureBoards.featureWorkItemType to the process's feature type, or to `"`" where it has none (Basic)" }
+        # A feature already under the epic with the workstream's name is reused; open ones first, so a closed
+        # one is reused only when no open one has that name. A Removed one never is: Azure Boards hides it.
+        # Another phase's tree may have found it already.
+        $children = @($wi['relations'] | Where-Object { $_ -and $_.rel -eq 'System.LinkTypes.Hierarchy-Forward' } | ForEach-Object { [int](($_.url -split '/')[-1]) })
+        $kids = @(Get-PwAbWorkItems -Ids $children -Fields @('System.Id', 'System.Title', 'System.WorkItemType', 'System.State') |
+                Where-Object { [string]$_.fields['System.WorkItemType'] -ieq $ab.featureWorkItemType -and [string]$_.fields['System.State'] -ine 'Removed' } |
+                Sort-Object { $ab.doneStates -contains [string]$_.fields['System.State'] }, { [int]$_.id })
+        foreach ($name in $wanted) {
+            $key = "$rootId|$name"
+            if (-not $script:AbFeatures[$key]) {
+                $hit = $kids | Where-Object { ([string]$_.fields['System.Title']).Trim() -ieq $name } | Select-Object -First 1
+                if ($hit) { $script:AbFeatures[$key] = [int]$hit.id }
+            }
+            $tree.Features[$name] = [int]$script:AbFeatures[$key]
+        }
+    }
+    $tree
+}
+
+function Set-ProvHierarchy {
+    <# Builds a phase's tree (Resolve-ProvHierarchy): creates the workstream features the epic lacks, then
+       links each item that has no parent under its place. An item under another parent (an item has only
+       one) was put there on the board, or by an older layout: it is named and left there, and -Force moves
+       it, as -Force makes the packet files win over board edits elsewhere in sync. An item whose type
+       doesn't fit its place is named and left where it is. -DryRun says what it would do and writes nothing. #>
+    param([Parameter(Mandatory)]$Tree, [Parameter(Mandatory)][hashtable]$ItemsById, [switch]$DryRun, [switch]$Force)
+    if (-not $Tree.RootId) { return }
+    $cfg = $script:PwConfig
+    $ab = $cfg.board.azureBoards
+    $org = $ab.organization.TrimEnd('/')
+    $ph = $Tree.Phase
+    $parentRel = 'System.LinkTypes.Hierarchy-Reverse'
+    # A Feature is created only for an item this run puts under it: a new item, one with no parent, or any
+    # item with -Force. Without that, a board kept in another layout would get empty Features, again each
+    # sync after the owner removes them.
+    $needed = @{}
+    foreach ($place in $Tree.Places) {
+        if ($place.Parent -ne 'feature' -or $place.Note -or $needed[$place.Feature]) { continue }
+        $item = $ItemsById[$place.Id]
+        if ($Force -or -not $item) { $needed[$place.Feature] = $true; continue }
+        $w = Get-PwAbWorkItem $item.Number
+        if ([string]$w.fields['System.WorkItemType'] -ine $place.Type) { continue }
+        if (-not @($w['relations'] | Where-Object { $_ -and $_.rel -eq $parentRel }).Count) { $needed[$place.Feature] = $true }
+    }
+    foreach ($name in @($Tree.Features.Keys | Sort-Object)) {
+        if ($Tree.Features[$name]) { continue }
+        # A Feature an earlier phase's tree created (or, in a dry run, would create) in this sync.
+        $key = "$($Tree.RootId)|$name"
+        if ($script:AbFeatures[$key]) { $Tree.Features[$name] = [int]$script:AbFeatures[$key]; continue }
+        if (-not $needed[$name]) { continue }
+        if ($DryRun) {
+            if (-not $script:AbFeaturesPlanned[$key]) { "would create $($ab.featureWorkItemType) '$name' under AB#$($Tree.RootId)" }
+            $script:AbFeaturesPlanned[$key] = $true
+            continue
+        }
+        $link = "[$($ph.Path)](https://github.com/$($cfg.repo)/blob/$($cfg.defaultBranch)/$($ph.Path))"
+        # The phase's own Feature (its packets without a workstream) carries its phase tag; a workstream's
+        # Feature may hold the packets of several phases, so it carries none.
+        $own = $name -ieq $ph.Title
+        $text = if ($own) { "The packets of $($ph.Title) ($link) that name no workstream." } else { "Workstream ${name}: the packets that name it, in every phase under this $($ab.epicWorkItemType) (first $($ph.Title), $link)." }
+        $text += " Board sync puts them under this $($ab.featureWorkItemType); it never edits or deletes it."
+        $ops = [System.Collections.Generic.List[object]]::new()
+        $ops.Add(@{ op = 'add'; path = '/fields/System.Title'; value = $name })
+        foreach ($o in (Get-PwAbDescriptionOps $text)) { $ops.Add($o) }
+        if ($own) { $ops.Add(@{ op = 'add'; path = '/fields/System.Tags'; value = "phase:$($ph.Slug)" }) }
+        if ($ab.areaPath) { $ops.Add(@{ op = 'add'; path = '/fields/System.AreaPath'; value = $ab.areaPath }) }
+        $ops.Add(@{ op = 'add'; path = '/relations/-'; value = @{ rel = $parentRel; url = "$org/_apis/wit/workItems/$($Tree.RootId)" } })
+        $wi = Invoke-PwAb -Method POST -Path "_apis/wit/workitems/`$$([uri]::EscapeDataString($ab.featureWorkItemType))" -Body @($ops) -ContentType 'application/json-patch+json'
+        $Tree.Features[$name] = [int]$wi.id
+        $script:AbFeatures[$key] = [int]$wi.id
+        "created $($ab.featureWorkItemType) '$name' AB#$($wi.id) under AB#$($Tree.RootId)"
+    }
+    foreach ($place in $Tree.Places) {
+        if ($place.Note) { "note: $($place.Note)"; continue }
+        # The parent: the root, a workstream feature, or the packet whose story a human task sits under.
+        $story = if ($place.Parent -notin 'root', 'feature') { $ItemsById[$place.Parent] } else { $null }
+        $target = if ($place.Parent -eq 'root') { $Tree.RootId } elseif ($place.Parent -eq 'feature') { [int]$Tree.Features[$place.Feature] } elseif ($story) { $story.Number } else { 0 }
+        $label = if ($place.Parent -eq 'root') { "AB#$target" } else {
+            $(if ($place.Parent -eq 'feature') { "$($ab.featureWorkItemType) '$($place.Feature)'" } else { $place.Parent }) + $(if ($target) { " AB#$target" } else { ' (new)' })
+        }
+        if ($story -and $story.Type -and $story.Type -ine $Tree.PacketType) { "note: $($place.Id) was left where it is: $label, the story it belongs under, is of type $($story.Type), not $($Tree.PacketType)"; continue }
+        $item = $ItemsById[$place.Id]
+        if (-not $item) { if ($DryRun) { "would put $($place.Id) (new) under $label" }; continue }
+        $wi = Get-PwAbWorkItem $item.Number
+        $type = [string]$wi.fields['System.WorkItemType']
+        if ($type -ine $place.Type) { "note: $($place.Id) AB#$($item.Number) is of type $type, but its place under $label takes a work item of type $($place.Type): change its type on the board, then sync again"; continue }
+        $rels = @($wi['relations'])
+        $parents = @(for ($i = 0; $i -lt $rels.Count; $i++) {
+                if ($rels[$i] -and $rels[$i].rel -eq $parentRel) { [pscustomobject]@{ Index = $i; Id = [int](($rels[$i].url -split '/')[-1]) } }
+            })
+        if ($target -and $parents.Count -eq 1 -and $parents[0].Id -eq $target) { continue }
+        $from = ($parents | ForEach-Object { "AB#$($_.Id)" }) -join ', '
+        if ($from -and -not $Force) { "note: $($place.Id) AB#$($item.Number) is under $from, and its place is under ${label}: sync -Phase $($ph.Slug) -Force moves it (with -DryRun, it shows every move first)"; continue }
+        $verb = if ($parents.Count) { 'move' } else { 'put' }
+        if ($DryRun) { "would $verb $($place.Id) AB#$($item.Number) under $label$(if ($from) { " (now under $from)" })"; continue }
+        # Outside a dry run every feature and item exists by now.
+        if (-not $target) { "note: $($place.Id) AB#$($item.Number) was left where it is: $label isn't on the board"; continue }
+        # The test of the revision keeps a change made since the read above from being overwritten.
+        $ops = @(@($parents | Sort-Object Index -Descending | ForEach-Object { @{ op = 'remove'; path = "/relations/$($_.Index)" } }) +
+            @(@{ op = 'add'; path = '/relations/-'; value = @{ rel = $parentRel; url = "$org/_apis/wit/workItems/$target" } }))
+        [void](Update-PwAbWorkItem -Id $item.Number -Ops $ops -Rev ([int]$wi.rev))
+        "$(if ($from) { 'moved' } else { 'linked' }) $($place.Id) AB#$($item.Number) under $label$(if ($from) { " (was under $from)" })"
+    }
 }
 
 function Set-ProvDependencies {
@@ -363,17 +596,27 @@ function Set-ProvDependencies {
 }
 
 function Initialize-ProvBoard {
-    <# Checks that the work item types exist and have every mapped state. Tags need no setup. #>
+    <# Checks that the hierarchy's work item types exist, and that the story, task and human task types have
+       every state their status map names. Tags need no setup. #>
     param([switch]$DryRun)
     $ab = $script:PwConfig.board.azureBoards
     $lines = [System.Collections.Generic.List[string]]::new()
-    foreach ($type in @($ab.workItemType, $ab.humanWorkItemType | Select-Object -Unique)) {
-        $states = Invoke-PwAb -Path "_apis/wit/workitemtypes/$([uri]::EscapeDataString($type))/states"
-        $names = @($states.value | ForEach-Object { $_.name })
-        if (-not $names) { $lines.Add("MISSING: work item type '$type' not found in $($ab.project)"); continue }
-        $mapped = @($script:Statuses | ForEach-Object { $ab.statusMap[$_].state } | Select-Object -Unique)
+    $levels = Get-PwAbLevels
+    $lines.Add("hierarchy: $(@($levels.Values) -join ' > ') (a plan's **Epic:**, **Feature:** or **User Story:** line names the root of its tree)")
+    $checked = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($level in @($levels.Keys) + 'human') {
+        $type = if ($level -eq 'human') { $ab.humanWorkItemType } else { $levels[$level] }
+        if (-not $checked.Add($type)) { continue }
+        $states = Get-PwAbTypeStates $type
+        $names = @($states.Names)
+        if (-not $names.Count) { $lines.Add("MISSING: work item type '$type' not found in $($ab.project) ($($states.Error))$(if ($level -eq 'feature') { '; a process without features (Basic) sets featureWorkItemType to ""' })"); continue }
+        if ($level -in 'epic', 'feature') { $lines.Add("'$type' found ($level level)"); continue }
+        $ownMap = $type -ieq $ab.taskWorkItemType -and $ab.Contains('taskStatusMap') -and $ab.taskStatusMap
+        $map = Get-PwAbStatusMap $type
+        $mapped = @($script:Statuses | ForEach-Object { $map[$_].state } | Select-Object -Unique)
         $missing = @($mapped | Where-Object { $names -notcontains $_ })
-        if ($missing.Count) { $lines.Add("MISSING states on '$type': $($missing -join ', ') (it has: $($names -join ', ')). Fix board.azureBoards.statusMap.") }
+        $fix = if ($ownMap) { 'board.azureBoards.taskStatusMap' } elseif ($type -ieq $ab.taskWorkItemType) { 'board.azureBoards.statusMap, or give the task type its own taskStatusMap' } else { 'board.azureBoards.statusMap' }
+        if ($missing.Count) { $lines.Add("MISSING states on '$type': $($missing -join ', ') (it has: $($names -join ', ')). Fix $fix.") }
         else { $lines.Add("'$type' has every mapped state ($($mapped -join ', '))") }
     }
     if ($ab.priorityField -ne 'Microsoft.VSTS.Common.Priority') { $lines.Add("priority field: $($ab.priorityField)") }

@@ -75,7 +75,7 @@ Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`) a
    - `src/textkit/TextKit.ps1`, the entry point that dot-sources the modules, starts empty apart from a comment.
 3. ⏸ Ask me to run `/packet-plan docs/specs/textkit.md e2e-textkit` in a **new** chat session (Agent, default agent), and to come back when it says it's done. Tell me before I go: if the planner asks about item 4's time budget, answer "keep it exactly as written; it's behind the cut line" (stage 7 needs it).
 4. When I'm back, check what it produced:
-   - `docs/plan/e2e-textkit/plan.md` exists, with a packet index, a Mermaid graph, a critical path and a `## Shared touchpoints` table that lists `src/textkit/TextKit.ps1`; its heading is the phase's name with no placeholder text, and any **Board** or **Epic** line holds a real link or issue number, not a promise that something will fill it in;
+   - `docs/plan/e2e-textkit/plan.md` exists, with a packet index, a Mermaid graph, a critical path and a `## Shared touchpoints` table that lists `src/textkit/TextKit.ps1`; its heading is the phase's name with no placeholder text, and any **Board** line or root line (**Epic:**, **Feature:** or **User Story:**) holds a real link or issue number, not a promise that something will fill it in;
    - one packet file per spec item, plus a human task: the foundation packet, word count, title case, the optional slow packet, and H-n;
    - each packet has `Owns`, `Acceptance criteria` written as `- [ ]`, `Tests to run` with backticked commands, and `Review lenses`;
    - no packet owns `tests/run-all.ps1`, `.github/workflows/ci.yml` or `src/textkit/TextKit.ps1` (the scaffold); the feature packets list `TextKit.ps1` as a shared touchpoint;

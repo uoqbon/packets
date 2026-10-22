@@ -24,7 +24,9 @@ $script:Defaults = @{
         provider     = 'github-issues'
         githubProject = @{ owner = '@me'; number = 0; fields = @{ status = 'Status'; priority = 'Priority'; size = 'Size'; wave = 'Wave'; packet = 'Packet'; target = 'Target date' } }
         githubIssues  = @{ statusPrefix = 'status:'; priorityPrefix = 'priority:'; sizePrefix = 'size:'; wavePrefix = 'wave:' }
-        azureBoards   = @{ workItemType = 'User Story'; humanWorkItemType = 'Task'; areaPath = ''; iterationPath = ''; doneStates = @('Closed', 'Removed'); priorityField = 'Microsoft.VSTS.Common.Priority'; targetDateField = ''; markdown = $true }
+        # The work item types of the hierarchy, top down: epic, feature ('' where the process has none),
+        # story (workItemType) and task. statusMap is for stories; taskStatusMap, when set, for tasks.
+        azureBoards   = @{ epicWorkItemType = 'Epic'; featureWorkItemType = 'Feature'; workItemType = 'User Story'; taskWorkItemType = 'Task'; humanWorkItemType = 'Task'; areaPath = ''; iterationPath = ''; doneStates = @('Closed', 'Removed'); priorityField = 'Microsoft.VSTS.Common.Priority'; targetDateField = ''; markdown = $true }
     }
     labels        = @{ packet = 'packet'; human = 'human-task'; needsHuman = 'needs-human'; followUp = 'follow-up' }
     commands      = @{ test = ''; ci = '' }
@@ -141,9 +143,15 @@ function Get-PwConfig {
             $ab = $cfg.board.azureBoards
             if (-not $ab.organization -or $ab.organization -notmatch '^https://' -or $ab.organization -match '/ORG$') { Stop-Pw 'config: board.azureBoards.organization must be the organization URL, such as https://dev.azure.com/contoso' }
             if (-not $ab.project -or $ab.project -eq 'PROJECT') { Stop-Pw 'config: board.azureBoards.project is required' }
-            foreach ($s in $script:Statuses) {
-                if (-not $ab.statusMap -or -not $ab.statusMap[$s] -or -not $ab.statusMap[$s].state) { Stop-Pw "config: board.azureBoards.statusMap needs a state for '$s'" }
+            foreach ($mapName in @('statusMap') + @(if ($ab.Contains('taskStatusMap') -and $null -ne $ab.taskStatusMap) { 'taskStatusMap' })) {
+                foreach ($s in $script:Statuses) {
+                    if (-not $ab[$mapName] -or -not $ab[$mapName][$s] -or -not $ab[$mapName][$s]['state']) { Stop-Pw "config: board.azureBoards.$mapName needs a state for '$s'" }
+                }
             }
+            foreach ($key in 'epicWorkItemType', 'workItemType', 'taskWorkItemType', 'humanWorkItemType') {
+                if (-not $ab[$key] -or $ab[$key] -isnot [string]) { Stop-Pw "config: board.azureBoards.$key must name a work item type" }
+            }
+            if ($ab.featureWorkItemType -and $ab.featureWorkItemType -isnot [string]) { Stop-Pw 'config: board.azureBoards.featureWorkItemType must name a work item type, or be "" where the process has no features' }
         }
         default { Stop-Pw "config: board.provider must be github-project, github-issues, azure-boards or local (got '$($cfg.board.provider)')" }
     }
@@ -425,7 +433,10 @@ function Get-PwPackets {
 }
 
 function Get-PwPhaseInfo {
-    <# Title and epic of a phase, from the first heading and the **Epic:** line of <plans>/<phase>/plan.md. #>
+    <# Title and root item of a phase, from the first heading of <plans>/<phase>/plan.md and its root line:
+       **Epic:**, **Feature:** or **User Story:** (or **Story:**), each naming an existing item (#<n> or
+       AB#<n>). Root is that item as { Level = epic|feature|story; Ref }, or $null without exactly one such
+       line; Roots lists every root line found, so a check can refuse two. Epic is the **Epic:** line's ref. #>
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$Phase, [string]$Ref)
     $rel = "$($Config.paths.plans.Trim('/'))/$Phase/plan.md"
     $text = $null
@@ -435,16 +446,22 @@ function Get-PwPhaseInfo {
         if (Test-Path -LiteralPath $full) { $text = Get-Content -Raw -LiteralPath $full }
     }
     $title = $Phase; $epic = $null
+    $roots = [System.Collections.Generic.List[object]]::new()
     if ($text) {
         # The phase's name is the heading, without a ": plan" suffix (the template's old heading).
         if ($text -match '(?m)^#\s+(?<t>.+?)\s*$') {
             $t = $Matches.t -creplace '(?:\s*:|\s+[·—–-])\s*[Pp]lan$', ''
             if ($t) { $title = $t }
         }
-        # Only a real item number: the template's placeholder (#0) or a missing number means no epic.
-        if ($text -match '\*\*Epic:\*\*\s*(?<e>(?:AB)?#0*[1-9]\d*)\b') { $epic = $Matches.e }
+        # Only a real item number: the template's placeholder (#0) or a missing number means no root.
+        foreach ($m in [regex]::Matches($text, '\*\*(?<k>Epic|Feature|User Story|Story):\*\*\s*(?<e>(?:AB)?#0*[1-9]\d*)\b', 'IgnoreCase')) {
+            $level = switch ($m.Groups['k'].Value) { 'Epic' { 'epic' } 'Feature' { 'feature' } default { 'story' } }
+            $roots.Add([pscustomobject]@{ Level = $level; Ref = $m.Groups['e'].Value; Line = $m.Groups['k'].Value })
+            if ($level -eq 'epic' -and -not $epic) { $epic = $m.Groups['e'].Value }
+        }
     }
-    [pscustomobject]@{ Slug = $Phase; Title = $title; Epic = $epic; Path = $rel; Exists = [bool]$text }
+    $root = if ($roots.Count -eq 1) { $roots[0] } else { $null }
+    [pscustomobject]@{ Slug = $Phase; Title = $title; Epic = $epic; Root = $root; Roots = @($roots); Path = $rel; Exists = [bool]$text }
 }
 
 function Test-PwPacket {

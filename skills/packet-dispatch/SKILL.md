@@ -199,7 +199,7 @@ On resume, `gh pr view <n> --json state`:
 
 - open: still waiting. Release and stop.
 - closed without merging: the owner declined it. Ask again (**Needs human**).
-- merged: `board sync -Phase <phase> -Ref origin/<defaultBranch>`, so the item shows the amended packet (if sync skips it because its body was edited on the board, say so to the owner; the packet file is the contract either way). Then run Select's checks again for this packet, since the amendment may have changed its dependencies or locks:
+- merged: `board sync -Phase <phase> -Ref origin/<defaultBranch>`, so the item shows the amended packet (if sync skips it because its body was edited on the board, or names it as misplaced in the tree, say so to the owner; the packet file is the contract either way). Never add `-Force`: that overwrites the owner's board edits and moves items. Then run Select's checks again for this packet, since the amendment may have changed its dependencies or locks:
   - `board deps <ID> -Json`: its `Verdict` must be START. Read the verdict, not the exit code, which is 1 while the status is Needs human.
   - `board locks <ID>` exits 0, when the packet lists locks.
   - No open contract question names one of its dependencies.

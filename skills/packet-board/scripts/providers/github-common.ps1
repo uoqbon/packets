@@ -252,14 +252,28 @@ function Set-PwGhLabels {
     $script:GhIssueCache = $null
 }
 
-function Set-ProvParent {
-    <# Makes the item a sub-issue of the phase epic. Already linked is fine. #>
-    param([Parameter(Mandatory)]$Item, [Parameter(Mandatory)][string]$EpicRef)
+function Resolve-ProvHierarchy {
+    <# A phase's tree on GitHub, which has no levels: every packet and human task becomes a sub-issue of the
+       plan's root issue (its **Epic:**, **Feature:** or **User Story:** line). #>
+    param([Parameter(Mandatory)]$Phase, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Packets)
+    [pscustomobject]@{ Phase = $Phase; Packets = @($Packets) }
+}
+
+function Set-ProvHierarchy {
+    <# Makes each item of the tree a sub-issue of the root. Already linked is fine; a dry run links nothing,
+       and -Force changes nothing here. #>
+    param([Parameter(Mandatory)]$Tree, [Parameter(Mandatory)][hashtable]$ItemsById, [switch]$DryRun, [switch]$Force)
+    $root = $Tree.Phase.Root
+    if (-not $root -or $DryRun) { return }
     $cfg = $script:PwConfig
-    $existing = @(Invoke-PwGhPages "repos/$($cfg.repo)/issues/$EpicRef/sub_issues?per_page=100" | ForEach-Object { [long]$_.id })
-    if ($existing -contains $Item.DbId) { return $false }
-    [void](Invoke-PwGh api -X POST "repos/$($cfg.repo)/issues/$EpicRef/sub_issues" -F "sub_issue_id=$($Item.DbId)")
-    $true
+    $ref = $root.Ref -replace '^(AB)?#', ''
+    $existing = @(Invoke-PwGhPages "repos/$($cfg.repo)/issues/$ref/sub_issues?per_page=100" | ForEach-Object { [long]$_.id })
+    foreach ($p in $Tree.Packets) {
+        $item = $ItemsById[$p.Id]
+        if (-not $item -or $existing -contains $item.DbId) { continue }
+        [void](Invoke-PwGh api -X POST "repos/$($cfg.repo)/issues/$ref/sub_issues" -F "sub_issue_id=$($item.DbId)")
+        "linked $($p.Id) under $($root.Level) #$ref"
+    }
 }
 
 function Set-ProvDependencies {

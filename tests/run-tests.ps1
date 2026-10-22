@@ -183,8 +183,10 @@ Click through it.
     $r = Invoke-Kit $board @('sync')
     Assert-That ($r.Code -eq 0 -and $r.Text -match 'sync: 6 created, 0 updated') 'sync creates six items' $r.Text
     Assert-That ($r.Text -match 'linked PKT-02 to 1 dependency') 'sync links dependencies' $r.Text
+    $g = (Invoke-Kit $board @('get', 'H-1')).Text | ConvertFrom-Json
+    Assert-That ($r.Text -match 'linked PKT-01 under epic #99' -and $r.Text -match 'linked H-1 under epic #99' -and $g.Parent -eq '99') 'sync puts packets and human tasks under the plan''s root item' $r.Text
     $r = Invoke-Kit $board @('sync')
-    Assert-That ($r.Code -eq 0 -and $r.Text -match '0 created, 0 updated, 6 unchanged') 'second sync is a no-op' $r.Text
+    Assert-That ($r.Code -eq 0 -and $r.Text -match '0 created, 0 updated, 6 unchanged' -and $r.Text -notmatch 'linked') 'second sync is a no-op' $r.Text
     $r = Invoke-Kit $board @('show', '-WorkingTree')
     Assert-That ($r.Text -match 'PKT-05\s+#\d+\s+Backlog') 'Initial status Backlog is honoured' $r.Text
     $r = Invoke-Kit $board @('next', '-WorkingTree')
@@ -248,6 +250,12 @@ Click through it.
     & git checkout -q -- docs/plan/phase-1/plan.md
     $r = Invoke-Kit $board @('sync')
     Assert-That ($r.Text -match 'sync: 0 created, 6 updated') 'and back' $r.Text
+    [System.IO.File]::WriteAllText($planPath, ((Get-Content -Raw $planPath) -replace '(?m)^- \*\*Epic:\*\* #99', "- **Epic:** #99`n- **Feature:** #12"), [System.Text.UTF8Encoding]::new($false))
+    $r = Invoke-Kit $validate @('-Phase', 'phase-1')
+    Assert-That ($r.Code -eq 1 -and $r.Text -match 'ERROR\s+phase-1\s+docs/plan/phase-1/plan\.md names more than one root item \(Epic #99, Feature #12\)') 'a plan with two root lines fails validation' $r.Text
+    $r = Invoke-Kit $board @('sync')
+    Assert-That ($r.Code -eq 1 -and $r.Text -match 'PROBLEM docs/plan/phase-1/plan\.md: more than one root item' -and $r.Text -match 'Nothing synced') 'and sync refuses it before writing anything' $r.Text
+    & git checkout -q -- docs/plan/phase-1/plan.md
 
     # board reads the config as merged on origin/main: a branch can't switch the board or the trust list.
     $bare = Join-Path ([System.IO.Path]::GetTempPath()) ("pw-origin-" + [guid]::NewGuid().ToString('n').Substring(0, 8))
@@ -411,7 +419,10 @@ function Get-ProvComments { param(`$Ref) @(
     Remove-Item -LiteralPath $trustTest
     $unitTest = Join-Path ([System.IO.Path]::GetTempPath()) "pw-unit-$([guid]::NewGuid().ToString('n')).ps1"
     $phaseRoot = Join-Path ([System.IO.Path]::GetTempPath()) "pw-phases-$([guid]::NewGuid().ToString('n'))"
-    $headings = [ordered]@{ a = "# TextKit (e2e): plan`n`n- **Epic:** #0`n"; b = "# Disaster recovery plan`n`n- **Epic:** #12`n"; c = "# Office floor-plan`n"; d = "# Migration-Plan`n"; e = "# Checkout — Plan`n" }
+    $headings = [ordered]@{
+        a = "# TextKit (e2e): plan`n`n- **Epic:** #0`n"; b = "# Disaster recovery plan`n`n- **Epic:** #12`n"; c = "# Office floor-plan`n"; d = "# Migration-Plan`n"; e = "# Checkout — Plan`n"
+        f = "# F`n`n- **Feature:** AB#12`n"; g = "# G`n`n- **Story:** AB#7`n- **User Story:** AB#0`n"; h = "# H`n`n- **Epic:** AB#1`n- **User Story:** AB#2`n"
+    }
     foreach ($k in $headings.Keys) {
         New-Item -ItemType Directory -Force -Path (Join-Path $phaseRoot "docs/plan/$k") | Out-Null
         [System.IO.File]::WriteAllText((Join-Path $phaseRoot "docs/plan/$k/plan.md"), $headings[$k], [System.Text.UTF8Encoding]::new($false))
@@ -422,6 +433,7 @@ function Get-ProvComments { param(`$Ref) @(
 `$a = Get-PwPhaseInfo -Config `$cfg -Phase 'a'; `$b = Get-PwPhaseInfo -Config `$cfg -Phase 'b'
 "title-a=`$(`$a.Title)|epic-a=`$(`$a.Epic)|title-b=`$(`$b.Title)|epic-b=`$(`$b.Epic)"
 "titles=" + ((@('c', 'd', 'e') | ForEach-Object { (Get-PwPhaseInfo -Config `$cfg -Phase `$_).Title }) -join '|')
+"roots=" + ((@('b', 'f', 'g', 'h') | ForEach-Object { `$i = Get-PwPhaseInfo -Config `$cfg -Phase `$_; "`$(if (`$i.Root) { "`$(`$i.Root.Level):`$(`$i.Root.Ref)" } else { 'none' })/`$(@(`$i.Roots).Count)" }) -join '|')
 . '$((Join-Path $skills 'packet-board/scripts/providers/github-common.ps1').Replace("'", "''"))'
 function Confirm-PwGhLabel { param(`$Config, `$Name, `$Color, `$Description, [switch]`$DryRun) `$true }
 "labels=" + ((Initialize-PwGhLabels -Config @{ labels = @{ packet = 'packet'; human = 'human-task'; needsHuman = 'needs-human'; followUp = 'follow-up' } } -Keys 'needsHuman', 'followUp') -join ',')
@@ -479,6 +491,7 @@ function Invoke-PwGhPages { param(`$Path) @(
     $r = Invoke-Kit $unitTest @()
     Assert-That ($r.Text -match 'title-a=TextKit \(e2e\)\|epic-a=\|title-b=Disaster recovery plan\|epic-b=#12') 'the phase title drops a ": plan" suffix only; the template''s #0 is no epic' $r.Text
     Assert-That ($r.Text -match 'titles=Office floor-plan\|Migration-Plan\|Checkout(\r?\n|$)') 'a hyphenated word ending in plan is kept; a spaced dash before Plan is a suffix' $r.Text
+    Assert-That ($r.Text -match 'roots=epic:#12/1\|feature:AB#12/1\|story:AB#7/1\|none/2(\r?\n|$)') 'a plan''s root line is an Epic, a Feature or a (User) Story; a placeholder is none; two lines are no root' $r.Text
     Assert-That ($r.Text -match 'labels=needs-human,follow-up') 'the follow-up labels can be set up on their own (Azure Boards setup)' $r.Text
     $claimId = if ($r.Text -match 'claim=(\S+)') { $Matches[1] } else { '' }
     $hostName = if ($r.Text -match 'host=(\S+)') { $Matches[1] } else { '' }
@@ -765,6 +778,214 @@ finally {
     Pop-Location
     if ($Keep) { Write-Host "kept $mergeRepo" } else { Remove-Item -Recurse -Force -LiteralPath $mergeRepo, $originRepo -ErrorAction SilentlyContinue }
 }
+
+Write-Host 'azure-boards hierarchy (against an in-memory Azure DevOps)'
+# Sync's steps for one phase (Resolve-ProvHierarchy, New-ProvItem for missing items, Set-ProvHierarchy), run
+# against tests/azure-boards-fake.ps1, which keeps links, revisions and states the way Azure DevOps does.
+$abTest = Join-Path ([System.IO.Path]::GetTempPath()) "pw-ab-$([guid]::NewGuid().ToString('n')).ps1"
+Set-Content -LiteralPath $abTest -Value @'
+param([string]$Kit)
+. (Join-Path $Kit 'skills/packet-board/scripts/PacketWorkflow.ps1')
+. (Join-Path $Kit 'skills/packet-board/scripts/providers/github-common.ps1')
+. (Join-Path $Kit 'skills/packet-board/scripts/providers/azure-boards.ps1')
+. (Join-Path $Kit 'tests/azure-boards-fake.ps1')
+function Initialize-PwGhLabels { param($Config, [string[]]$Keys, [switch]$DryRun) , @() }
+$tpl = Get-Content -Raw (Join-Path $Kit 'templates/packet-workflow.json') | ConvertFrom-Json -AsHashtable
+function New-TestConfig {
+    param([hashtable]$Azure = @{})
+    $ab = Merge-PwHashtable $tpl.board.azureBoards (Merge-PwHashtable @{ organization = 'https://dev.azure.com/fake'; project = 'Sample' } $Azure)
+    Merge-PwHashtable $script:Defaults @{ repo = 'example/sample'; board = @{ provider = 'azure-boards'; azureBoards = $ab } }
+}
+function Reset-Board { param($Config) $script:FakeAb.Items = @{}; $script:FakeAb.Next = 1; $script:FakeAbCalls.Clear(); $script:AbTrees = @{}; $script:AbFeatures = @{}; $script:AbFeaturesPlanned = @{}; $script:AbItemCache = $null; Initialize-Prov -Config $Config }
+function P {
+    param([string]$Id, [string]$Workstream = '', [string[]]$Deps = @())
+    $human = $Id -like 'H-*'
+    [pscustomobject]@{ Id = $Id; Title = 'Work'; Kind = $(if ($human) { 'human' } else { 'packet' }); Phase = 'phase-1'; Workstream = $(if ($Workstream) { $Workstream } else { $null })
+        DependsOn = @($Deps); InitialStatus = 'Ready'; Priority = 'P1'; Size = $(if ($human) { $null } else { 'M' }); Wave = 'W1'; Target = $null }
+}
+function Phase {
+    param([string]$Line, [string]$Ref, [string]$Slug = 'phase-1', [string]$Title = 'Storefront')
+    $root = if ($Line) { [pscustomobject]@{ Level = $(switch ($Line) { 'Epic' { 'epic' } 'Feature' { 'feature' } default { 'story' } }); Ref = $Ref; Line = $Line } } else { $null }
+    [pscustomobject]@{ Slug = $Slug; Title = $Title; Path = "docs/plan/$Slug/plan.md"; Root = $root; Roots = @($root | Where-Object { $_ }); Epic = $null; Exists = $true }
+}
+function Invoke-TestSync {
+    <# board.ps1's order: every phase's tree first, then the missing items, then each tree. -Phases pairs a
+       phase with its packets: @(@($phase, $packets), …); or pass one -Phase and its -Packets. #>
+    param($Phase, $Packets, [object[]]$Phases, [switch]$DryRun, [switch]$Force)
+    if (-not $Phases) { $Phases = @(, @($Phase, $Packets)) }
+    $items = @{}; foreach ($it in @(Get-ProvItems -Refresh)) { $items[$it.Id] = $it }
+    $trees = @(foreach ($pair in $Phases) { Resolve-ProvHierarchy -Phase $pair[0] -Packets $pair[1] })
+    if (-not $DryRun) {
+        foreach ($pair in $Phases) { foreach ($p in $pair[1]) { if (-not $items[$p.Id]) { $items[$p.Id] = New-ProvItem -Packet $p -Title "$($p.Id) · $($p.Title)" -Body "Packet $($p.Id)" -PhaseSlug $pair[0].Slug -PhaseTitle $pair[0].Title } } }
+    }
+    @(foreach ($tree in $trees) { Set-ProvHierarchy -Tree $tree -ItemsById $items -DryRun:$DryRun -Force:$Force })
+}
+function Get-Tree { param([string[]]$Ids) ($Ids | ForEach-Object { $n = Find-FakeAbItem $_; "$($_)>$(Get-FakeAbParent $n):$($script:FakeAb.Items[$n].fields['System.WorkItemType'])" }) -join ',' }
+function Get-ParentId { param([int]$Id) Get-FakeAbTarget (@($script:FakeAb.Items[$Id].relations | Where-Object { $_.rel -eq 'System.LinkTypes.Hierarchy-Reverse' })[0]) }
+
+# 1. An epic root, on a board laid out the old way (every item straight under the epic): a plain sync links
+# the new items and names the misplaced ones; -Force moves them.
+Reset-Board (New-TestConfig)
+$epic = New-FakeAbItem 'Epic' 'Storefront revamp'
+[void](New-FakeAbItem 'Feature' 'Payments' -State 'Closed' -Parent $epic)
+$payments = New-FakeAbItem 'Feature' 'Payments' -Parent $epic
+[void](New-FakeAbItem 'Feature' 'Checkout')
+$pkt1 = New-FakeAbItem 'User Story' 'PKT-01 · Core' -Tags 'packet; phase:phase-1' -Parent $epic
+[void](New-FakeAbItem 'Task' 'H-1 · Approve keys' -Tags 'packet; human-task; phase:phase-1' -Parent $epic)
+[void](New-FakeAbItem 'Feature' 'Checkout' -State 'Removed' -Parent $epic)
+$packets = @((P 'PKT-01' 'payments'), (P 'PKT-02' 'Checkout' @('PKT-01')), (P 'H-1' '' @('PKT-01')), (P 'PKT-03' '' @('H-1')), (P 'H-2' '' @('PKT-02')), (P 'H-3'))
+$ph = Phase 'Epic' "AB#$epic"
+$dry = Invoke-TestSync $ph $packets -DryRun
+"s1-dry=$($dry -join ' | ')|writes=$(@(Get-FakeAbWrites).Count)"
+$plain = Invoke-TestSync $ph $packets
+"s1-plain=$($plain -join ' | ')|tree=$(Get-Tree 'PKT-01', 'PKT-02', 'H-1')"
+$mark = $script:FakeAbCalls.Count
+$dryForce = Invoke-TestSync $ph $packets -DryRun -Force
+"s1-dry-force=$($dryForce -join ' | ')|writes=$(@(Get-FakeAbWrites $mark).Count)"
+$out = Invoke-TestSync $ph $packets -Force
+"s1=$($out -join ' | ')"
+"s1-tree=$(Get-Tree 'PKT-01', 'PKT-02', 'PKT-03', 'H-1', 'H-2', 'H-3')"
+"s1-reused=$((Get-ParentId $pkt1) -eq $payments)"
+"s1-epic=" + ((@($script:FakeAb.Items[$epic].relations | Where-Object { $_.rel -eq 'System.LinkTypes.Hierarchy-Forward' } | ForEach-Object { $c = $script:FakeAb.Items[(Get-FakeAbTarget $_)]; "$($c.fields['System.WorkItemType']):$($c.fields['System.Title'])" }) | Sort-Object) -join ',')
+$mark = $script:FakeAbCalls.Count
+$again = Invoke-TestSync $ph $packets
+"s1-again=$($again -join ' | ')|writes=$(@(Get-FakeAbWrites $mark).Count)"
+
+# 1b. Two phases under one epic share a workstream's Feature, in one sync and the next.
+Reset-Board (New-TestConfig)
+$epic = New-FakeAbItem 'Epic' 'Platform'
+$two = @(@((Phase 'Epic' "AB#$epic" 'phase-1' 'Alpha'), @((P 'PKT-01' 'Backend'))), @((Phase 'Epic' "AB#$epic" 'phase-2' 'Beta'), @((P 'PKT-02' 'backend'), (P 'PKT-03'))))
+$dry = Invoke-TestSync -Phases $two -DryRun
+"s1b-dry=$($dry -join ' | ')"
+$out = Invoke-TestSync -Phases $two
+$mark = $script:FakeAbCalls.Count
+$again = Invoke-TestSync -Phases $two
+"s1b=$(Get-Tree 'PKT-01', 'PKT-02', 'PKT-03')|features=$(@($script:FakeAb.Items.Values | Where-Object { $_.fields['System.WorkItemType'] -eq 'Feature' } | ForEach-Object { "$($_.fields['System.Title'])[$($_.fields['System.Tags'])]" } | Sort-Object) -join ',')|again=$(@($again).Count)/$(@(Get-FakeAbWrites $mark).Count)"
+
+# 1b'. A board kept in another layout on purpose: a plain sync (the dispatcher's) creates no Feature that
+# nothing would go under, so it writes nothing at all; -Force then builds the tree.
+Reset-Board (New-TestConfig)
+$epic = New-FakeAbItem 'Epic' 'Kept'
+[void](New-FakeAbItem 'User Story' 'PKT-01 · Api' -Tags 'packet' -Parent $epic)
+[void](New-FakeAbItem 'User Story' 'PKT-02 · Web' -Tags 'packet' -Parent $epic)
+$kept = @((P 'PKT-01' 'Backend'), (P 'PKT-02'))
+$mark = $script:FakeAbCalls.Count
+$plain = Invoke-TestSync (Phase 'Epic' "AB#$epic") $kept
+"s1k=$($plain -join ' | ')|writes=$(@(Get-FakeAbWrites $mark).Count)"
+$forced = Invoke-TestSync (Phase 'Epic' "AB#$epic") $kept -Force
+"s1k-force=$(Get-Tree 'PKT-01', 'PKT-02')|$($forced -join ' | ')"
+
+# 1c. An item changed on the board between sync's read and its write is not overwritten: the move fails.
+Reset-Board (New-TestConfig)
+$epic = New-FakeAbItem 'Epic' 'Stale'
+$pkt1 = New-FakeAbItem 'User Story' 'PKT-01 · Core' -Tags 'packet' -Parent $epic
+$script:StaleId = $pkt1
+# Someone edits the item right after sync reads it.
+function Get-PwAbWorkItem { param([int]$Id) $wi = Invoke-PwAb -Path "_apis/wit/workitems/${Id}?`$expand=relations"; if ($Id -eq $script:StaleId) { $script:FakeAb.Items[$Id].rev++ }; $wi }
+try { [void](Invoke-TestSync (Phase 'Epic' "AB#$epic") @((P 'PKT-01' 'Backend')) -Force); 's1c=none' } catch { "s1c=$($_.Exception.Message)|parent=$(Get-FakeAbParent $pkt1)" }
+$script:StaleId = 0
+
+# 2. A story root: the packets are its tasks, with the task states.
+Reset-Board (New-TestConfig)
+$story = New-FakeAbItem 'User Story' 'Export orders as CSV'
+$out = Invoke-TestSync (Phase 'User Story' "AB#$story") @((P 'PKT-01'), (P 'PKT-02' '' @('PKT-01')), (P 'H-1' '' @('PKT-02')))
+"s2=$($out -join ' | ')"
+"s2-tree=$(Get-Tree 'PKT-01', 'PKT-02', 'H-1')"
+Set-ProvFields -Item (@(Get-ProvItems -Refresh) | Where-Object { $_.Id -eq 'PKT-01' }) -Fields @{ Status = 'Ready to merge' }
+$back = @(Get-ProvItems -Refresh) | Where-Object { $_.Id -eq 'PKT-01' }
+"s2-status=$($back.Status)|state=$($script:FakeAb.Items[$back.Number].fields['System.State'])|tags=$($script:FakeAb.Items[$back.Number].fields['System.Tags'])"
+$noMap = New-TestConfig; $noMap.board.azureBoards.Remove('taskStatusMap')
+Reset-Board $noMap
+$story = New-FakeAbItem 'User Story' 'Export'
+try { [void](Resolve-ProvHierarchy -Phase (Phase 'User Story' "AB#$story") -Packets @((P 'PKT-01'))); 's2-nomap=none' } catch { "s2-nomap=$($_.Exception.Message)" }
+
+# 3. A feature root, with an item left over from when the root was a story, and roots that don't fit.
+Reset-Board (New-TestConfig)
+$epic = New-FakeAbItem 'Epic' 'Big'
+$feature = New-FakeAbItem 'Feature' 'Search' -Parent $epic
+[void](New-FakeAbItem 'Task' 'PKT-02 · Left over' -Tags 'packet')
+$out = Invoke-TestSync (Phase 'Feature' "AB#$feature") @((P 'PKT-01'), (P 'PKT-02'), (P 'H-1' '' @('PKT-02')), (P 'H-2' '' @('PKT-01')))
+"s3=$($out -join ' | ')"
+"s3-tree=$(Get-Tree 'PKT-01', 'H-2', 'PKT-02', 'H-1')"
+foreach ($case in @(@{ Name = 'wrong-type'; Line = 'Feature'; Ref = "AB#$epic" }, @{ Name = 'packet-root'; Line = 'User Story'; Ref = "AB#$(Find-FakeAbItem 'PKT-01')" }, @{ Name = 'missing'; Line = 'Epic'; Ref = 'AB#999' })) {
+    $mark = $script:FakeAbCalls.Count
+    try { [void](Resolve-ProvHierarchy -Phase (Phase $case.Line $case.Ref) -Packets @((P 'PKT-09'))); "s3-$($case.Name)=none" } catch { "s3-$($case.Name)=$($_.Exception.Message)|writes=$(@(Get-FakeAbWrites $mark).Count)" }
+}
+
+# 4. Basic: Epic > Issue > Task, no features.
+$basicMap = @{ Backlog = @{ state = 'To Do' }; Ready = @{ state = 'To Do'; tag = 'status:ready' }; 'In progress' = @{ state = 'Doing' }; 'In review' = @{ state = 'Doing'; tag = 'status:in-review' }
+    'Ready to merge' = @{ state = 'Doing'; tag = 'status:ready-to-merge' }; 'Needs human' = @{ state = 'Doing'; tag = 'status:needs-human' }; Done = @{ state = 'Done' } }
+Reset-Board (New-TestConfig @{ featureWorkItemType = ''; workItemType = 'Issue'; statusMap = $basicMap })
+$epic = New-FakeAbItem 'Epic' 'Basic epic'
+[void](Invoke-TestSync (Phase 'Epic' "AB#$epic") @((P 'PKT-01' 'Ignored'), (P 'H-1' '' @('PKT-01'))))
+"s4-tree=$(Get-Tree 'PKT-01', 'H-1')"
+try { [void](Resolve-ProvHierarchy -Phase (Phase 'Feature' "AB#$epic") -Packets @()); 's4-feature=none' } catch { "s4-feature=$($_.Exception.Message)" }
+Reset-Board (New-TestConfig @{ taskWorkItemType = 'user story' })
+$epic = New-FakeAbItem 'Epic' 'One type, two levels'
+try { [void](Resolve-ProvHierarchy -Phase (Phase 'Epic' "AB#$epic") -Packets @((P 'PKT-01'))); 's4-same=none' } catch { "s4-same=$($_.Exception.Message)" }
+try { [void](Resolve-ProvHierarchy -Phase (Phase '' '') -Packets @((P 'PKT-01'))); 's4-same-unrooted=ok' } catch { "s4-same-unrooted=$($_.Exception.Message)" }
+# A Basic install from before the hierarchy: no featureWorkItemType, so the default Feature, which Basic lacks.
+$oldBasic = New-TestConfig @{ workItemType = 'Issue'; statusMap = $basicMap }
+Reset-Board $oldBasic
+$script:FakeAb.States.Remove('Feature')
+$epic = New-FakeAbItem 'Epic' 'Old basic'
+$mark = $script:FakeAbCalls.Count
+try { [void](Invoke-TestSync (Phase 'Epic' "AB#$epic") @((P 'PKT-01'))); 's4-old-basic=none' } catch { "s4-old-basic=$($_.Exception.Message)|writes=$(@(Get-FakeAbWrites $mark).Count)" }
+$script:FakeAb.States['Feature'] = @('New', 'Active', 'Resolved', 'Closed', 'Removed')
+# A human task type that is no level's type still sits under the story it unblocks.
+Reset-Board (New-TestConfig @{ humanWorkItemType = 'Approval' })
+$feature = New-FakeAbItem 'Feature' 'Search'
+$out = Invoke-TestSync (Phase 'Feature' "AB#$feature") @((P 'H-1'), (P 'PKT-01' '' @('H-1')))
+"s4-approval=$(Get-Tree 'PKT-01', 'H-1')|$($out -join ' | ')"
+
+# 5. Setup checks each level's type, and the task type against its own map.
+Reset-Board (New-TestConfig)
+"setup=$((Initialize-ProvBoard) -join ' | ')"
+Reset-Board $noMap
+"setup-nomap=$((Initialize-ProvBoard) -join ' | ')"
+
+# 6. The config's hierarchy keys.
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) "pw-abcfg-$([guid]::NewGuid().ToString('n'))"
+New-Item -ItemType Directory -Path $tmp | Out-Null
+Push-Location $tmp
+try {
+    & git init -q .
+    foreach ($case in @(@{ Name = 'template'; Azure = @{} }, @{ Name = 'same-type'; Azure = @{ taskWorkItemType = 'user story' } }, @{ Name = 'task-map'; Azure = @{ taskStatusMap = @{ 'Ready to merge' = @{ state = '' } } } })) {
+        $c = @{ repo = 'example/sample'; board = @{ provider = 'azure-boards'; azureBoards = (Merge-PwHashtable $tpl.board.azureBoards (Merge-PwHashtable @{ organization = 'https://dev.azure.com/fake'; project = 'Sample' } $case.Azure)) } }
+        $f = Join-Path $tmp "$($case.Name).json"
+        Set-Content -LiteralPath $f -Value ($c | ConvertTo-Json -Depth 10)
+        try { [void](Get-PwConfig -Path $f); "cfg-$($case.Name)=ok" } catch { "cfg-$($case.Name)=$($_.Exception.Message)" }
+    }
+}
+finally { Pop-Location; Remove-Item -Recurse -Force -LiteralPath $tmp }
+'@
+$r = Invoke-Kit $abTest @('-Kit', $kit)
+$ab = @{}; foreach ($line in ($r.Text -split "`n")) { if ($line -match '^(?<k>[\w-]+)=(?<v>.*)$') { $ab[$Matches.k] = $Matches.v } }
+$abGet = { param($k) if ($ab.ContainsKey($k)) { $ab[$k] } else { '' } }
+Assert-That ($r.Code -eq 0) 'the hierarchy scenarios run' $r.Text
+Assert-That ((& $abGet 's1-dry') -match "would create Feature 'Checkout' under AB#1" -and (& $abGet 's1-dry') -match "would create Feature 'Storefront' under AB#1" -and (& $abGet 's1-dry') -match 'would put PKT-02 \(new\) under Feature ''Checkout'' \(new\)' -and (& $abGet 's1-dry') -match "note: PKT-01 AB#5 is under AB#1, and its place is under Feature 'payments' AB#3: sync -Phase phase-1 -Force moves it" -and (& $abGet 's1-dry') -notmatch 'would move' -and (& $abGet 's1-dry') -match '\|writes=0$') 'a dry run says which features it would create and what it would link, names misplaced items, and writes nothing' (& $abGet 's1-dry')
+Assert-That ((& $abGet 's1-plain') -match '\|tree=PKT-01>Storefront revamp:User Story,PKT-02>Checkout:User Story,H-1>Storefront revamp:Task$' -and (& $abGet 's1-plain') -match 'note: H-1 AB#6 is under AB#1' -and (& $abGet 's1-plain') -notmatch 'moved') 'without -Force, sync moves nothing (the dispatcher''s sync never moves an item): it links new items and names the misplaced' (& $abGet 's1-plain')
+Assert-That ((& $abGet 's1-dry-force') -match "would move PKT-01 AB#5 under Feature 'payments' AB#3 \(now under AB#1\)" -and (& $abGet 's1-dry-force') -match 'would move H-1 AB#6 under PKT-03 AB#\d+ \(now under AB#1\)' -and (& $abGet 's1-dry-force') -match '\|writes=0$') 'a dry run with -Force lists every move, and writes nothing' (& $abGet 's1-dry-force')
+Assert-That ((& $abGet 's1-tree') -eq 'PKT-01>Payments:User Story,PKT-02>Checkout:User Story,PKT-03>Storefront:User Story,H-1>PKT-03:Task,H-2>PKT-02:Task,H-3>none:Task') 'under an epic: a feature per workstream (none: the phase''s name), packets as its stories, a human task under the story it unblocks or follows' "$(& $abGet 's1-tree')`n$(& $abGet 's1')"
+Assert-That ((& $abGet 's1-reused') -eq 'True' -and (& $abGet 's1-epic') -eq 'Feature:Checkout,Feature:Checkout,Feature:Payments,Feature:Payments,Feature:Storefront') 'an open feature under the epic with the workstream''s name is reused (not a closed one, a Removed one, nor one elsewhere), and only features are left under the epic' "$(& $abGet 's1-reused') $(& $abGet 's1-epic')"
+Assert-That ((& $abGet 's1') -match 'moved PKT-01 AB#5 under Feature ''payments'' AB#3 \(was under AB#1\)' -and (& $abGet 's1') -match 'moved H-1 AB#6 under PKT-03 AB#\d+ \(was under AB#1\)' -and (& $abGet 's1') -match 'note: H-3 \(type Task\) has no User Story to sit under') 'sync -Force says what it moved, and why a human task has no place' (& $abGet 's1')
+Assert-That ((& $abGet 's1-again') -match '^note: H-3 [^|]*\|writes=0$') 'a second sync changes nothing' (& $abGet 's1-again')
+Assert-That ((& $abGet 's1b') -eq 'PKT-01>Backend:User Story,PKT-02>Backend:User Story,PKT-03>Beta:User Story|features=Backend[],Beta[phase:phase-2]|again=0/0' -and ([regex]::Matches((& $abGet 's1b-dry'), "would create Feature 'Backend'")).Count -eq 1) 'phases under one epic share a workstream''s Feature (one, untagged; a dry run plans it once), and the next sync changes nothing' "$(& $abGet 's1b')`n$(& $abGet 's1b-dry')"
+Assert-That ((& $abGet 's1k') -match "note: PKT-01 AB#2 is under AB#1, and its place is under Feature 'Backend' \(new\)" -and (& $abGet 's1k') -notmatch 'created' -and (& $abGet 's1k') -match '\|writes=0$' -and (& $abGet 's1k-force') -match '^PKT-01>Backend:User Story,PKT-02>Storefront:User Story\|created Feature') 'on a board kept in another layout, a plain sync creates no empty Feature and writes nothing; -Force builds the tree' "$(& $abGet 's1k')`n$(& $abGet 's1k-force')"
+Assert-That ((& $abGet 's1c') -match 'TF26071' -and (& $abGet 's1c') -match '\|parent=Stale$') 'a move whose revision test fails stops sync and leaves the item where it was' (& $abGet 's1c')
+Assert-That ((& $abGet 's2-tree') -eq 'PKT-01>Export orders as CSV:Task,PKT-02>Export orders as CSV:Task,H-1>Export orders as CSV:Task') 'under a story: the packets and human tasks are its tasks' "$(& $abGet 's2-tree')`n$(& $abGet 's2')"
+Assert-That ((& $abGet 's2-status') -match '^Ready to merge\|state=Active\|tags=[^|]*status:ready-to-merge' -and (& $abGet 's2-status') -notmatch 'status:ready(;|$)') 'a task packet moves through the task states (taskStatusMap): Ready to merge is Active plus its tag' (& $abGet 's2-status')
+Assert-That ((& $abGet 's2-nomap') -match 'of type Task, which has no state Resolved' -and (& $abGet 's2-nomap') -match 'taskStatusMap') 'a story root without a task status map that fits stops sync before it writes' (& $abGet 's2-nomap')
+Assert-That ((& $abGet 's3-tree') -eq 'PKT-01>Search:User Story,H-2>PKT-01:Task,PKT-02>none:Task,H-1>none:Task' -and (& $abGet 's3') -match 'note: PKT-02 AB#3 is of type Task, but its place under AB#2 takes a work item of type User Story' -and (& $abGet 's3') -match 'note: H-1 was left where it is: PKT-02 AB#3, the story it belongs under, is of type Task') 'under a feature: packets as its stories; an item of the wrong type, and a task under it, are left alone and named' "$(& $abGet 's3-tree')`n$(& $abGet 's3')"
+Assert-That ((& $abGet 's3-wrong-type') -match 'says \*\*Feature:\*\* AB#1, but AB#1 is of type Epic' -and (& $abGet 's3-packet-root') -match 'is a packet''s own item' -and (& $abGet 's3-missing') -match 'AB#999|999 does not exist' -and (& $abGet 's3-wrong-type') -match 'writes=0$' -and (& $abGet 's3-packet-root') -match 'writes=0$') 'a root of the wrong type, a packet''s own item or a missing item stops sync, having written nothing' "$(& $abGet 's3-wrong-type')`n$(& $abGet 's3-packet-root')`n$(& $abGet 's3-missing')"
+Assert-That ((& $abGet 's4-tree') -eq 'PKT-01>Basic epic:Issue,H-1>PKT-01:Task' -and (& $abGet 's4-feature') -match 'featureWorkItemType is empty') 'a process without features (Basic): packets straight under the epic, and a Feature line is refused' "$(& $abGet 's4-tree')`n$(& $abGet 's4-feature')"
+Assert-That ((& $abGet 's4-old-basic') -match "no work item type 'Feature'" -and (& $abGet 's4-old-basic') -match 'featureWorkItemType' -and (& $abGet 's4-old-basic') -match '\|writes=0$') 'an older Basic config under an epic stops before writing, and says to set featureWorkItemType' (& $abGet 's4-old-basic')
+Assert-That ((& $abGet 's4-approval') -match '^PKT-01>Search:User Story,H-1>PKT-01:Approval\|' -and (& $abGet 's4-approval') -notmatch 'note:') 'a human task type outside the levels sits under the story it unblocks' (& $abGet 's4-approval')
+Assert-That ((& $abGet 'setup') -match 'hierarchy: Epic > Feature > User Story > Task' -and (& $abGet 'setup') -match "'Task' has every mapped state \(New, Active, Closed\)" -and (& $abGet 'setup') -match "'User Story' has every mapped state \(New, Active, Resolved, Closed\)") 'setup checks the hierarchy''s types, the task type against taskStatusMap' (& $abGet 'setup')
+Assert-That ((& $abGet 'setup-nomap') -match "MISSING states on 'Task': Resolved .*give the task type its own taskStatusMap") 'without taskStatusMap, setup names the missing task state and the fix' (& $abGet 'setup-nomap')
+Assert-That ((& $abGet 'cfg-template') -eq 'ok' -and (& $abGet 'cfg-task-map') -match "taskStatusMap needs a state for 'Ready to merge'") 'the config refuses an incomplete taskStatusMap' "$(& $abGet 'cfg-template')`n$(& $abGet 'cfg-task-map')"
+Assert-That ((& $abGet 'cfg-same-type') -eq 'ok' -and (& $abGet 's4-same-unrooted') -eq 'ok' -and (& $abGet 's4-same') -match 'needs a different work item type at each level \(.*got Epic, Feature, User Story, user story\)') 'one type at two levels is refused only where a plan names a root, so an older config keeps working' "$(& $abGet 'cfg-same-type')`n$(& $abGet 's4-same')`n$(& $abGet 's4-same-unrooted')"
+Remove-Item -LiteralPath $abTest
 
 Write-Host 'install'
 $target = Join-Path ([System.IO.Path]::GetTempPath()) ("pw-install-" + [guid]::NewGuid().ToString('n').Substring(0, 8))
