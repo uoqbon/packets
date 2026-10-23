@@ -1426,7 +1426,7 @@ Write-Host 'whitespace in the kit''s files'
 $inCheckout = (& git -C $kit rev-parse --is-inside-work-tree 2>$null) -eq 'true'
 if (-not $inCheckout) { Write-Host '  skip  whitespace check: the kit is not inside a git checkout (nothing says which files are tracked)' }
 else {
-    $tracked = @(& git -C $kit ls-files -z -- skills agents templates install.ps1 tests '*.md') -join '' -split "`0" | Where-Object { $_ }
+    $tracked = @((@(& git -C $kit ls-files -z -- skills agents templates install.ps1 tests '*.md') -join '') -split "`0" | Where-Object { $_ })
     $wsErrors = foreach ($file in $tracked) {
         $path = Join-Path $kit $file
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
@@ -1434,7 +1434,7 @@ else {
         if ([Array]::IndexOf($bytes, [byte]0) -ge 0) { continue }
         $text = [System.Text.Encoding]::UTF8.GetString($bytes).Replace("`r`n", "`n")
         $lines = $text -split "`n"
-        for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '[ \t]+\r?$') { "${file}:$($i + 1): trailing whitespace" } }
+        for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '[ \t]+$') { "${file}:$($i + 1): trailing whitespace" } }
         if ($text -match '\n\n\z') { "${file}:$(($text -replace '\n+$', '').Split("`n").Count + 1): new blank line at EOF" }
     }
     Assert-That ($tracked.Count -gt 0) "the kit's tracked text files are found ($($tracked.Count))"
