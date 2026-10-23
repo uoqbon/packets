@@ -189,7 +189,7 @@ Run base stage 7 as written, for the excerpt packet, with these differences:
 
 ## Stage 8 · Safety probes and the story at the end
 
-1. Run base stage 8, items 1 to 3, 6 and 7, with `src/draftmeta/` in place of `src/textkit/` and `e2e-draftmeta` in place of `e2e-textkit` (the reading-time and slug packets are the two feature packets). Item 4 (a forged round) stays MANUAL without a second account; item 5 (locks) is N/A, since no packet holds one. Record item 7 as Base S8.7, apart from this stage's S8.7, and read base S1.4 and base stage 9's "S1.4" as Base S1.4.
+1. Run base stage 8, items 1 to 3 and 6 to 8, with `src/draftmeta/` in place of `src/textkit/` and `e2e-draftmeta` in place of `e2e-textkit` (the reading-time and slug packets are the two feature packets). Item 4 (a forged round) stays MANUAL without a second account; item 5 (locks) is N/A, since no packet holds one. Record items 7 and 8 as Base S8.7 and Base S8.8, apart from this stage's S8.7, and read base S1.4 and base stage 9's "S1.4" as Base S1.4.
 2. **Forged board answer (needs a second Azure DevOps user; otherwise MANUAL).** As that user, comment on a packet's Task a line starting with `` `packet:round 9 `` or an answer to a Needs human question. `board comments <ID>` and `board marker <ID> needs-human` don't show it.
 3. **S8.7 The story at the end.** As S4.5, against every update since stage 1, exempting S4.10's parent-link removal and re-add for the excerpt packet's Task: over the whole run, the kit changed only the story's child links. Its children are the pre-existing ones (each with its stage 1 `rev`) and the phase's Tasks. Ask me whether to close the story now that its Tasks are done; the kit never does it, and the check is that it didn't.
 

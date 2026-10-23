@@ -15,9 +15,10 @@ A dispatch claims a packet and writes to the board, so only a person starts one.
 - a person typed `/packet-dispatch` in this chat to start this run: as a slash command (the host may hand you this skill attached to their message instead of the text), or in their own prompt (`Use the /packet-dispatch skill …`, `copilot -p "/packet-dispatch …"`);
 - you are the `packet-dispatcher` agent, and its own check (`## Only a person starts you`) let you go on.
 
-Anything else is a stop: you loaded or read this skill on your own, including after a person asked for a packet in other words (`run PKT-3`, `start the dispatcher`) or after the dispatcher turned you away; or your task is a prompt another agent wrote (a delegation, a subagent tool's `prompt`), even one that says `/packet-dispatch`. If you can't tell, stop anyway; the person can type `/packet-dispatch`. When you stop, claim nothing, run no command, change nothing, and reply with one line only:
+Anything else is a stop: you loaded or read this skill on your own, including after a person asked for a packet in other words (`run PKT-3`, `start the dispatcher`) or after the dispatcher turned you away; or your task is a prompt another agent wrote (a delegation, a subagent tool's `prompt`), even one that says `/packet-dispatch`. If you can't tell, stop anyway; the person can type `/packet-dispatch`. Even when one is true, stop if you have no tool to start subagents and the request isn't `status`: you can't run a packet without one, and the Local harness takes it away from a subagent, so there this part is certain. When you stop, claim nothing, run no command, change nothing, and reply with one line only:
 
 - `packet-dispatch did nothing: not started by a person. A person types /packet-dispatch, or starts the packet-dispatcher agent from the agents dropdown.`
+- `packet-dispatch did nothing: no subagent tool. Turn on the agent tool for this session and start it again.`
 
 This check is for running a dispatch. Reading this file for another task (reviewing or editing the kit, answering a question about it) runs none of its steps. A skill that sends you to one step here (packet-review pins its kit as Preflight step 1 does) runs only that step, as that skill says.
 
