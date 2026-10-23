@@ -1387,12 +1387,16 @@ try {
     $dispatcher = Get-Content -Raw (Join-Path $target '.github/agents/packet-dispatcher.agent.md')
     $dispatcherFront = ($dispatcher -split '(?m)^---\r?$')[1]
     Assert-That ($dispatcherFront -match '(?m)^disable-model-invocation: true\r?$') 'the dispatcher cannot be started as a subagent' ''
-    Assert-That ($dispatcherFront -match '(?m)^agents: \[.+\]\r?$' -and $dispatcherFront -notmatch '(?m)^agents:.*packet-dispatcher') 'the dispatcher''s agents list leaves itself out' $dispatcherFront
+    Assert-That ($dispatcherFront -match '(?m)^agents: \[.+\]\r?$' -and $dispatcherFront -notmatch '(?m)^agents:.*(packet-dispatcher|\*)') 'the dispatcher''s agents list names its subagents and leaves itself out' $dispatcherFront
     $guard = '## Only a person starts you'
-    Assert-That ($dispatcher -match "(?m)^$guard\r?$" -and (Get-Content -Raw (Join-Path $kit 'tests/copilot-e2e.prompt.md')).Contains("``$guard``")) 'the dispatcher stops when another agent starts it, under the heading e2e S1.4 looks for' ''
+    $guardBody = if ($dispatcher -match ('(?ms)^' + $guard + '\r?$(.*?)^## ')) { $Matches[1] } else { '' }
+    Assert-That ($guardBody -match 'Stop if either of these is true' -and $guardBody.Contains('`packet-dispatcher did nothing: started by another agent.') -and $guardBody.Contains('`packet-dispatcher did nothing: no subagent tool.') -and (Get-Content -Raw (Join-Path $kit 'tests/copilot-e2e.prompt.md')).Contains("``$guard``")) 'the dispatcher stops when another agent starts it, under the heading and with the line e2e S1.4 and S8.7 look for' $guardBody
     $subagents = @(Get-ChildItem -LiteralPath (Join-Path $kit 'agents') -Filter '*.agent.md' | Where-Object Name -ne 'packet-dispatcher.agent.md')
-    $canStart = @($subagents | Where-Object { $front = ((Get-Content -Raw $_.FullName) -split '(?m)^---\r?$')[1]; $front -notmatch '(?m)^user-invocable: false\r?$' -or $front -match "(?m)^tools:.*'agent'" })
-    Assert-That ($subagents.Count -eq 4 -and $canStart.Count -eq 0) 'the other agents are subagent-only and can''t start an agent' (($canStart | ForEach-Object Name) -join ', ')
+    $canStart = @($subagents | Where-Object {
+        $front = ((Get-Content -Raw $_.FullName) -split '(?m)^---\r?$')[1]
+        $tools = if ($front -match '(?m)^tools: *\[(.*)\]\r?$') { @($Matches[1] -split ',' | ForEach-Object { $_.Trim().Trim("'", '"', ' ') }) } else { @('(no tools line)') }
+        $front -notmatch '(?m)^user-invocable: false\r?$' -or @($tools | Where-Object { $_ -in 'agent', 'custom-agent', 'task', 'runSubagent', '(no tools line)' }).Count -gt 0 })
+    Assert-That ($subagents.Count -eq 4 -and $canStart.Count -eq 0) 'the other agents are subagent-only, with a tools list that has no subagent tool' (($canStart | ForEach-Object Name) -join ', ')
     $cfgPath = Join-Path $target '.github/packet-workflow.json'
     $cfgIn = Get-Content -Raw $cfgPath | ConvertFrom-Json -AsHashtable
     $cfgIn.models.light = @("Claude Sonnet 5.5 (Anthropic)", "it's fine")
