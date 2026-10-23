@@ -1391,7 +1391,13 @@ try {
     $guard = '## Only a person starts you'
     $guardBody = if ($dispatcher -match ('(?ms)^' + $guard + '\r?$(.*?)^## ')) { $Matches[1] } else { '' }
     Assert-That ($guardBody -match 'Stop if either of these is true' -and $guardBody.Contains('`packet-dispatcher did nothing: started by another agent.') -and $guardBody.Contains('`packet-dispatcher did nothing: no subagent tool.') -and (Get-Content -Raw (Join-Path $kit 'tests/copilot-e2e.prompt.md')).Contains("``$guard``")) 'the dispatcher stops when another agent starts it, under the heading and with the line e2e S1.4 and S8.7 look for' $guardBody
-    $dispatchSkillFront = ((Get-Content -Raw (Join-Path $target '.github/skills/packet-dispatch/SKILL.md')) -split '(?m)^---\r?$')[1]
+    $dispatchSkill = Get-Content -Raw (Join-Path $target '.github/skills/packet-dispatch/SKILL.md')
+    $skillGuard = '## Only a person starts a dispatch'
+    $skillGuardBody = if ($dispatchSkill -match ('(?ms)^' + $skillGuard + '\r?$(.*?)^## ')) { $Matches[1] } else { '' }
+    $skillStop = '`packet-dispatch did nothing: not started by a person. A person types /packet-dispatch, or starts the packet-dispatcher agent from the agents dropdown.`'
+    $e2ePrompt = Get-Content -Raw (Join-Path $kit 'tests/copilot-e2e.prompt.md')
+    Assert-That ([regex]::Match($dispatchSkill, '(?m)^## .*?(?=\r?$)').Value -eq $skillGuard -and $skillGuardBody.Contains('`/packet-dispatch`') -and $skillGuardBody.Contains('`packet-dispatcher` agent') -and $skillGuardBody.Contains($skillStop) -and $e2ePrompt.Contains("``$skillGuard``") -and $e2ePrompt.Contains($skillStop.Trim('`'))) 'the dispatch skill stops, before anything else, unless a person typed /packet-dispatch or started the dispatcher, under the heading and with the line e2e S8.8 looks for' $skillGuardBody
+    $dispatchSkillFront = ($dispatchSkill -split '(?m)^---\r?$')[1]
     Assert-That ($dispatchSkillFront -match '(?m)^name: packet-dispatch\r?$' -and $dispatchSkillFront -notmatch '(?m)^\s*[''"]?disable-model-invocation[''"]?\s*:' -and (Get-Content -Raw (Join-Path $kit 'README.md')).Contains('github/copilot-cli#4438')) 'the dispatch skill stays without disable-model-invocation, which would lock people out of it on some hosts, and the README says why' $dispatchSkillFront
     $subagents = @(Get-ChildItem -LiteralPath (Join-Path $kit 'agents') -Filter '*.agent.md' | Where-Object Name -ne 'packet-dispatcher.agent.md')
     $canStart = @($subagents | Where-Object {
