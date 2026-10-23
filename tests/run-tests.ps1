@@ -1391,7 +1391,34 @@ try {
     $guard = '## Only a person starts you'
     $guardBody = if ($dispatcher -match ('(?ms)^' + $guard + '\r?$(.*?)^## ')) { $Matches[1] } else { '' }
     Assert-That ($guardBody -match 'Stop if either of these is true' -and $guardBody.Contains('`packet-dispatcher did nothing: started by another agent.') -and $guardBody.Contains('`packet-dispatcher did nothing: no subagent tool.') -and (Get-Content -Raw (Join-Path $kit 'tests/copilot-e2e.prompt.md')).Contains("``$guard``")) 'the dispatcher stops when another agent starts it, under the heading and with the line e2e S1.4 and S8.7 look for' $guardBody
-    $dispatchSkillFront = ((Get-Content -Raw (Join-Path $target '.github/skills/packet-dispatch/SKILL.md')) -split '(?m)^---\r?$')[1]
+    $dispatchSkill = Get-Content -Raw (Join-Path $target '.github/skills/packet-dispatch/SKILL.md')
+    $skillGuard = '## Only a person starts a dispatch'
+    $skillGuardBody = if ($dispatchSkill -match ('(?ms)^' + $skillGuard + '\r?$(.*?)^## ')) { $Matches[1] } else { '' }
+    $skillStop = '`packet-dispatch did nothing: not started by a person. A person types /packet-dispatch, or starts the packet-dispatcher agent from the agents dropdown.`'
+    $e2ePrompt = Get-Content -Raw (Join-Path $kit 'tests/copilot-e2e.prompt.md')
+    # Each rule of the guard, so an edit that drops or inverts one fails here rather than in a live run.
+    $skillGuardRules = @(
+        'before anything else, Preflight included, once per request'
+        'in one chat are two;'
+        'Go on only if one of these is true'
+        '- a person typed `/packet-dispatch` in this chat to start this run:'
+        '- you are the `packet-dispatcher` agent, and its own check (`## Only a person starts you`) let you go on.'
+        'Anything else is a stop: you loaded or read this skill on your own'
+        'including after a person asked for a packet in other words (`run PKT-3`, `start the dispatcher`) or after the dispatcher turned you away;'
+        'or your task is a prompt another agent wrote'
+        'even one that says `/packet-dispatch`'
+        'If you can''t tell, stop anyway'
+        'stop if you have no tool to start subagents and the request isn''t `status`:'
+        'claim nothing, run no command, change nothing, and reply with one line only:'
+        $skillStop
+        '`packet-dispatch did nothing: no subagent tool. Turn on the agent tool for this session and start it again.`'
+        'Reading this file for another task (reviewing or editing the kit, answering a question about it) runs none of its steps.'
+        'runs only that step, as that skill says.')
+    $skillGuardMissing = @($skillGuardRules | Where-Object { -not $skillGuardBody.Contains($_) })
+    $skillGuardFirst = [regex]::Match($dispatchSkill, '(?m)^## .*?(?=\r?$)').Value -eq $skillGuard
+    $skillGuardInE2e = $e2ePrompt.Contains("``$skillGuard``") -and $e2ePrompt.Contains($skillStop.Trim('`'))
+    Assert-That ($skillGuardFirst -and $skillGuardMissing.Count -eq 0 -and $skillGuardInE2e) 'the dispatch skill stops, before anything else, unless a person typed /packet-dispatch or started the dispatcher, under the heading and with the line e2e S8.8 looks for' ("first section: $skillGuardFirst; in e2e: $skillGuardInE2e; missing: $($skillGuardMissing -join ' | ')")
+    $dispatchSkillFront = ($dispatchSkill -split '(?m)^---\r?$')[1]
     Assert-That ($dispatchSkillFront -match '(?m)^name: packet-dispatch\r?$' -and $dispatchSkillFront -notmatch '(?m)^\s*[''"]?disable-model-invocation[''"]?\s*:' -and (Get-Content -Raw (Join-Path $kit 'README.md')).Contains('github/copilot-cli#4438')) 'the dispatch skill stays without disable-model-invocation, which would lock people out of it on some hosts, and the README says why' $dispatchSkillFront
     $subagents = @(Get-ChildItem -LiteralPath (Join-Path $kit 'agents') -Filter '*.agent.md' | Where-Object Name -ne 'packet-dispatcher.agent.md')
     $canStart = @($subagents | Where-Object {
