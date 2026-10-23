@@ -885,8 +885,9 @@ function Invoke-PwClaim {
     <# The claim check. A claim lasts LeaseMinutes after its newest comment, by the board's clock; it is
        renewed once a third of that has passed.
 
-       Read-only first: if this claim id already has a comment, and it held the window that ends at its
-       newest comment (Select-PwClaimHolder), and more than two thirds of the lease is left by the latest
+       Read-only first: if this claim id already has a comment and another claim holds the window that
+       ends at its newest comment (Select-PwClaimHolder), it is LOST, with nothing written, -Force or not.
+       If that window is ours and more than two thirds of the lease is left by the latest
        the board's clock can read (Get-ProvBoardNow), the claim still holds and nothing is written. That
        comment was posted by a check that read it as holding, so any claim posted after it within the lease
        saw it and lost; no one else can hold until it lapses.
@@ -906,20 +907,20 @@ function Invoke-PwClaim {
     $lease = [TimeSpan]::FromMinutes($LeaseMinutes)
     $renewBelow = [TimeSpan]::FromMinutes($LeaseMinutes * 2 / 3)
     $lapsed = $false
-    if (-not $Force) {
-        $claims = @(Get-PwClaimComments -Ref $Ref)
-        $newest = @($claims | Where-Object { $_.ClaimId -eq $ClaimId }) | Select-Object -Last 1
-        if ($newest) {
-            $holder = Select-PwClaimHolder -Claims $claims -At $newest.CreatedAt -LeaseMinutes $LeaseMinutes
-            if ($holder.ClaimId -ne $ClaimId) {
-                return [pscustomobject]@{ Result = 'LOST'; ClaimId = $holder.ClaimId; CreatedAt = $holder.CreatedAt; CommentId = $holder.CommentId; Renewed = $false; Lapsed = $false; Left = $null }
-            }
-            $left = $newest.CreatedAt + $lease - (Get-ProvBoardNow)
-            if ($left -gt $renewBelow) {
-                return [pscustomobject]@{ Result = 'HOLD'; ClaimId = $ClaimId; CreatedAt = $newest.CreatedAt; CommentId = $newest.CommentId; Renewed = $false; Lapsed = $false; Left = $left }
-            }
-            $lapsed = $left -le [TimeSpan]::Zero
+    $claims = @(Get-PwClaimComments -Ref $Ref)
+    $newest = @($claims | Where-Object { $_.ClaimId -eq $ClaimId }) | Select-Object -Last 1
+    if ($newest) {
+        # Even with -Force: a comment of ours that lost its own window (one left behind by a failed delete
+        # or a crash) must not turn into a hold once the claim that beat it ages out of a newer window.
+        $holder = Select-PwClaimHolder -Claims $claims -At $newest.CreatedAt -LeaseMinutes $LeaseMinutes
+        if ($holder.ClaimId -ne $ClaimId) {
+            return [pscustomobject]@{ Result = 'LOST'; ClaimId = $holder.ClaimId; CreatedAt = $holder.CreatedAt; CommentId = $holder.CommentId; Renewed = $false; Lapsed = $false; Left = $null }
         }
+        $left = $newest.CreatedAt + $lease - (Get-ProvBoardNow)
+        if (-not $Force -and $left -gt $renewBelow) {
+            return [pscustomobject]@{ Result = 'HOLD'; ClaimId = $ClaimId; CreatedAt = $newest.CreatedAt; CommentId = $newest.CommentId; Renewed = $false; Lapsed = $false; Left = $left }
+        }
+        $lapsed = $left -le [TimeSpan]::Zero
     }
     $body = "``packet:claim $ClaimId`` A dispatcher session is working on this packet. The claim lapses $LeaseMinutes minutes after its newest refresh."
     $posted = Add-ProvComment -Ref $Ref -Body $body

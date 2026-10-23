@@ -160,9 +160,11 @@ function Remove-ProvComment {
 
 function Get-ProvBoardNow {
     <# The latest GitHub's clock can read now, from the Date header of a call to rate_limit (which
-       doesn't count against the rate limit). #>
+       doesn't count against the rate limit), or to user where rate_limit isn't served (GitHub Enterprise
+       Server with rate limiting off). #>
     $sent = [DateTimeOffset]::UtcNow
-    $text = Invoke-PwGh api --include rate_limit
+    try { $text = Invoke-PwGh api --include rate_limit }
+    catch { $sent = [DateTimeOffset]::UtcNow; $text = Invoke-PwGh api --include user }
     $m = [regex]::Match($text, '(?im)^date:[ \t]*(?<d>[^\r\n]+?)[ \t]*\r?$')
     if (-not $m.Success) { Stop-Pw "GitHub's answer had no Date header, so its clock is unknown" }
     Get-PwBoardNow -Date (ConvertFrom-PwHttpDate $m.Groups['d'].Value) -SentAt $sent

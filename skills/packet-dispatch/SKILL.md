@@ -71,7 +71,7 @@ Every call runs this first, `resume` and `status` included.
 2. `board claim <ID> <claim-id>`:
    - `HOLD …` (exit 0): you hold the packet. Now `board set <ID> "Status=In progress"` and `board assign <ID>` (if only the assignment fails, say so in your report and go on).
    - `LOST …` (exit 1): another session holds it. Go back to **Select**.
-   - exit 2: no answer. Stop and report; a failed check is never a won one.
+   - exit 2: no answer. Run `board release <ID> <claim-id>` (a claim comment the failed check left behind would otherwise block the packet), then stop and report; a failed check is never a won one.
 
 The claim is a lease (`claims.leaseMinutes`, 30 by default) that runs from its newest claim comment, by the board's clock. **Check** it with the same `board claim <ID> <claim-id>` wherever the steps below say so. That command alone decides when to renew: it posts a new claim comment only once a third of the lease has gone, and otherwise confirms the hold without writing anything. Its line ends with `(kept, nothing posted; <n>m of <lease>m left, …)` or `(renewed; <n>m left)`. A check therefore costs one read, and the item gets a claim comment about every ten minutes, not one per check. Don't add `-Force` (it renews at once); the workflow never needs it.
 
