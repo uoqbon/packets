@@ -46,7 +46,7 @@ The base prompt's ground rules 1 to 7 apply (sandbox only, never merge, pinned k
 
 ## Stage 1 · Environment, discovery and the story
 
-1. Run base stage 1, items 1 to 7, as written.
+1. Run base stage 1, items 1 to 7, as written, with IDs `Base S1.<n>` so they don't clash with this stage's. Base S1.4 can end `HOST`: the host lists the dispatcher although the kit's file opts out. Record the fields that check names, not a plain FAIL.
 2. **PAT.** `pwsh -NoProfile -Command '[bool]$env:AZURE_DEVOPS_EXT_PAT'` prints `True`. Write `.packet-e2e/ab.ps1` (ground rule 2), then `ab '/org/_apis/connectionData?api-version=7.1-preview'` names the authenticated user: record its `authenticatedUser.properties.Account.$value` (the unique name the kit trusts as the signed-in user).
 3. **Process.** `ab '/org/_apis/projects/<abProject>?includeCapabilities=true'` gives the process template (`capabilities.processTemplate.templateName`). Record it: Agile, Scrum, Basic or CMMI. It decides the work item types and the two status maps in stage 2 (`<kitSource>/skills/packet-board/providers.md`, section azure-boards, has a starting point for each).
 4. **The story.** `ab '_apis/wit/workitems/<story>?$expand=all'`:

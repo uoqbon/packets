@@ -34,7 +34,7 @@ Inputs (if one is still a literal `${input:…}` placeholder, ask me for it befo
 6. **Stop at every checkpoint** marked ⏸. Tell me in a short numbered list exactly what to do, and what to type when I come back (`/packet-kit-e2e <next stage>`, or paste this prompt again with that stage).
 7. Shell variables don't survive between terminal calls. Note values (packet IDs, PR numbers, SHAs) in `state.md` and type them literally later.
 
-Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`) and evidence. On `FAIL`, record what you expected, what happened, and the kit file and line you think is responsible. Then carry on with the stage unless a later check depends on the failed one.
+Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`, or `HOST` where a check allows it: the kit is right and the host doesn't honour it) and evidence. On `FAIL`, record what you expected, what happened, and the kit file and line you think is responsible. Then carry on with the stage unless a later check depends on the failed one.
 
 ## Stage 1 · Environment and discovery
 
@@ -42,6 +42,17 @@ Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`) a
 2. Remote default branch: `git symbolic-ref --short refs/remotes/origin/HEAD` prints `origin/<default>`.
 3. **Copilot discovery.** List the agent skills you can use in this session, with name and one-line description, without reading any files. Expected: `packet-plan`, `packet-board`, `packet-dispatch`, `packet-review`, `packet-progress`. Record any that are missing, extra or duplicated, including copies under `.claude/skills` or `.agents/skills`.
 4. **Custom agents.** List the custom agents you could start as subagents, without reading any files. Expected: `packet-implementer` and `packet-reviewer-light`, `-standard` and `-deep`, and **not** `packet-dispatcher` (it has `disable-model-invocation: true`: only a person starts it). Then ask me to open the agents dropdown and confirm that `packet-dispatcher` appears there and the other four don't (they are `user-invocable: false`). ⏸ only if I haven't answered yet.
+
+   If `packet-dispatcher` is in your list, only then read `.github/agents/packet-dispatcher.agent.md`, and never start it to find out more. Its frontmatter should have `disable-model-invocation: true` and an `agents:` line without `packet-dispatcher`, and its body should have the section `## Only a person starts you`. The result is:
+   - `FAIL`, a kit defect, if any of those three is missing or different. Name the file and line.
+   - `HOST`, if all three are there and the host lists the dispatcher anyway. Some hosts drop the key (for VS Code's Copilot SDK agent host, see [microsoft/vscode#340861](https://github.com/microsoft/vscode/issues/340861)), and the body's guard is then what stops a subagent start. Record:
+     - the harness (Local or Copilot/CLI);
+     - the versions you can read: `code --version` (first line), the Copilot Chat extension (`code --list-extensions --show-versions`, the `github.copilot-chat` line), and for Copilot/CLI, `copilot --version`;
+     - the tool and the field that listed the dispatcher (for example the `task` tool's `agent_type`), and every agent name it listed;
+     - the line numbers of `disable-model-invocation: true`, of the `agents:` line, and of the guard's heading;
+     - the upstream issue it matches, if any.
+
+     `HOST` doesn't count as a failure of the kit. The report lists it under its own heading (stage 9).
 5. **Your tools.** Say which of these you have now: reading files, searching, editing, running terminal commands, starting subagents, a todo list. Record the harness I'm using (Local, or Copilot/CLI), asking me if you can't tell. For the Copilot harness, ask me to confirm that `github.copilot.chat.cli.customAgents.enabled` is on.
 6. **Static file checks** on the installed kit (`.github/agents/*.agent.md`, `.github/skills/*/SKILL.md`):
    - each file opens with a YAML frontmatter block;
@@ -194,11 +205,12 @@ Make each probe on a scratch branch `e2e/probe-<n>` from the default branch and 
 
 Write `.packet-e2e/report.md` and show it to me:
 
-1. **Summary:** the date, the sandbox, the board provider, the harness, the models used, and the number of checks per result (PASS, FAIL, BLOCKED, MANUAL).
+1. **Summary:** the date, the sandbox, the board provider, the harness, the models used, and the number of checks per result (PASS, FAIL, BLOCKED, MANUAL, HOST).
 2. **Results table:** check ID, what it checks, result, and evidence (the command and its deciding line, or a PR or comment link).
 3. **Failures:** one entry each, with expected against actual, the most likely kit file and line, and a suggested change.
-4. **Copilot behaviour notes:** how skills were discovered and invoked; whether subagents ran in parallel; any tool or model the agent files name that wasn't available; anything an agent did that its instructions forbid, or skipped although they require it; prompts where the agent needed my help.
-5. **Clean-up list for me:** branches, worktrees (`git worktree list`), temp folders, open PRs, and the sandbox items to close or delete. Remove nothing yourself.
+4. **Host limitations:** one entry per `HOST` result, with the fields its check records. No kit change is suggested; name what the kit does instead (for S1.4: the dispatcher's guard, which stops a subagent start before it claims anything).
+5. **Copilot behaviour notes:** how skills were discovered and invoked; whether subagents ran in parallel; any tool or model the agent files name that wasn't available; anything an agent did that its instructions forbid, or skipped although they require it; prompts where the agent needed my help.
+6. **Clean-up list for me:** branches, worktrees (`git worktree list`), temp folders, open PRs, and the sandbox items to close or delete. Remove nothing yourself.
 
 ## `status`
 
