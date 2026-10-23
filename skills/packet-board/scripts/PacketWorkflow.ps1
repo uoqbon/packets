@@ -899,7 +899,7 @@ function Invoke-PwClaim {
        renewal could read a window without it and hold too. A failed call throws: a failed check is never
        a win. One exception: a due renewal that loses to a claim comment left behind (one that lost its
        own check) deletes its comment and still holds on the newest earlier one, if that hasn't lapsed and
-       more than a sixth of the lease is left; Deferred names the left-behind claim.
+       more than a minute of it is left; Deferred names the left-behind claim.
 
        Returns @{ Result = 'HOLD'|'LOST'; ClaimId; CreatedAt; CommentId } for the holder, plus Renewed (a
        comment was posted), Lapsed (this claim had lapsed before it renewed: someone may have held and
@@ -943,14 +943,16 @@ function Invoke-PwClaim {
         return [pscustomobject]@{ Result = 'HOLD'; ClaimId = $ClaimId; CreatedAt = $mine; CommentId = $posted.Id; Renewed = $true; Lapsed = $lapsed; Left = $lease }
     }
     [void](Remove-ProvComment -Ref $Ref -CommentId $posted.Id)
-    if ($newest -and -not $lapsed) {
-        # Our newest comment held its own window and hasn't lapsed, yet an older claim fills this one. That
-        # claim is older than our oldest comment in the window ending at our newest, which saw it, so it
-        # lost its own check: a comment left behind by a failed delete or a crash. It can't hold, and no
-        # claim posted after our newest comment can either, so the claim still holds until that comment
-        # lapses. The renewal waits until the left-behind comment ages out (before ours does: it is older).
+    if ($newest -and -not $lapsed -and ($claims | Where-Object { [string]$_.CommentId -eq [string]$holder.CommentId })) {
+        # Our newest comment held its own window and hasn't lapsed, yet an older claim, one the first read
+        # saw too, fills this one. It is older than our oldest comment in the window ending at our newest,
+        # so it lost its own check: a comment left behind by a failed delete or a crash. It can't hold, and
+        # no claim posted after our newest comment can either, so the claim still holds until that comment
+        # lapses (measured again: the post and read may have been slow). The renewal waits until the
+        # left-behind comment ages out, which is before ours does. A winner the first read didn't see may
+        # be a real holder whose comment showed up late: that stays LOST.
         $left = $newest.CreatedAt + $lease - (Get-ProvBoardNow)
-        if ($left -gt [TimeSpan]::FromMinutes($LeaseMinutes / 6)) {
+        if ($left -gt [TimeSpan]::FromMinutes(1)) {
             return [pscustomobject]@{ Result = 'HOLD'; ClaimId = $ClaimId; CreatedAt = $newest.CreatedAt; CommentId = $newest.CommentId; Renewed = $false; Lapsed = $false; Left = $left; Deferred = $holder.ClaimId }
         }
     }

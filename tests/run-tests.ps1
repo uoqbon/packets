@@ -1250,14 +1250,30 @@ Move-FakeAbClock -Minutes 2
 $late = Claim 'session-a'
 Move-FakeAbClock -Minutes 5
 "c-leftover=$($seen -join ',')|$($left -join ',')|deferred=$deferred|a-posts=$aPosts|$late|$(Claim 'session-a')|$(Claim 'session-b' -Force)"
-# Deferred too long: with a sixth of the lease or less left, the renewal that loses is LOST.
+# Deferred too long: with a minute or less left, the renewal that loses is LOST.
 $wi5 = New-FakeAbItem 'User Story' 'PKT-05 · Late' -Tags 'packet'
 $script:ClaimRef = [string]$wi5
 [void](Claim 'session-a')
-[void](Add-FakeAbComment -Id $wi5 -Text '`packet:claim session-b` left behind' -At $script:FakeAb.Clock.AddSeconds(30))
+[void](Add-FakeAbComment -Id $wi5 -Text '`packet:claim session-b` left behind' -At $script:FakeAb.Clock.AddMinutes(3.7))
 Move-FakeAbClock -Minutes 4; [void](Claim 'session-a' -Force)
-Move-FakeAbClock -Minutes 26.2
+Move-FakeAbClock -Minutes 29.6
 "c-leftover-late=$(Claim 'session-a')|$(Claim 'session-a')"
+# The renewal stalls past the lease between its post and its read: the lease is measured again, so LOST.
+$wi6 = New-FakeAbItem 'User Story' 'PKT-06 · Slow' -Tags 'packet'
+$script:ClaimRef = [string]$wi6
+[void](Claim 'session-a')
+[void](Add-FakeAbComment -Id $wi6 -Text '`packet:claim session-b` left behind' -At $script:FakeAb.Clock.AddMinutes(5))
+foreach ($m in 11, 11, 12) { Move-FakeAbClock -Minutes $m; [void](Claim 'session-a') }
+$script:FakeAb.OnComment = { param($c) Move-FakeAbClock -Minutes 20 }
+"c-leftover-stall=$(Claim 'session-a')"
+# A winner the first read didn't see (a real claim, older than ours, that shows up only after our post) is
+# never taken for a left-behind one.
+$wi7 = New-FakeAbItem 'User Story' 'PKT-07 · Late view' -Tags 'packet'
+$script:ClaimRef = [string]$wi7
+[void](Claim 'session-a')
+Move-FakeAbClock -Minutes 12
+$script:FakeAb.OnComment = { param($c) [void](Add-FakeAbComment -Id $wi7 -Text '`packet:claim session-b` late' -At $script:FakeAb.Clock.AddMinutes(-13)) }
+"c-late-view=$(Claim 'session-a')|$(Claim 'session-b')"
 $script:FakeAb.CommentPage = 200
 
 # 5. Setup checks each level's type, and the task type against its own map.
@@ -1323,7 +1339,9 @@ Assert-That ((& $abGet 'c-race-due') -eq 'HOLD:session-b:renewed|LOST:session-b|
 Assert-That ((& $abGet 'c-release') -eq '2|0|2|2|0') 'Azure claims: release deletes every claim comment of that session, and only those' (& $abGet 'c-release')
 Assert-That ((& $abGet 'c-race-lapsed') -eq 'HOLD:session-x:renewed:lapsed|LOST:session-x|HOLD:session-y:renewed|LOST:session-y|x-posts=1|y-posts=1') 'Azure claims: two claims posted in one second inside each other''s checks: the lower comment id holds, the other loses; a renewal after a lapse says so' (& $abGet 'c-race-lapsed')
 Assert-That ((& $abGet 'c-leftover') -eq 'HOLD:session-a:renewed,HOLD:session-a:renewed,HOLD:session-a:kept|LOST:session-a,LOST:session-a,HOLD:session-a:kept|deferred=session-b|a-posts=3|HOLD:session-a:renewed|HOLD:session-a:kept|LOST:session-a') 'Azure claims: a losing comment left behind never becomes a hold, even with -Force; the holder''s renewal defers (posting nothing that stays) and renews once it ages out' (& $abGet 'c-leftover')
-Assert-That ((& $abGet 'c-leftover-late') -eq 'LOST:session-b|LOST:session-b') 'Azure claims: a deferred renewal with a sixth of the lease or less left is LOST' (& $abGet 'c-leftover-late')
+Assert-That ((& $abGet 'c-leftover-late') -eq 'LOST:session-b|LOST:session-b') 'Azure claims: a deferred renewal with a minute or less left is LOST' (& $abGet 'c-leftover-late')
+Assert-That ((& $abGet 'c-leftover-stall') -eq 'LOST:session-b') 'Azure claims: a renewal that stalls past the lease measures it again and doesn''t defer' (& $abGet 'c-leftover-stall')
+Assert-That ((& $abGet 'c-late-view') -eq 'LOST:session-b|HOLD:session-b:renewed') 'Azure claims: a winning claim that shows up late is a LOST, never a deferral' (& $abGet 'c-late-view')
 Assert-That ((& $abGet 'c-skew-ahead') -eq 'HOLD:session-s:renewed,HOLD:session-s:kept,HOLD:session-s:renewed|live=2') 'Azure claims: with the board''s clock five hours ahead, keep and renew still follow the board''s clock' (& $abGet 'c-skew-ahead')
 Assert-That ((& $abGet 'setup') -match 'hierarchy: Epic > Feature > User Story > Task' -and (& $abGet 'setup') -match "'Task' has every mapped state \(New, Active, Closed\)" -and (& $abGet 'setup') -match "'User Story' has every mapped state \(New, Active, Resolved, Closed\)") 'setup checks the hierarchy''s types, the task type against taskStatusMap' (& $abGet 'setup')
 Assert-That ((& $abGet 'setup-nomap') -match "MISSING states on 'Task': Resolved .*give the task type its own taskStatusMap") 'without taskStatusMap, setup names the missing task state and the fix' (& $abGet 'setup-nomap')
