@@ -1,5 +1,7 @@
 # azure-boards.ps1: the board as Azure Boards work items, while code and pull requests stay on GitHub
 # (PR bodies say "Fixes AB#<id>", which the Azure Boards GitHub app links and transitions on merge).
+# The app rewrites that mention into a Markdown link a few seconds after each body edit; that is expected,
+# and the kit never reads the line back.
 #
 # Statuses map to a work item State plus an optional tag (board.azureBoards.statusMap, and taskStatusMap
 # for the task type, whose states differ), because the stock processes have fewer states than the
