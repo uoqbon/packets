@@ -25,7 +25,7 @@ These settings come from review-scope's `Settings` (§1), which reads the config
 1. **The PR and its packet.** `gh pr view <pr> --json number,title,headRefName,headRefOid,baseRefName,state`. The packet ID is the title's prefix (`<ID>: …`) or the branch's (`pkt/<id>-…`). `board get <ID>` must find its item.
 2. **The round number** comes from the PR's history, never from memory: `board rounds <pr>` lists the round reports (it reads only reports posted by trusted authors: the signed-in user and the config's `trustedAuthors`); this round is one more than the last. If that is past `maxRounds`, don't run a round (`Settings.MaxRounds` from §1's review-scope command, which you can run before this check; never the checkout's config): the packet needs the owner, who can settle it (the packet-dispatch skill's **Settle**).
 3. **The checkout.** The reviewers read this checkout, so it must sit at the PR's head with no local changes: `git fetch origin`, `git status --porcelain` empty, `git rev-parse HEAD` equal to `headRefOid` (a dispatcher is already there; invoked directly, use `gh pr checkout <pr>` in a clean worktree). Note the head SHA.
-4. **The claim.** From a dispatcher: use its claim id and refresh it (`board claim <ID> <claim-id>`) before each pair and before the report. Invoked directly: make your own (`board new-claim-id`, `board claim`), refresh it the same way, and release it when you finish. `LOST` or exit 2 at any refresh: stop the round with no report. A round is reported whole or not at all.
+4. **The claim.** Check it with `board claim <ID> <claim-id>` before each pair and before the report, and nowhere else. That command decides when to renew: it posts a claim comment only when one is due and otherwise just confirms the hold (the packet-dispatch skill, step 2), so never add `-Force`. From a dispatcher: use its claim id; the dispatcher doesn't check again before the round. Invoked directly: make your own (`board new-claim-id`, `board claim`), check it the same way, and release it when you finish. `LOST` or exit 2 at any check: stop the round with no report. A round is reported whole or not at all.
 5. **Status.** If the item shows Ready to merge, the head moved after a pass: `board set <ID> "Status=In review"` before the round starts.
 6. **Lens texts come from trusted copies:** the kit's from the commit the kit was pinned from (`<kit sha>`, the packet-dispatch skill's Preflight step 1), a project lens from the default branch at that commit, never from the PR's checkout. A project lens overrides the kit's lens of the same name. For each lens, note the command that prints it: `git show <kit sha>:<paths.lenses>/<lens>.md` when that file exists there, otherwise `git show <kit sha>:.github/skills/packet-review/lenses/<lens>.md`. Reviewers run these commands themselves (§2). The scripts read the config at the base on their own.
 
@@ -49,7 +49,7 @@ Round 1's lenses are the packet's **Review lenses** plus those the diff's paths 
 
 ## 2 · Run the lenses, a pair at a time
 
-Refresh the claim before each pair. For each pair (review-scope's `Pairs`), start the round's reviewer agent once per run, with that run's lens or lenses, all in one step if your harness runs subagents in parallel, otherwise one after the other. Wait until every run in the pair has answered before the next pair. Don't edit the checkout or push while a pair runs.
+Check the claim before each pair. For each pair (review-scope's `Pairs`), start the round's reviewer agent once per run, with that run's lens or lenses, all in one step if your harness runs subagents in parallel, otherwise one after the other. Wait until every run in the pair has answered before the next pair. Don't edit the checkout or push while a pair runs.
 
 Reviewers run on the models their agent files pin. If your subagent tool asks for a model, or doesn't offer the pinned ones, use the model the owner named for the agent's class (the dispatcher asks once, in its Preflight; invoked directly, ask the owner yourself, before the first pair), never a weaker one, and put the model in the report's header.
 
@@ -84,7 +84,7 @@ If a reviewer reports that it couldn't run one of those commands, run it yoursel
 
 ## 3 · Triage
 
-When every lens has reported, refresh the claim. Reviewers can be wrong, so you check each finding:
+When every lens has reported, triage. Reviewers can be wrong, so you check each finding:
 
 1. **Merge duplicates** across lenses; keep the strongest reproduction.
 2. **Verify** each against the code at the head: open the cited lines; if it gives a command or test, run it.
@@ -94,7 +94,7 @@ When every lens has reported, refresh the claim. Reviewers can be wrong, so you 
 
 ## 4 · Report
 
-Refresh the claim. When the round passes with follow-ups (§5), open them first, so the report lists them: if opening one fails, stop here, with no report. Then fill [round-report-template.md](./round-report-template.md) and post it as one PR comment: `gh pr comment <pr> --body-file <file>`. Its first line is the round marker, which every later round, resume and progress report reads:
+Check the claim. When the round passes with follow-ups (§5), open them first, so the report lists them: if opening one fails, stop here, with no report. Then fill [round-report-template.md](./round-report-template.md) and post it as one PR comment: `gh pr comment <pr> --body-file <file>`. Its first line is the round marker, which every later round, resume and progress report reads:
 
 ```text
 `packet:round <N> head=<head sha> tier=<tier> lenses=<a,b,c> runs=<reviewer runs> confirmed=<lenses with confirmed findings> outcome=<pass|fix|needs-human>`

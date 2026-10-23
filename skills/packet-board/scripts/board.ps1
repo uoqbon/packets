@@ -24,9 +24,13 @@
   board.ps1 get <ID>                        the item as JSON
   board.ps1 set <ID> Field=Value …          Status, Priority, Size, Wave, Target (Status: one of the seven)
   board.ps1 new-claim-id                    a fresh claim id for this session
-  board.ps1 claim <ID> <claim-id>           the claim check: HOLD (exit 0) or LOST (exit 1)
+  board.ps1 claim <ID> <claim-id> [-Force]  the claim check: HOLD (exit 0) or LOST (exit 1). Posts a claim
+                                            comment only when one is due (none yet, or a third of the lease
+                                            gone, by the board's clock); otherwise checks without writing.
+                                            The line ends with (renewed; …) or (kept, nothing posted; …) and
+                                            the lease left. -Force: post a renewal now
   board.ps1 release <ID> <claim-id>         delete this claim id's claim comments
-  board.ps1 claims <ID>                     claims from the last lease window (report only)
+  board.ps1 claims <ID>                     claims from the last lease window, by the board's clock (report only)
   board.ps1 comment <ID> <file>             post the file as a comment on the item
   board.ps1 marker <ID> <kind> [-Json]      the newest trusted comment on the item with a `packet:<kind>` marker
   board.ps1 comments <ID> [-Json]           the item's comments from trusted authors (the owner's answers)
@@ -361,9 +365,14 @@ try {
         'claim' {
             $item = Resolve-PwItem $cfg $Rest[0]
             if (-not $Rest[1]) { Stop-Pw 'usage: board.ps1 claim <ID> <claim-id> (board.ps1 new-claim-id makes one)' }
-            $r = Invoke-PwClaim -Ref $item.Ref -ClaimId $Rest[1] -LeaseMinutes $lease
-            Write-Output ('{0} {1} {2} {3}' -f $r.Result, $r.ClaimId, $r.CreatedAt.UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ'), $r.CommentId)
-            if ($r.Result -ne 'HOLD') { exit 1 }
+            $r = Invoke-PwClaim -Ref $item.Ref -ClaimId $Rest[1] -LeaseMinutes $lease -Force:$Force
+            $line = '{0} {1} {2} {3}' -f $r.Result, $r.ClaimId, $r.CreatedAt.UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ'), $r.CommentId
+            if ($r.Result -ne 'HOLD') { Write-Output $line; exit 1 }
+            $left = [Math]::Max(0, [Math]::Floor($r.Left.TotalMinutes))
+            $how = if (-not $r.Renewed) { "kept, nothing posted; ${left}m of ${lease}m left, renews under $([Math]::Floor($lease * 2 / 3))m" }
+            elseif ($r.Lapsed) { "renewed after the lease had lapsed; ${left}m left" }
+            else { "renewed; ${left}m left" }
+            Write-Output "$line ($how)"
         }
         'release' {
             $item = Resolve-PwItem $cfg $Rest[0]
@@ -373,8 +382,9 @@ try {
         }
         'claims' {
             $item = Resolve-PwItem $cfg $Rest[0]
-            foreach ($c in (Get-PwLiveClaims -Ref $item.Ref -LeaseMinutes $lease)) {
-                $age = [int]([DateTimeOffset]::UtcNow - $c.CreatedAt).TotalMinutes
+            $live = Get-PwLiveClaims -Ref $item.Ref -LeaseMinutes $lease
+            foreach ($c in $live.Claims) {
+                $age = [int]($live.Now - $c.CreatedAt).TotalMinutes
                 Write-Output ('{0} {1} {2} ({3}m ago)' -f $c.ClaimId, $c.CreatedAt.UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ'), $c.CommentId, $age)
             }
         }
