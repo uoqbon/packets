@@ -1013,4 +1013,3 @@ function Invoke-PwGit {
     }
     finally { Remove-Item -LiteralPath $err -ErrorAction SilentlyContinue }
 }
-
