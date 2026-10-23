@@ -1395,7 +1395,7 @@ try {
     $canStart = @($subagents | Where-Object {
         $front = ((Get-Content -Raw $_.FullName) -split '(?m)^---\r?$')[1]
         $tools = if ($front -match '(?m)^tools: *\[(.*)\]\r?$') { @($Matches[1] -split ',' | ForEach-Object { $_.Trim().Trim("'", '"', ' ') }) } else { @('(no tools line)') }
-        $front -notmatch '(?m)^user-invocable: false\r?$' -or @($tools | Where-Object { $_ -in 'agent', 'custom-agent', 'task', 'runSubagent', '(no tools line)' }).Count -gt 0 })
+        $front -notmatch '(?m)^user-invocable: false\r?$' -or @($tools | Where-Object { ($_ -split '/')[-1] -in 'agent', 'custom-agent', 'task', 'runSubagent', '(no tools line)' }).Count -gt 0 })
     Assert-That ($subagents.Count -eq 4 -and $canStart.Count -eq 0) 'the other agents are subagent-only, with a tools list that has no subagent tool' (($canStart | ForEach-Object Name) -join ', ')
     $cfgPath = Join-Path $target '.github/packet-workflow.json'
     $cfgIn = Get-Content -Raw $cfgPath | ConvertFrom-Json -AsHashtable
