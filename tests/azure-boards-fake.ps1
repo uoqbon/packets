@@ -3,8 +3,11 @@
 # work items, their revisions, their states per type and their links. Like Azure DevOps it keeps both
 # ends of a link (and gives both a new revision), refuses a second parent, applies a patch only when its
 # revision test passes, refuses a state the item's type doesn't have, merges an 'add' on System.Tags into
-# the tags already there, and answers a type the project doesn't have with an error. Every call is logged
-# in $script:FakeAbCalls.
+# the tags already there, and answers a type the project doesn't have with an error. It keeps work item
+# comments too (list in pages with a continuation token, post, delete), stamped by its own clock
+# ($script:FakeAb.Clock, which the tests move and which needn't match the local one), and every answer
+# carries that clock as its Date header, in whole seconds. Each comment post and delete is a revision of
+# the work item, as on the service. Every call is logged in $script:FakeAbCalls.
 
 $script:FakeAb = @{
     Next   = 1
@@ -17,6 +20,15 @@ $script:FakeAb = @{
         'Issue'      = @('To Do', 'Doing', 'Done')
         'Approval'   = @('New', 'Active', 'Resolved', 'Closed')
     }
+    # Comments by work item id. Deleted ones stay, marked isDeleted, and are listed like that (as with
+    # includeDeleted), so the provider's filter is what hides them.
+    Comments    = @{}
+    NextComment = 1
+    CommentPage = 200
+    Clock       = [DateTimeOffset]'2026-10-22T20:00:00Z'
+    User        = 'dispatcher@example.com'
+    # Run after each comment is posted, before the answer goes back: a competitor racing in.
+    OnComment   = $null
 }
 $script:FakeAbCalls = [System.Collections.Generic.List[string]]::new()
 $script:FakeAbBack = @{
@@ -114,12 +126,66 @@ function Set-FakeAbOps {
     $item.rev++
 }
 
+function Add-FakeAbComment {
+    <# A comment on a work item, stamped by the fake's clock (or -At), as -By posted it. #>
+    param([Parameter(Mandatory)][int]$Id, [Parameter(Mandatory)][string]$Text, [string]$By = $script:FakeAb.User, $At = $null)
+    if (-not $script:FakeAb.Items.ContainsKey($Id)) { throw "TF401232: work item $Id does not exist" }
+    if (-not $script:FakeAb.Comments.ContainsKey($Id)) { $script:FakeAb.Comments[$Id] = [System.Collections.Generic.List[object]]::new() }
+    $c = @{ id = $script:FakeAb.NextComment++; workItemId = $Id; text = $Text; createdDate = $(if ($At) { [DateTimeOffset]$At } else { $script:FakeAb.Clock }).ToString('o'); createdBy = @{ uniqueName = $By }; isDeleted = $false }
+    $script:FakeAb.Comments[$Id].Add($c)
+    $script:FakeAb.Items[$Id].rev++
+    $c
+}
+
+function Move-FakeAbClock {
+    param([double]$Minutes = 0, [double]$Seconds = 0)
+    $script:FakeAb.Clock = $script:FakeAb.Clock.AddMinutes($Minutes).AddSeconds($Seconds)
+}
+
+function Get-FakeAbComments {
+    <# A work item's comments that aren't deleted, oldest first. #>
+    param([int]$Id)
+    @($script:FakeAb.Comments[$Id] | Where-Object { $_ -and -not $_.isDeleted })
+}
+
 function Invoke-PwAb {
     param(
         [string]$Method = 'GET', [Parameter(Mandatory)][string]$Path, $Body,
         [string]$ContentType = 'application/json', [string]$ApiVersion = '7.1', [switch]$OrgLevel
     )
     $script:FakeAbCalls.Add("$Method $Path")
+    $clock = $script:FakeAb.Clock
+    $script:AbServerClock = @{ Date = [DateTimeOffset]::new($clock.UtcTicks - $clock.UtcTicks % [TimeSpan]::TicksPerSecond, [TimeSpan]::Zero); SentAt = [DateTimeOffset]::UtcNow }
+    if ($Method -eq 'GET' -and $Path -eq '_apis/connectionData' -and $OrgLevel) {
+        return @{ authenticatedUser = @{ properties = @{ Account = @{ '$value' = $script:FakeAb.User } } } }
+    }
+    if ($Path -match '^_apis/wit/workItems/(?<id>\d+)/comments(?:/(?<cid>\d+))?(?:\?(?<q>.*))?$') {
+        $id = [int]$Matches.id; $cid = $Matches['cid']; $q = "$($Matches['q'])"
+        if (-not $script:FakeAb.Items.ContainsKey($id)) { Stop-FakeAb $Method $Path "TF401232: work item $id does not exist" }
+        $list = @($script:FakeAb.Comments[$id] | Where-Object { $_ })
+        if ($Method -eq 'GET' -and -not $cid) {
+            # Newest first, as the service lists them; the continuation token is where the next page starts.
+            $top = if ($q -match '(?:^|&)\$top=(?<n>\d+)') { [Math]::Min([int]$Matches.n, $script:FakeAb.CommentPage) } else { $script:FakeAb.CommentPage }
+            $start = if ($q -match '(?:^|&)continuationToken=(?<t>[^&]+)') { [int][uri]::UnescapeDataString($Matches.t) } else { 0 }
+            [array]::Reverse($list)
+            $page = @($list | Select-Object -Skip $start -First $top)
+            $r = @{ totalCount = $list.Count; count = $page.Count; comments = @($page | ForEach-Object { @{} + $_ }) }
+            if ($start + $top -lt $list.Count) { $r.continuationToken = [string]($start + $top) }
+            return $r
+        }
+        if ($Method -eq 'POST' -and -not $cid) {
+            $c = Add-FakeAbComment -Id $id -Text $Body.text
+            if ($script:FakeAb.OnComment) { $hook = $script:FakeAb.OnComment; $script:FakeAb.OnComment = $null; & $hook $c }
+            return (@{} + $c)
+        }
+        if ($Method -eq 'DELETE' -and $cid) {
+            $c = $list | Where-Object { $_.id -eq [int]$cid -and -not $_.isDeleted } | Select-Object -First 1
+            if (-not $c) { Stop-FakeAb $Method $Path "TF401181: comment $cid does not exist" }
+            $c.isDeleted = $true
+            $script:FakeAb.Items[$id].rev++
+            return $null
+        }
+    }
     if ($Method -eq 'GET' -and $Path -match '^_apis/wit/workitems/(?<id>\d+)\?(?<q>.*)$') {
         $id = [int]$Matches.id; $expand = $Matches.q -match 'expand=relations'
         if (-not $script:FakeAb.Items.ContainsKey($id)) { Stop-FakeAb $Method $Path "TF401232: work item $id does not exist" }

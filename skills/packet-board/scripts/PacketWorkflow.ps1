@@ -857,36 +857,106 @@ function Get-PwClaimComments {
         } | Sort-Object CreatedAt, { [long]$_.CommentId })
 }
 
+function Get-PwBoardNow {
+    <# The latest the board's clock can read now, from a response's Date header (whole seconds) and the
+       local time the request went out: the server stamped Date between then and the response, so its
+       clock is at most Date + 1s + the local time since. Claims are judged by the board's clock, never
+       the local one: two machines' clocks can be minutes apart. #>
+    param([Parameter(Mandatory)][DateTimeOffset]$Date, [Parameter(Mandatory)][DateTimeOffset]$SentAt)
+    $Date.AddSeconds(1) + ([DateTimeOffset]::UtcNow - $SentAt)
+}
+
+function ConvertFrom-PwHttpDate {
+    param([string]$Text)
+    $d = [DateTimeOffset]::MinValue
+    if (-not [DateTimeOffset]::TryParse($Text, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$d)) { Stop-Pw "the board sent a Date header that isn't a date ('$Text'), so its clock is unknown" }
+    $d.ToUniversalTime()
+}
+
+function Select-PwClaimHolder {
+    <# The holder as of board time -At: the oldest claim in the lease window ending there (ties: the lower
+       comment id). The claim check and the read-only check both decide with this. #>
+    param([object[]]$Claims, [Parameter(Mandatory)][DateTimeOffset]$At, [Parameter(Mandatory)][int]$LeaseMinutes)
+    $from = $At.AddMinutes(-$LeaseMinutes)
+    @($Claims | Where-Object { $_.CreatedAt -ge $from -and $_.CreatedAt -le $At } | Sort-Object CreatedAt, { [long]$_.CommentId }) | Select-Object -First 1
+}
+
 function Invoke-PwClaim {
-    <# The claim check. Posts a claim comment, then reads the claims in the lease window before it, by
-       the board's clock. The oldest claim in that window holds the packet (ties: the lower comment id).
-       Returns @{ Result = 'HOLD'|'LOST'; ClaimId; CreatedAt; CommentId } for the holder. On LOST the
-       comment it posted is deleted again. On HOLD nothing else is deleted: a holder's older claim must
-       stay visible until release, or a session that posted just before this refresh could read a window
-       without it and hold too. A failed call throws: a failed check is never a win. #>
-    param([Parameter(Mandatory)][string]$Ref, [Parameter(Mandatory)][string]$ClaimId, [Parameter(Mandatory)][int]$LeaseMinutes)
+    <# The claim check. A claim lasts LeaseMinutes after its newest comment, by the board's clock; it is
+       renewed once a third of that has passed.
+
+       Read-only first: if this claim id already has a comment and another claim holds the window that
+       ends at its newest comment (Select-PwClaimHolder), it is LOST, with nothing written, -Force or not.
+       If that window is ours and more than two thirds of the lease is left by the latest
+       the board's clock can read (Get-ProvBoardNow), the claim still holds and nothing is written. That
+       comment won its own window, so any claim posted after it within the lease saw it and lost; no one
+       else can hold until it lapses.
+
+       Otherwise (a first claim, one that is due, a lapsed one, or -Force) it posts a claim comment, then
+       reads the claims in the lease window before it, by the board's clock. The oldest claim in that window
+       holds the packet. On LOST the comment it posted is deleted again. On HOLD nothing else is deleted:
+       a holder's older claim must stay visible until release, or a session that posted just before this
+       renewal could read a window without it and hold too. A failed call throws: a failed check is never
+       a win. One exception: a due renewal that loses to a claim comment left behind (one that lost its
+       own check) deletes its comment and still holds on the newest earlier one, if that hasn't lapsed and
+       more than a minute of it is left; Deferred names the left-behind claim.
+
+       Returns @{ Result = 'HOLD'|'LOST'; ClaimId; CreatedAt; CommentId } for the holder, plus Renewed (a
+       comment was posted), Lapsed (this claim had lapsed before it renewed: someone may have held and
+       released it meanwhile) and Left (the lease left, for HOLD). #>
+    param([Parameter(Mandatory)][string]$Ref, [Parameter(Mandatory)][string]$ClaimId, [Parameter(Mandatory)][int]$LeaseMinutes, [switch]$Force)
     if ($ClaimId -notmatch '^[A-Za-z0-9._-]+$') { Stop-Pw "claim id '$ClaimId' may only use letters, digits, '.', '_' and '-'" }
+    $lease = [TimeSpan]::FromMinutes($LeaseMinutes)
+    $renewBelow = [TimeSpan]::FromMinutes($LeaseMinutes * 2 / 3)
+    $lapsed = $false
+    $claims = @(Get-PwClaimComments -Ref $Ref)
+    $newest = @($claims | Where-Object { $_.ClaimId -eq $ClaimId }) | Select-Object -Last 1
+    if ($newest) {
+        # Even with -Force: a comment of ours that lost its own window (one left behind by a failed delete
+        # or a crash) must not turn into a hold once the claim that beat it ages out of a newer window.
+        $holder = Select-PwClaimHolder -Claims $claims -At $newest.CreatedAt -LeaseMinutes $LeaseMinutes
+        if ($holder.ClaimId -ne $ClaimId) {
+            return [pscustomobject]@{ Result = 'LOST'; ClaimId = $holder.ClaimId; CreatedAt = $holder.CreatedAt; CommentId = $holder.CommentId; Renewed = $false; Lapsed = $false; Left = $null }
+        }
+        $left = $newest.CreatedAt + $lease - (Get-ProvBoardNow)
+        if (-not $Force -and $left -gt $renewBelow) {
+            return [pscustomobject]@{ Result = 'HOLD'; ClaimId = $ClaimId; CreatedAt = $newest.CreatedAt; CommentId = $newest.CommentId; Renewed = $false; Lapsed = $false; Left = $left }
+        }
+        $lapsed = $left -le [TimeSpan]::Zero
+    }
     $body = "``packet:claim $ClaimId`` A dispatcher session is working on this packet. The claim lapses $LeaseMinutes minutes after its newest refresh."
     $posted = Add-ProvComment -Ref $Ref -Body $body
     try {
         $mine = [DateTimeOffset]$posted.CreatedAt
-        $from = $mine.AddMinutes(-$LeaseMinutes)
-        $window = @(Get-PwClaimComments -Ref $Ref | Where-Object { $_.CreatedAt -ge $from -and $_.CreatedAt -le $mine })
+        $window = @(Get-PwClaimComments -Ref $Ref)
         if (-not ($window | Where-Object { [string]$_.CommentId -eq [string]$posted.Id })) {
             # Our own comment isn't visible yet: treat it as the newest in the window.
             $window += [pscustomobject]@{ ClaimId = $ClaimId; CreatedAt = $mine; CommentId = $posted.Id }
         }
-        $holder = $window | Sort-Object CreatedAt, { [long]$_.CommentId } | Select-Object -First 1
+        $holder = Select-PwClaimHolder -Claims $window -At $mine -LeaseMinutes $LeaseMinutes
     }
     catch {
         try { [void](Remove-ProvComment -Ref $Ref -CommentId $posted.Id) } catch { }
         throw
     }
     if ($holder.ClaimId -eq $ClaimId) {
-        return [pscustomobject]@{ Result = 'HOLD'; ClaimId = $ClaimId; CreatedAt = $mine; CommentId = $posted.Id }
+        return [pscustomobject]@{ Result = 'HOLD'; ClaimId = $ClaimId; CreatedAt = $mine; CommentId = $posted.Id; Renewed = $true; Lapsed = $lapsed; Left = $lease }
     }
     [void](Remove-ProvComment -Ref $Ref -CommentId $posted.Id)
-    [pscustomobject]@{ Result = 'LOST'; ClaimId = $holder.ClaimId; CreatedAt = $holder.CreatedAt; CommentId = $holder.CommentId }
+    if ($newest -and -not $lapsed -and ($claims | Where-Object { [string]$_.CommentId -eq [string]$holder.CommentId })) {
+        # Our newest comment held its own window and hasn't lapsed, yet an older claim, one the first read
+        # saw too, fills this one. It is older than our oldest comment in the window ending at our newest,
+        # so it lost its own check: a comment left behind by a failed delete or a crash. It can't hold, and
+        # no claim posted after our newest comment can either, so the claim still holds until that comment
+        # lapses (measured again: the post and read may have been slow). The renewal waits until the
+        # left-behind comment ages out, which is before ours does. A winner the first read didn't see may
+        # be a real holder whose comment showed up late: that stays LOST.
+        $left = $newest.CreatedAt + $lease - (Get-ProvBoardNow)
+        if ($left -gt [TimeSpan]::FromMinutes(1)) {
+            return [pscustomobject]@{ Result = 'HOLD'; ClaimId = $ClaimId; CreatedAt = $newest.CreatedAt; CommentId = $newest.CommentId; Renewed = $false; Lapsed = $false; Left = $left; Deferred = $holder.ClaimId }
+        }
+    }
+    [pscustomobject]@{ Result = 'LOST'; ClaimId = $holder.ClaimId; CreatedAt = $holder.CreatedAt; CommentId = $holder.CommentId; Renewed = $false; Lapsed = $false; Left = $null }
 }
 
 function Remove-PwClaim {
@@ -901,10 +971,13 @@ function Remove-PwClaim {
 }
 
 function Get-PwLiveClaims {
-    <# Claims made in the last lease window by the local clock. It only reports; the claim check decides. #>
+    <# Claims made in the last lease window by the board's clock, and that clock's reading (Now). It only
+       reports; the claim check decides. #>
     param([Parameter(Mandatory)][string]$Ref, [Parameter(Mandatory)][int]$LeaseMinutes)
-    $from = [DateTimeOffset]::UtcNow.AddMinutes(-$LeaseMinutes)
-    @(Get-PwClaimComments -Ref $Ref | Where-Object { $_.CreatedAt -ge $from })
+    $claims = @(Get-PwClaimComments -Ref $Ref)
+    $now = Get-ProvBoardNow
+    $from = $now.AddMinutes(-$LeaseMinutes)
+    [pscustomobject]@{ Now = $now; Claims = @($claims | Where-Object { $_.CreatedAt -ge $from }) }
 }
 
 # ---------------------------------------------------------------------------------------------------

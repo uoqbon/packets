@@ -2,6 +2,8 @@
 
 Pull requests always live on GitHub, so every provider needs the GitHub CLI (`gh`) signed in with access to the repository. The provider only decides where the board lives.
 
+Claims are judged by the board's clock, never the local one: a claim comment is stamped by the board, and the claim check reads how late the board's clock can be from a response's `Date` header (GitHub: a call to `rate_limit`, which costs no rate limit, or to `user` where `rate_limit` isn't served; Azure Boards: the comments read just before; local: the local clock, which stamps its comments).
+
 ## github-project
 
 A GitHub Project (v2), owned by a user or an organization, over the repository's issues.
@@ -72,7 +74,7 @@ Work items in Azure Boards, while code and pull requests stay on GitHub. Install
 - **Tags:** `packet`, `human-task`, `size:<S|M|L>`, `wave:<value>`, `phase:<slug>` and the status tags. Priority uses the Priority field (P0 = 1 … P3 = 4).
 - **Descriptions** are written as Markdown (`markdown: true`, needs an organization with Markdown support for work item fields). With `markdown: false` the packet text goes in as preformatted HTML, and sync can no longer tell a board-side edit from its own, so it always rewrites.
 - **Dependencies** become Predecessor links. They don't move items in the tree.
-- **Comments** (claims, briefs) are posted as Markdown comments and deleted through the comments API.
+- **Comments** (claims, briefs) are posted as Markdown comments and deleted through the comments API. Each post and delete is a revision of the work item, which is why `board claim` posts only when a renewal is due.
 - **Untested against a live organization** in the kit's own tests; run `board setup` and a `sync -DryRun` first.
 
 ## local

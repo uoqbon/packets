@@ -71,9 +71,16 @@ Every call runs this first, `resume` and `status` included.
 2. `board claim <ID> <claim-id>`:
    - `HOLD …` (exit 0): you hold the packet. Now `board set <ID> "Status=In progress"` and `board assign <ID>` (if only the assignment fails, say so in your report and go on).
    - `LOST …` (exit 1): another session holds it. Go back to **Select**.
-   - exit 2: no answer. Stop and report; a failed check is never a won one.
+   - exit 2: no answer. Run `board release <ID> <claim-id>` (a claim comment the failed check left behind would otherwise block the packet), then stop and report; a failed check is never a won one.
 
-The claim is a lease (`claims.leaseMinutes`, 30 by default). **Refresh** it with the same `board claim <ID> <claim-id>` before each long step: before the implementer starts, after its hand-back has passed step 6.1's clean-tree and kit check, before each push, before each review round, and before the hand-off write. If a refresh answers `LOST` or exit 2, stop at once: no further implementer run, push, PR, board write or round. Run `board release <ID> <claim-id>`, keep the local commits, and tell the owner which claim holds the packet.
+The claim is a lease (`claims.leaseMinutes`, 30 by default) that runs from its newest claim comment, by the board's clock. **Check** it with the same `board claim <ID> <claim-id>` wherever the steps below say so. That command alone decides when to renew: it posts a new claim comment only once a third of the lease has gone, and otherwise confirms the hold without writing anything. Its line ends with `(kept, nothing posted; <n>m of <lease>m left, …)` or `(renewed; <n>m left)`; `(kept, renewal deferred: …; <n>m left)` is a hold too, but with less left than usual: check again before <n> minutes have passed, and don't start an implementer run or a review round on it. A check renews within those minutes, once the left-behind comment ages out. A check therefore costs a few reads, and the item gets a claim comment about every ten minutes, not one per check. Don't add `-Force` (it renews at once); the workflow never needs it.
+
+- Check before each **long step**: each implementer run (step 5) and each review round (packet-review checks before each pair of reviewers).
+- Check before each **irreversible write**: a push, opening the PR, `board set`, and the hand-off comment.
+
+After any other check at least two thirds of the lease is left (20 minutes by default), so keep the work between two checks shorter than that. If implementer runs or test suites take longer, ask the owner to raise `claims.leaseMinutes` once this packet is released. A step that outlasts the lease is still safe, because the next check answers `LOST` if another session took the packet meanwhile, but its work may be wasted. That holds only while every session uses the same lease: sessions that read different values of `claims.leaseMinutes` (each reads it when it fetches the default branch) can both hold a packet. So the owner changes it, either way, only once running dispatchers have released, while `board claims` shows no live claim on any packet.
+
+If a check answers `LOST` or exit 2, stop at once: no further implementer run, push, PR, board write or round. Run `board release <ID> <claim-id>`, keep the local commits, and tell the owner which claim holds the packet. If it answers `renewed after the lease had lapsed`, another session may have held and released the packet meanwhile. Read its state again before the next write: `board get <ID>`, `board pr <ID>`, `board rounds <pr>`, and `git fetch origin` with the branch's log.
 
 **Release** whenever you stop working on the packet, for any reason, as your last action: `board release <ID> <claim-id>`. A session that dies without releasing blocks the packet until the lease runs out.
 
@@ -105,22 +112,22 @@ For STACK add `dep=<dependency ID> dep-pr=<its PR number> dep-branch=<its head b
 
 ## 5 · Run the implementer
 
-Refresh the claim. Then run the **`packet-implementer`** agent as a subagent (in VS Code: the Run Subagent tool, naming the agent). Its task names the brief's file rather than pasting it, so your own context stays small: "Your implementation brief is in `<the brief file from step 4>`. Read all of it first (`pwsh -NoProfile -Command "Get-Content -Raw '<file>'"`), then build the packet it describes." Subagents are stateless: each follow-up (a test failure, review findings) is a new run with the brief's file, what to do now, and the current state (`git log --oneline <base-sha>..HEAD`). If the file is gone (a new session, a cleaned temp folder), write it again from the brief marker comment (`board marker <ID> brief`).
+Check the claim (step 2). Then run the **`packet-implementer`** agent as a subagent (in VS Code: the Run Subagent tool, naming the agent). Its task names the brief's file rather than pasting it, so your own context stays small: "Your implementation brief is in `<the brief file from step 4>`. Read all of it first (`pwsh -NoProfile -Command "Get-Content -Raw '<file>'"`), then build the packet it describes." Subagents are stateless: each follow-up (a test failure, review findings) is a new run with the brief's file, what to do now, and the current state (`git log --oneline <base-sha>..HEAD`). If the file is gone (a new session, a cleaned temp folder), write it again from the brief marker comment (`board marker <ID> brief`).
 
 While it runs, do nothing else on this packet.
 
 ## 6 · Verify the hand-back
 
 1. **Clean tree and kit integrity, with git alone.** `git status --porcelain` must print nothing: if the implementer left uncommitted changes, run it again to commit or discard them; an uncommitted edit to a script would run as is. Then `git diff --name-only <comparison base>...HEAD`: if it lists anything under `.github/skills/`, `.github/agents/`, the project lens directory (`paths.lenses`, `.github/packet-lenses/` by default) or `.github/packet-workflow.json` that the packet doesn't own, restore those paths from the comparison base (`git checkout <comparison base> -- <path>`) and commit. (Against the brief's base after a merge, a kit upgrade that landed on the default branch would look like the packet's change, and restoring it would revert the upgrade.) The pinned kit never runs the checkout's copies, but the PR must not carry kit changes the packet doesn't own; the scripts read the config at the base (`board` at the default branch) for the same reason.
-2. Refresh the claim. **Questions:** if the implementer stopped with a question, answer it when the plan or the code settles it and run it again. A product, scope or contract decision goes to **Needs human**.
+2. Check the claim. **Questions:** if the implementer stopped with a question, answer it when the plan or the code settles it and run it again. A product, scope or contract decision goes to **Needs human**.
 3. **Scope.** `pwsh -File <kit>/.github/skills/packet-dispatch/scripts/check-scope.ps1 -Packet <ID> -Base <base-sha>` must exit 0; it prints the base it compared against. For OUTSIDE, LOCKED or MACHINERY lines, restore those paths from that base and commit, or send the work back. For each TOUCH line, read that file's diff and confirm it is exactly the edit the packet allows.
-4. **Tests.** Run the packet's **Tests to run**, then `commands.ci` from the config once, if it is set. Send each command's output to a file in the system temp directory and read its summary and failures (the last 60 lines, plus each failing test the runner names), not the whole log: every line you read stays in your context for the rest of the packet. For step 5's evidence, search the file for the tests the brief maps to acceptance criteria. On a failure caused by the packet, refresh the claim and send the failure back to a new implementer run (step 5). After two failed attempts, **Needs human**.
+4. **Tests.** Run the packet's **Tests to run**, then `commands.ci` from the config once, if it is set. Send each command's output to a file in the system temp directory and read its summary and failures (the last 60 lines, plus each failing test the runner names), not the whole log: every line you read stays in your context for the rest of the packet. For step 5's evidence, search the file for the tests the brief maps to acceptance criteria. On a failure caused by the packet, send the failure back to a new implementer run (step 5). After two failed attempts, **Needs human**.
 5. **Evidence.** Every acceptance criterion maps to a test that passed or a command's output. A criterion that can't be met as written goes to **Needs human**.
 6. **Decision record.** The file at `paths.decisions` for this packet exists and covers each choice the packet left open.
 
 ## 7 · Open the PR
 
-Refresh the claim, then:
+Check the claim, then:
 
 1. `git push -u origin <branch>` (never with `--force`).
 2. Fill [pr-template.md](./pr-template.md) into a temp file. Its first line is `board ref <ID>`'s output (`Closes #12`, or `Fixes AB#345` for Azure Boards), so the merge closes the item.
@@ -129,22 +136,22 @@ Refresh the claim, then:
 
 ## 8 · Review rounds
 
-Refresh the claim before each round, then follow the [packet-review](../packet-review/SKILL.md) skill for the PR. It returns one of:
+Follow the [packet-review](../packet-review/SKILL.md) skill for the PR, giving it your claim id: it checks the claim before each pair and before its report, so don't add a check of your own before the round. It returns one of:
 
-- **Fix**: the panel returned confirmed findings to fix. Refresh the claim, then run a new implementer with the brief's file (step 5), the findings, and: "Fix only these findings. One commit: `Round-<N> review fixes (<ID>)`." Verify as in step 6 (kit integrity, scope, the packet's tests), refresh the claim, push, and start the next round.
+- **Fix**: the panel returned confirmed findings to fix. Run a new implementer with the brief's file (step 5, which checks the claim first), the findings, and: "Fix only these findings. One commit: `Round-<N> review fixes (<ID>)`." Verify as in step 6 (kit integrity, scope, the packet's tests), check the claim, push, and start the next round.
 - **Pass**: go to step 9.
 - **Needs human**: the panel has set the status and asked the question. Release the claim and stop.
 
 ## 9 · Hand off
 
 1. **Reviewed head.** `gh pr view <pr> --json headRefOid,mergeable`. The head must equal the `head=` of the newest `round` or `settle-check` entry in `board rounds <pr>` (**Settle**). If commits landed after it, they are unreviewed: run another round (step 8), or **Needs human** when the rounds are used up.
-2. **Conflicts.** `mergeable` is `CONFLICTING`: merge `origin/<defaultBranch>` into the branch (never rebase), resolve inside the packet's paths, verify as in step 6 (clean tree and kit, scope, the packet's tests; both now compare against the default branch you merged), push. The resolution is new code: run a review round for it, then return here. With the rounds used up, **Needs human** instead: the owner settles the resolution.
+2. **Conflicts.** `mergeable` is `CONFLICTING`: merge `origin/<defaultBranch>` into the branch (never rebase), resolve inside the packet's paths, verify as in step 6 (clean tree and kit, scope, the packet's tests; both now compare against the default branch you merged), check the claim, push. The resolution is new code: run a review round for it, then return here. With the rounds used up, **Needs human** instead: the owner settles the resolution.
 3. **CI on that head.** `gh pr checks <pr>`. Read its words, not just its exit code:
    - every check passed: go on to 4.
    - pending, or no checks yet: leave the packet In review, comment on the item "Panel passed; waiting for CI on `<sha7>`. Once it passes: `/packet-dispatch resume <ID>`", release the claim and stop. Never wait in a polling loop.
    - failed: read why (`gh run view <run id> --log-failed`). If the change caused it and rounds remain, fix it like a review finding (step 8: implementer, push, a round for the fix). If it is infrastructure outside the diff (a runner or registry outage), comment asking the owner to re-run CI (agents never re-run workflows), release and stop. If three rounds are used, **Needs human**.
    - cancelled or skipped: comment asking the owner to re-run CI, release and stop.
-4. **Ready to merge.** Refresh the claim. `board set <ID> "Status=Ready to merge"`, then comment on the item:
+4. **Ready to merge.** Check the claim. `board set <ID> "Status=Ready to merge"`, then comment on the item:
 
    ```text
    `packet:handoff pr=<pr> head=<head sha>` Ready to merge: PR #<pr>, <N> review round(s), follow-ups <#… or none>, CI passed on <sha7>.
@@ -181,7 +188,7 @@ When the dependency merges: merge `origin/<defaultBranch>` into the packet branc
 
 When only the owner can decide (scope, a contract, a product question, a blocking finding after round 3, CI that can't pass):
 
-1. Refresh the claim. `board set <ID> "Status=Needs human"`.
+1. Check the claim. `board set <ID> "Status=Needs human"`.
 2. Comment on the item, first line `` `packet:needs-human` ``: the question in one sentence, what you found (with file:line or output), two or three options with your recommendation first, and what happens after each. Never ask the owner to edit packet or spec files themselves: an option that changes the packet gives the exact wording it would put there, and says that choosing it means an amendment PR that you open and they merge (**Amend**).
 3. Release the claim and stop.
 
@@ -223,7 +230,7 @@ A settle counts only if `board rounds <pr> -Json` lists it as a `settle-request`
 
 1. Claim. `git fetch origin`, then `git merge --ff-only <the request's head>`. If the request describes a change (its `Body`), apply exactly that on top, as one commit `Settle (<ID>)`; otherwise the owner's pushed commits are the settle.
 2. Verify as in step 6 (clean tree and kit first, scope, the packet's tests). A problem goes back to the owner (**Needs human**), never to another panel round.
-3. Refresh the claim and push (never with `--force`).
+3. Check the claim and push (never with `--force`).
 4. Comment on the PR: `` `packet:settle-check head=<the pushed head sha>` `` with what you ran and the results. That head counts as reviewed in step 9.1: the owner reviewed the settle themselves.
 5. Continue at step 9.1 (the reviewed head is now the settle-check's), then 9.2 and 9.3, and in the hand-off say "settled by the owner after round <N>".
 

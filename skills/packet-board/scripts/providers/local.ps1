@@ -138,6 +138,11 @@ function Remove-ProvComment {
 
 function Get-ProvCurrentUser { 'local' }
 
+function Get-ProvBoardNow {
+    <# The board's clock: the local one, which stamps this board's comments. #>
+    [DateTimeOffset]::UtcNow
+}
+
 function Get-ProvRefText { param([Parameter(Mandatory)]$Item) "Packet $($Item.Id) (local board item $($Item.Number))" }
 function Set-ProvAssignee { param([Parameter(Mandatory)][string]$Ref) }
 

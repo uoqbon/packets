@@ -223,14 +223,37 @@ Click through it.
     $r = Invoke-Kit $board @('claim', 'PKT-01', 'session-b')
     Assert-That ($r.Code -eq 1 -and $r.Text -match '^LOST session-a') 'second session loses to the first' $r.Text
     $r = Invoke-Kit $board @('claim', 'PKT-01', 'session-a')
-    Assert-That ($r.Code -eq 0 -and $r.Text -match '^HOLD session-a') 'holder refreshes its claim' $r.Text
+    Assert-That ($r.Code -eq 0 -and $r.Text -match '^HOLD session-a \S+ \d+ \(kept, nothing posted; (29|30)m of 30m left, renews under 20m\)$') 'a check within the lease holds without posting, and says how much is left' $r.Text
     $r = Invoke-Kit $board @('claims', 'PKT-01')
-    Assert-That (@($r.Text -split "`n" | Where-Object { $_ -match 'session-a' }).Count -eq 2 -and $r.Text -notmatch 'session-b') 'a refresh keeps the older claim until release; the lost claim is gone' $r.Text
-    $r = Invoke-Kit $board @('release', 'PKT-01', 'session-a')
-    Assert-That ($r.Text -match 'released 2 claim') 'release deletes all of the session''s claim comments' $r.Text
+    Assert-That (@($r.Text -split "`n" | Where-Object { $_ -match 'session-a' }).Count -eq 1 -and $r.Text -notmatch 'session-b') 'so the holder still has one claim comment; the lost claim is gone' $r.Text
+    $r = Invoke-Kit $board @('claim', 'PKT-01', 'session-a', '-Force')
+    Assert-That ($r.Code -eq 0 -and $r.Text -match '^HOLD session-a .*\(renewed; 30m left\)$') '-Force renews at once' $r.Text
+    # Age session-a's claims on the board: 11 minutes is past a third of the lease, so the check renews.
+    $ageClaims = {
+        param([string]$Claim, [double]$Minutes)
+        $file = Join-Path $repo '.git/packet-board.json'
+        $lb = Get-Content -Raw -LiteralPath $file | ConvertFrom-Json -AsHashtable
+        foreach ($list in $lb.comments.Values) { foreach ($c in @($list)) { if ($c.body -match "^``packet:claim $Claim``") { $c.createdAt = ([DateTimeOffset]$c.createdAt).AddMinutes(-$Minutes).ToString('o') } } }
+        [System.IO.File]::WriteAllText($file, ($lb | ConvertTo-Json -Depth 64), [System.Text.UTF8Encoding]::new($false))
+    }
+    & $ageClaims 'session-a' 11
+    $r = Invoke-Kit $board @('claim', 'PKT-01', 'session-a')
+    $c = Invoke-Kit $board @('claims', 'PKT-01')
+    Assert-That ($r.Code -eq 0 -and $r.Text -match '\(renewed; 30m left\)$' -and @($c.Text -split "`n" | Where-Object { $_ -match 'session-a' }).Count -eq 3) 'a claim a third of the way through its lease renews, keeping the older comments' "$($r.Text)`n$($c.Text)"
+    # Past the lease, another session takes over, and the old holder's check is LOST.
+    & $ageClaims 'session-a' 31
     $r = Invoke-Kit $board @('claim', 'PKT-01', 'session-b')
-    Assert-That ($r.Code -eq 0) 'after release another session can hold' $r.Text
+    Assert-That ($r.Code -eq 0 -and $r.Text -match '^HOLD session-b .*\(renewed; 30m left\)$') 'after the lease lapses another session holds' $r.Text
+    $r = Invoke-Kit $board @('claim', 'PKT-01', 'session-a')
+    Assert-That ($r.Code -eq 1 -and $r.Text -match '^LOST session-b') 'and the old holder''s check is LOST' $r.Text
+    $r = Invoke-Kit $board @('release', 'PKT-01', 'session-a')
+    Assert-That ($r.Text -match 'released 3 claim') 'release deletes all of the session''s claim comments' $r.Text
+    $r = Invoke-Kit $board @('claims', 'PKT-01')
+    Assert-That ($r.Text -match 'session-b' -and $r.Text -notmatch 'session-a') 'and only that session''s' $r.Text
     [void](Invoke-Kit $board @('release', 'PKT-01', 'session-b'))
+    $r = Invoke-Kit $board @('claim', 'PKT-01', 'session-c')
+    Assert-That ($r.Code -eq 0) 'after release another session can hold' $r.Text
+    [void](Invoke-Kit $board @('release', 'PKT-01', 'session-c'))
 
     Write-Host 'board: set, marker, reconcile'
     $r = Invoke-Kit $board @('set', 'PKT-01', 'Status=In progress')
@@ -1151,6 +1174,119 @@ $dry = Invoke-TestSync -Phases $two -DryRun -Force
 $forced = Invoke-TestSync -Phases $two -Force
 "s7c=$(Get-Tree 'H-1')|$($dry -join ' | ')||$($forced -join ' | ')"
 
+# 8. Claims as work item comments, judged by the board's clock (the fake's, hours from the local one).
+# Comments come back two to a page, so every read follows the continuation token.
+Reset-Board (New-TestConfig)
+$script:FakeAb.Comments = @{}; $script:FakeAb.CommentPage = 2
+$L = 30
+function Claim {
+    param([string]$Id, [switch]$Force)
+    $r = Invoke-PwClaim -Ref $script:ClaimRef -ClaimId $Id -LeaseMinutes $L -Force:$Force
+    if ($r.Result -ne 'HOLD') { return "LOST:$($r.ClaimId)" }
+    "HOLD:$($r.ClaimId):$(if ($r.Renewed) { 'renewed' } else { 'kept' })$(if ($r.Lapsed) { ':lapsed' })"
+}
+function Posts { param([int]$Item, [string]$Id) @(Get-FakeAbComments $Item | Where-Object { $_.text -match "^``packet:claim $([regex]::Escape($Id))``" }).Count }
+$wi = New-FakeAbItem 'User Story' 'PKT-01 · Core' -Tags 'packet'
+$script:ClaimRef = [string]$wi
+$script:FakeAb.Clock = [DateTimeOffset]::UtcNow.AddHours(-3)
+$first = Claim 'session-a'
+$rev0 = $script:FakeAb.Items[$wi].rev; $mark = $script:FakeAbCalls.Count
+$checks = @(foreach ($m in 1, 4, 4) { Move-FakeAbClock -Minutes $m; Claim 'session-a' })
+$commentWrites = @($script:FakeAbCalls | Select-Object -Skip $mark | Where-Object { $_ -match '^(POST|DELETE) .*/comments' }).Count
+"c-kept=$first|$($checks -join ',')|posts=$(Posts $wi 'session-a')|revs=$($script:FakeAb.Items[$wi].rev - $rev0)|writes=$commentWrites|live=$(@((Get-PwLiveClaims -Ref $script:ClaimRef -LeaseMinutes $L).Claims).Count)"
+# 10m06s after the claim, a third of the lease is gone: the next check renews, and the one after keeps it.
+Move-FakeAbClock -Minutes 1.1
+$due = Claim 'session-a'
+Move-FakeAbClock -Minutes 1
+"c-due=$due|$(Claim 'session-a')|posts=$(Posts $wi 'session-a')"
+# A forged older claim from someone untrusted counts for nothing; a competitor loses and leaves no comment.
+[void](Add-FakeAbComment -Id $wi -Text '`packet:claim session-m` forged' -By 'mallory@example.com' -At $script:FakeAb.Clock.AddMinutes(-15))
+$b = Claim 'session-b'
+"c-competitor=$b|$(Claim 'session-a')|b-posts=$(Posts $wi 'session-b')|a-posts=$(Posts $wi 'session-a')"
+# The lease lapses: a competitor takes over, and the old holder's check and its forced renewal both lose.
+Move-FakeAbClock -Minutes 31
+$taken = Claim 'session-b'
+"c-lapse=$taken|$(Claim 'session-a')|$(Claim 'session-a' -Force)|a-posts=$(Posts $wi 'session-a')|b-posts=$(Posts $wi 'session-b')"
+# The new holder's renewal is due, and the old holder claims while it runs (after its post, before its read).
+Move-FakeAbClock -Minutes 11
+$script:FakeAb.OnComment = { param($c) $script:Race = Claim 'session-a' }
+$renew = Claim 'session-b'
+"c-race-due=$renew|$($script:Race)|holds=$(@($renew, $script:Race | Where-Object { $_ -like 'HOLD*' }).Count)|a-posts=$(Posts $wi 'session-a')|b-posts=$(Posts $wi 'session-b')"
+"c-release=$(Remove-PwClaim -Ref $script:ClaimRef -ClaimId 'session-a')|$(Posts $wi 'session-a')|$(Posts $wi 'session-b')|$(Remove-PwClaim -Ref $script:ClaimRef -ClaimId 'session-b')|$(Posts $wi 'session-b')"
+# After a lapse, two sessions post in the same second, each inside the other's check: the lower comment id
+# holds, whichever of them started first.
+$wi2 = New-FakeAbItem 'User Story' 'PKT-02 · Api' -Tags 'packet'
+$script:ClaimRef = [string]$wi2
+[void](Claim 'session-x')
+Move-FakeAbClock -Minutes 40
+$script:FakeAb.OnComment = { param($c) $script:Race = Claim 'session-y' }
+$x = Claim 'session-x'
+$one = "$x|$($script:Race)"
+[void](Remove-PwClaim -Ref $script:ClaimRef -ClaimId 'session-x')
+[void](Claim 'session-x')
+Move-FakeAbClock -Minutes 40
+$script:FakeAb.OnComment = { param($c) $script:Race = Claim 'session-x' }
+$y = Claim 'session-y'
+"c-race-lapsed=$one|$y|$($script:Race)|x-posts=$(Posts $wi2 'session-x')|y-posts=$(Posts $wi2 'session-y')"
+# The board's clock five hours ahead of the local one: renewal still follows the board's.
+$wi3 = New-FakeAbItem 'User Story' 'PKT-03 · Web' -Tags 'packet'
+$script:ClaimRef = [string]$wi3
+$script:FakeAb.Clock = [DateTimeOffset]::UtcNow.AddHours(5)
+$s = @((Claim 'session-s'), $(Move-FakeAbClock -Minutes 5; Claim 'session-s'), $(Move-FakeAbClock -Minutes 6; Claim 'session-s'))
+"c-skew-ahead=$($s -join ',')|live=$(@((Get-PwLiveClaims -Ref $script:ClaimRef -LeaseMinutes $L).Claims).Count)"
+# A losing claim comment left behind (its delete failed): neither a check nor -Force turns it into a hold
+# once the claim that beat it has aged out. The holder's due renewal loses to it, so it defers: it keeps
+# the hold on its newest comment and renews once the left-behind one has aged out (or been released).
+$wi4 = New-FakeAbItem 'User Story' 'PKT-04 · Ops' -Tags 'packet'
+$script:ClaimRef = [string]$wi4
+[void](Claim 'session-a')
+[void](Add-FakeAbComment -Id $wi4 -Text '`packet:claim session-b` left behind' -At $script:FakeAb.Clock.AddMinutes(5))
+$seen = @(foreach ($m in 11, 11, 9) { Move-FakeAbClock -Minutes $m; Claim 'session-a' })
+Move-FakeAbClock -Minutes 3
+$left = @((Claim 'session-b' -Force), (Claim 'session-b'), (Claim 'session-a'))
+$deferred = (Invoke-PwClaim -Ref $script:ClaimRef -ClaimId 'session-a' -LeaseMinutes $L).Deferred
+$aPosts = Posts $wi4 'session-a'
+Move-FakeAbClock -Minutes 2
+$late = Claim 'session-a'
+Move-FakeAbClock -Minutes 5
+"c-leftover=$($seen -join ',')|$($left -join ',')|deferred=$deferred|a-posts=$aPosts|$late|$(Claim 'session-a')|$(Claim 'session-b' -Force)"
+# Deferred too long: with a minute or less left, the renewal that loses is LOST.
+$wi5 = New-FakeAbItem 'User Story' 'PKT-05 · Late' -Tags 'packet'
+$script:ClaimRef = [string]$wi5
+[void](Claim 'session-a')
+[void](Add-FakeAbComment -Id $wi5 -Text '`packet:claim session-b` left behind' -At $script:FakeAb.Clock.AddMinutes(3.7))
+Move-FakeAbClock -Minutes 4; [void](Claim 'session-a' -Force)
+Move-FakeAbClock -Minutes 29.6
+"c-leftover-late=$(Claim 'session-a')|$(Claim 'session-a')"
+# Deferred with a few minutes left (between the one-minute floor and a sixth of the lease): still a hold, and
+# the renewal goes through once the left-behind comment ages out.
+$wi8 = New-FakeAbItem 'User Story' 'PKT-08 · Floor' -Tags 'packet'
+$script:ClaimRef = [string]$wi8
+[void](Claim 'session-a')
+[void](Add-FakeAbComment -Id $wi8 -Text '`packet:claim session-b` left behind' -At $script:FakeAb.Clock.AddMinutes(3))
+Move-FakeAbClock -Minutes 4; [void](Claim 'session-a' -Force)
+Move-FakeAbClock -Minutes 27
+$floor = Invoke-PwClaim -Ref $script:ClaimRef -ClaimId 'session-a' -LeaseMinutes $L
+Move-FakeAbClock -Minutes 2.1
+"c-leftover-floor=$($floor.Result):$($floor.Deferred):$([Math]::Floor($floor.Left.TotalMinutes))|$(Claim 'session-a')"
+# The renewal stalls past the lease between its post and its read: the lease is measured again, so LOST.
+$wi6 = New-FakeAbItem 'User Story' 'PKT-06 · Slow' -Tags 'packet'
+$script:ClaimRef = [string]$wi6
+[void](Claim 'session-a')
+[void](Add-FakeAbComment -Id $wi6 -Text '`packet:claim session-b` left behind' -At $script:FakeAb.Clock.AddMinutes(5))
+foreach ($m in 11, 11, 12) { Move-FakeAbClock -Minutes $m; [void](Claim 'session-a') }
+$script:FakeAb.OnComment = { param($c) Move-FakeAbClock -Minutes 20 }
+"c-leftover-stall=$(Claim 'session-a')"
+# A winner the first read didn't see (a real claim, older than ours, that shows up only after our post) is
+# never taken for a left-behind one.
+$wi7 = New-FakeAbItem 'User Story' 'PKT-07 · Late view' -Tags 'packet'
+$script:ClaimRef = [string]$wi7
+[void](Claim 'session-a')
+Move-FakeAbClock -Minutes 12
+$script:FakeAb.OnComment = { param($c) [void](Add-FakeAbComment -Id $wi7 -Text '`packet:claim session-b` late' -At $script:FakeAb.Clock.AddMinutes(-13)) }
+"c-late-view=$(Claim 'session-a')|$(Claim 'session-b')"
+$script:FakeAb.CommentPage = 200
+
 # 5. Setup checks each level's type, and the task type against its own map.
 Reset-Board (New-TestConfig)
 "setup=$((Initialize-ProvBoard) -join ' | ')"
@@ -1206,6 +1342,19 @@ Assert-That ((& $abGet 's7b') -match "note: H-2 \(new\) would get no parent: its
 Assert-That ((& $abGet 's7c') -match '^H-1>PKT-01:Task\|' -and (& $abGet 's7c') -match 'note: H-1 was left where it is: PKT-20 \(new\), the story it belongs under, is of type Task, not User Story' -and (& $abGet 's7c') -match 'note: H-1 was left where it is: PKT-20 AB#\d+, the story it belongs under, is of type Task, not User Story' -and (& $abGet 's7c') -notmatch 'would move H-1') 'a Parent packet another phase creates as a Task: the dry run names the type clash the real run hits, and promises no move' (& $abGet 's7c')
 Assert-That ((& $abGet 's7b-new') -match 'would put PKT-21 \(new\) under AB#\d+' -and (& $abGet 's7b-new') -match 'would move H-1 AB#\d+ under PKT-21 \(new\) \(now under AB#\d+\)') 'a Parent packet this sync creates is (new) in its dry run' (& $abGet 's7b-new')
 Assert-That ((& $abGet 's7-story') -match '^H-5>Small:Task\|' -and (& $abGet 's7-story') -match "note: H-5 names Parent PKT-05, but under AB#\d+ \(type User Story\) its Task can't go under a packet's Task, so that line has no effect here") 'under a story root the Parent line has no effect, and sync says so' (& $abGet 's7-story')
+Assert-That ((& $abGet 'c-kept') -eq 'HOLD:session-a:renewed|HOLD:session-a:kept,HOLD:session-a:kept,HOLD:session-a:kept|posts=1|revs=0|writes=0|live=1') 'Azure claims: checks within the first third of the lease post nothing and add no revision, by the board''s clock three hours behind the local one' (& $abGet 'c-kept')
+Assert-That ((& $abGet 'c-due') -eq 'HOLD:session-a:renewed|HOLD:session-a:kept|posts=2') 'Azure claims: once a third of the lease is gone the check renews, and the older claim comment stays' (& $abGet 'c-due')
+Assert-That ((& $abGet 'c-competitor') -eq 'LOST:session-a|HOLD:session-a:kept|b-posts=0|a-posts=2') 'Azure claims: a competitor loses and its comment is deleted; an untrusted forged claim counts for nothing' (& $abGet 'c-competitor')
+Assert-That ((& $abGet 'c-lapse') -eq 'HOLD:session-b:renewed|LOST:session-b|LOST:session-b|a-posts=2|b-posts=1') 'Azure claims: after the lease lapses a competitor takes over, and the old holder''s check and forced renewal return LOST' (& $abGet 'c-lapse')
+Assert-That ((& $abGet 'c-race-due') -eq 'HOLD:session-b:renewed|LOST:session-b|holds=1|a-posts=2|b-posts=2') 'Azure claims: a competitor posting during a renewal loses; exactly one holder' (& $abGet 'c-race-due')
+Assert-That ((& $abGet 'c-release') -eq '2|0|2|2|0') 'Azure claims: release deletes every claim comment of that session, and only those' (& $abGet 'c-release')
+Assert-That ((& $abGet 'c-race-lapsed') -eq 'HOLD:session-x:renewed:lapsed|LOST:session-x|HOLD:session-y:renewed|LOST:session-y|x-posts=1|y-posts=1') 'Azure claims: two claims posted in one second inside each other''s checks: the lower comment id holds, the other loses; a renewal after a lapse says so' (& $abGet 'c-race-lapsed')
+Assert-That ((& $abGet 'c-leftover') -eq 'HOLD:session-a:renewed,HOLD:session-a:renewed,HOLD:session-a:kept|LOST:session-a,LOST:session-a,HOLD:session-a:kept|deferred=session-b|a-posts=3|HOLD:session-a:renewed|HOLD:session-a:kept|LOST:session-a') 'Azure claims: a losing comment left behind never becomes a hold, even with -Force; the holder''s renewal defers (posting nothing that stays) and renews once it ages out' (& $abGet 'c-leftover')
+Assert-That ((& $abGet 'c-leftover-late') -eq 'LOST:session-b|LOST:session-b') 'Azure claims: a deferred renewal with a minute or less left is LOST' (& $abGet 'c-leftover-late')
+Assert-That ((& $abGet 'c-leftover-floor') -eq 'HOLD:session-b:2|HOLD:session-a:renewed') 'Azure claims: a deferral with a few minutes left still holds, and renews once the left-behind comment ages out' (& $abGet 'c-leftover-floor')
+Assert-That ((& $abGet 'c-leftover-stall') -eq 'LOST:session-b') 'Azure claims: a renewal that stalls past the lease measures it again and doesn''t defer' (& $abGet 'c-leftover-stall')
+Assert-That ((& $abGet 'c-late-view') -eq 'LOST:session-b|HOLD:session-b:renewed') 'Azure claims: a winning claim that shows up late is a LOST, never a deferral' (& $abGet 'c-late-view')
+Assert-That ((& $abGet 'c-skew-ahead') -eq 'HOLD:session-s:renewed,HOLD:session-s:kept,HOLD:session-s:renewed|live=2') 'Azure claims: with the board''s clock five hours ahead, keep and renew still follow the board''s clock' (& $abGet 'c-skew-ahead')
 Assert-That ((& $abGet 'setup') -match 'hierarchy: Epic > Feature > User Story > Task' -and (& $abGet 'setup') -match "'Task' has every mapped state \(New, Active, Closed\)" -and (& $abGet 'setup') -match "'User Story' has every mapped state \(New, Active, Resolved, Closed\)") 'setup checks the hierarchy''s types, the task type against taskStatusMap' (& $abGet 'setup')
 Assert-That ((& $abGet 'setup-nomap') -match "MISSING states on 'Task': Resolved .*give the task type its own taskStatusMap") 'without taskStatusMap, setup names the missing task state and the fix' (& $abGet 'setup-nomap')
 Assert-That ((& $abGet 'cfg-template') -eq 'ok' -and (& $abGet 'cfg-task-map') -match "taskStatusMap needs a state for 'Ready to merge'") 'the config refuses an incomplete taskStatusMap' "$(& $abGet 'cfg-template')`n$(& $abGet 'cfg-task-map')"

@@ -21,6 +21,8 @@
 $script:AbHeaders = $null
 $script:AbItemCache = $null
 $script:AbCommentsApi = '7.1-preview.4'
+# The Date header of the newest answer and the local time its request went out (Get-ProvBoardNow).
+$script:AbServerClock = $null
 # Each phase's tree (Resolve-ProvHierarchy), by phase slug: New-ProvItem reads the packets' type from it.
 $script:AbTrees = @{}
 # The Features found or created under each epic, by "<epic id>|<name>" (keys ignore case), shared by every
@@ -66,11 +68,14 @@ function Invoke-PwAb {
         $json = if ($Body -is [string]) { $Body } else { ConvertTo-Json -InputObject $Body -Depth 20 }
         $params.Body = [Text.Encoding]::UTF8.GetBytes($json)
     }
+    $sent = [DateTimeOffset]::UtcNow
     try { $resp = Invoke-WebRequest @params }
     catch {
         $detail = if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { $_.Exception.Message }
         Stop-Pw "Azure DevOps $Method $Path failed: $detail"
     }
+    $date = @($resp.Headers['Date'])[0]
+    if ($date) { $script:AbServerClock = @{ Date = (ConvertFrom-PwHttpDate $date); SentAt = $sent } }
     if (-not $resp.Content) { return $null }
     $resp.Content | ConvertFrom-Json -AsHashtable -Depth 64
 }
@@ -355,6 +360,14 @@ function Remove-ProvComment {
 function Get-ProvRefText {
     param([Parameter(Mandatory)]$Item)
     "Fixes AB#$($Item.Number)"
+}
+
+function Get-ProvBoardNow {
+    <# The latest Azure DevOps's clock can read now, from the Date header of the newest answer (the claim
+       check reads the comments just before it asks), or of a call made for it. #>
+    if (-not $script:AbServerClock) { [void](Invoke-PwAb -Path '_apis/connectionData' -OrgLevel -ApiVersion '7.1-preview') }
+    if (-not $script:AbServerClock) { Stop-Pw "Azure DevOps's answer had no Date header, so its clock is unknown" }
+    Get-PwBoardNow -Date $script:AbServerClock.Date -SentAt $script:AbServerClock.SentAt
 }
 
 $script:AbAccount = $null
