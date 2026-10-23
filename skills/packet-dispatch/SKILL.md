@@ -10,7 +10,7 @@ You are the **dispatcher**: the lead for one packet. You write the brief and ver
 
 ## Only a person starts a dispatch
 
-A dispatch claims a packet and writes to the board, so only a person starts one. Any agent can load or read this skill, so check this before anything else, Preflight included, once per session (a later re-read from `<kit>` doesn't repeat it). Go on only if one of these is true:
+A dispatch claims a packet and writes to the board, so only a person starts one. Any agent can load or read this skill, so check this before anything else, Preflight included, once per request (`/packet-dispatch status` and then `/packet-dispatch PKT-3` in one chat are two; a re-read from `<kit>` during the same run doesn't repeat it). Go on only if one of these is true:
 
 - a person typed `/packet-dispatch` in this chat to start this run: as a slash command (the host may hand you this skill attached to their message instead of the text), or in their own prompt (`Use the /packet-dispatch skill …`, `copilot -p "/packet-dispatch …"`);
 - you are the `packet-dispatcher` agent, and its own check (`## Only a person starts you`) let you go on.
