@@ -27,8 +27,9 @@
   board.ps1 claim <ID> <claim-id> [-Force]  the claim check: HOLD (exit 0) or LOST (exit 1). Posts a claim
                                             comment only when one is due (none yet, or a third of the lease
                                             gone, by the board's clock); otherwise checks without writing.
-                                            The line ends with (renewed; …) or (kept, nothing posted; …) and
-                                            the lease left. -Force: post a renewal now
+                                            The line ends with (renewed; …), (kept, nothing posted; …) or
+                                            (kept, renewal deferred: …) and the lease left. -Force: post a
+                                            renewal now
   board.ps1 release <ID> <claim-id>         delete this claim id's claim comments
   board.ps1 claims <ID>                     claims from the last lease window, by the board's clock (report only)
   board.ps1 comment <ID> <file>             post the file as a comment on the item

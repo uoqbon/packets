@@ -1258,6 +1258,17 @@ $script:ClaimRef = [string]$wi5
 Move-FakeAbClock -Minutes 4; [void](Claim 'session-a' -Force)
 Move-FakeAbClock -Minutes 29.6
 "c-leftover-late=$(Claim 'session-a')|$(Claim 'session-a')"
+# Deferred with a few minutes left (between the one-minute floor and a sixth of the lease): still a hold, and
+# the renewal goes through once the left-behind comment ages out.
+$wi8 = New-FakeAbItem 'User Story' 'PKT-08 · Floor' -Tags 'packet'
+$script:ClaimRef = [string]$wi8
+[void](Claim 'session-a')
+[void](Add-FakeAbComment -Id $wi8 -Text '`packet:claim session-b` left behind' -At $script:FakeAb.Clock.AddMinutes(3))
+Move-FakeAbClock -Minutes 4; [void](Claim 'session-a' -Force)
+Move-FakeAbClock -Minutes 27
+$floor = Invoke-PwClaim -Ref $script:ClaimRef -ClaimId 'session-a' -LeaseMinutes $L
+Move-FakeAbClock -Minutes 2.1
+"c-leftover-floor=$($floor.Result):$($floor.Deferred):$([Math]::Floor($floor.Left.TotalMinutes))|$(Claim 'session-a')"
 # The renewal stalls past the lease between its post and its read: the lease is measured again, so LOST.
 $wi6 = New-FakeAbItem 'User Story' 'PKT-06 · Slow' -Tags 'packet'
 $script:ClaimRef = [string]$wi6
@@ -1340,6 +1351,7 @@ Assert-That ((& $abGet 'c-release') -eq '2|0|2|2|0') 'Azure claims: release dele
 Assert-That ((& $abGet 'c-race-lapsed') -eq 'HOLD:session-x:renewed:lapsed|LOST:session-x|HOLD:session-y:renewed|LOST:session-y|x-posts=1|y-posts=1') 'Azure claims: two claims posted in one second inside each other''s checks: the lower comment id holds, the other loses; a renewal after a lapse says so' (& $abGet 'c-race-lapsed')
 Assert-That ((& $abGet 'c-leftover') -eq 'HOLD:session-a:renewed,HOLD:session-a:renewed,HOLD:session-a:kept|LOST:session-a,LOST:session-a,HOLD:session-a:kept|deferred=session-b|a-posts=3|HOLD:session-a:renewed|HOLD:session-a:kept|LOST:session-a') 'Azure claims: a losing comment left behind never becomes a hold, even with -Force; the holder''s renewal defers (posting nothing that stays) and renews once it ages out' (& $abGet 'c-leftover')
 Assert-That ((& $abGet 'c-leftover-late') -eq 'LOST:session-b|LOST:session-b') 'Azure claims: a deferred renewal with a minute or less left is LOST' (& $abGet 'c-leftover-late')
+Assert-That ((& $abGet 'c-leftover-floor') -eq 'HOLD:session-b:2|HOLD:session-a:renewed') 'Azure claims: a deferral with a few minutes left still holds, and renews once the left-behind comment ages out' (& $abGet 'c-leftover-floor')
 Assert-That ((& $abGet 'c-leftover-stall') -eq 'LOST:session-b') 'Azure claims: a renewal that stalls past the lease measures it again and doesn''t defer' (& $abGet 'c-leftover-stall')
 Assert-That ((& $abGet 'c-late-view') -eq 'LOST:session-b|HOLD:session-b:renewed') 'Azure claims: a winning claim that shows up late is a LOST, never a deferral' (& $abGet 'c-late-view')
 Assert-That ((& $abGet 'c-skew-ahead') -eq 'HOLD:session-s:renewed,HOLD:session-s:kept,HOLD:session-s:renewed|live=2') 'Azure claims: with the board''s clock five hours ahead, keep and renew still follow the board''s clock' (& $abGet 'c-skew-ahead')
