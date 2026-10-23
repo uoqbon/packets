@@ -1069,6 +1069,29 @@ Reset-Board (New-TestConfig @{ featureWorkItemType = ''; workItemType = 'Issue';
 $epic = New-FakeAbItem 'Epic' 'Basic epic'
 [void](Invoke-TestSync (Phase 'Epic' "AB#$epic") @((P 'PKT-01' 'Ignored'), (P 'H-1' '' @('PKT-01'))))
 "s4-tree=$(Get-Tree 'PKT-01', 'H-1')"
+# 4b. Tags. The fake, like Azure DevOps, merges an 'add' on System.Tags into the tags already there, so these
+# fail if a write adds the new list rather than replacing the old one. Each status keeps only its own tag.
+function Get-TagSet { param([int]$Id) (@(Get-PwAbTags $script:FakeAb.Items[$Id].fields) | Sort-Object) -join ',' }
+$pkt = @(Get-ProvItems -Refresh) | Where-Object { $_.Id -eq 'PKT-01' }
+$walk = foreach ($s in 'In review', 'Ready to merge', 'In progress', 'Needs human', 'Done') {
+    Set-ProvFields -Item $pkt -Fields @{ Status = $s }
+    $back = @(Get-ProvItems -Refresh) | Where-Object { $_.Id -eq 'PKT-01' }
+    "$s>$($back.Status)[$(@(Get-PwAbTags $script:FakeAb.Items[$pkt.Number].fields | Where-Object { $_ -like 'status:*' }) -join ',')]"
+}
+"s4-walk=$($walk -join ' ')|tags=$(Get-TagSet $pkt.Number)"
+# An item that already carries several status tags (as earlier writes left them on a real board): a status
+# change leaves one. Then a retag (sync's Update-ProvItem) replaces the size, wave and phase tags.
+$stale = New-FakeAbItem 'Issue' 'PKT-09 · Stale' -Tags 'packet; size:S; status:ready; status:in-review; status:ready-to-merge; wave:W0' -State 'Doing' -Parent $epic
+Set-ProvFields -Item (@(Get-ProvItems -Refresh) | Where-Object { $_.Id -eq 'PKT-09' }) -Fields @{ Status = 'Ready to merge' }
+"s4-stale=$(Get-TagSet $stale)"
+$moved = [pscustomobject]@{ Priority = $null; Size = 'L'; Wave = 'W2'; Target = $null }
+Update-ProvItem -Item (@(Get-ProvItems -Refresh) | Where-Object { $_.Id -eq 'PKT-09' }) -Packet $moved -Title 'PKT-09 · Stale' -Body 'Packet PKT-09' -PhaseSlug 'phase-2'
+"s4-retag=$(Get-TagSet $stale)"
+$plain = New-FakeAbItem 'Issue' 'Not a packet' -Tags 'a; b'
+[void](Invoke-PwAb -Method PATCH -Path "_apis/wit/workitems/$plain" -Body @(@{ op = 'add'; path = '/fields/System.Tags'; value = 'B; c' }) -ContentType 'application/json-patch+json')
+$added = Get-TagSet $plain
+[void](Invoke-PwAb -Method PATCH -Path "_apis/wit/workitems/$plain" -Body @(@{ op = 'replace'; path = '/fields/System.Tags'; value = 'c' }) -ContentType 'application/json-patch+json')
+"s4-fake-tags=$added|$(Get-TagSet $plain)"
 try { [void](Resolve-ProvHierarchy -Phase (Phase 'Feature' "AB#$epic") -Packets @()); 's4-feature=none' } catch { "s4-feature=$($_.Exception.Message)" }
 Reset-Board (New-TestConfig @{ taskWorkItemType = 'user story' })
 $epic = New-FakeAbItem 'Epic' 'One type, two levels'
@@ -1170,6 +1193,10 @@ Assert-That ((& $abGet 's2-nomap') -match 'of type Task, which has no state Reso
 Assert-That ((& $abGet 's3-tree') -eq 'PKT-01>Search:User Story,H-2>PKT-01:Task,PKT-02>none:Task,H-1>none:Task' -and (& $abGet 's3') -match 'note: PKT-02 AB#3 is of type Task, but its place under AB#2 takes a work item of type User Story' -and (& $abGet 's3') -match 'note: H-1 was left where it is: PKT-02 AB#3, the story it belongs under, is of type Task') 'under a feature: packets as its stories; an item of the wrong type, and a task under it, are left alone and named' "$(& $abGet 's3-tree')`n$(& $abGet 's3')"
 Assert-That ((& $abGet 's3-wrong-type') -match 'says \*\*Feature:\*\* AB#1, but AB#1 is of type Epic' -and (& $abGet 's3-packet-root') -match 'is a packet''s own item' -and (& $abGet 's3-missing') -match 'AB#999|999 does not exist' -and (& $abGet 's3-wrong-type') -match 'writes=0$' -and (& $abGet 's3-packet-root') -match 'writes=0$') 'a root of the wrong type, a packet''s own item or a missing item stops sync, having written nothing' "$(& $abGet 's3-wrong-type')`n$(& $abGet 's3-packet-root')`n$(& $abGet 's3-missing')"
 Assert-That ((& $abGet 's4-tree') -eq 'PKT-01>Basic epic:Issue,H-1>PKT-01:Task' -and (& $abGet 's4-feature') -match 'featureWorkItemType is empty') 'a process without features (Basic): packets straight under the epic, and a Feature line is refused' "$(& $abGet 's4-tree')`n$(& $abGet 's4-feature')"
+Assert-That ((& $abGet 's4-fake-tags') -eq 'a,b,c|c') 'the fake Azure DevOps merges an ''add'' on System.Tags (ignoring case) and lets ''replace'' set them' (& $abGet 's4-fake-tags')
+Assert-That ((& $abGet 's4-walk') -eq 'In review>In review[status:in-review] Ready to merge>Ready to merge[status:ready-to-merge] In progress>In progress[] Needs human>Needs human[status:needs-human] Done>Done[]|tags=packet,phase:phase-1,size:M,wave:W1') 'each status change leaves only the new status''s tag (none for an untagged status) and keeps the other tags' (& $abGet 's4-walk')
+Assert-That ((& $abGet 's4-stale') -eq 'packet,size:S,status:ready-to-merge,wave:W0') 'a status change clears every stale status tag an item already carries' (& $abGet 's4-stale')
+Assert-That ((& $abGet 's4-retag') -eq 'packet,phase:phase-2,size:L,status:ready-to-merge,wave:W2') 'a sync update replaces the old size, wave and phase tags rather than adding to them' (& $abGet 's4-retag')
 Assert-That ((& $abGet 's4-old-basic') -match "no work item type 'Feature'" -and (& $abGet 's4-old-basic') -match 'featureWorkItemType' -and (& $abGet 's4-old-basic') -match '\|writes=0$') 'an older Basic config under an epic stops before writing, and says to set featureWorkItemType' (& $abGet 's4-old-basic')
 Assert-That ((& $abGet 's4-approval') -match '^PKT-01>Search:User Story,H-1>PKT-01:Approval\|' -and (& $abGet 's4-approval') -notmatch 'note:') 'a human task type outside the levels sits under the story it unblocks' (& $abGet 's4-approval')
 Assert-That ((& $abGet 's7') -match '^PKT-01>Search:User Story,PKT-02>Search:User Story,H-1>PKT-02:Task,H-2>PKT-01:Task\|' -and (& $abGet 's7') -notmatch 'note:') 'a Parent line puts a human task under that story, over the one it unblocks, and gives a task with no dependencies a place' (& $abGet 's7')

@@ -2,8 +2,9 @@
 # azure-boards provider: it replaces Invoke-PwAb, the provider's one REST call, with a store that keeps
 # work items, their revisions, their states per type and their links. Like Azure DevOps it keeps both
 # ends of a link (and gives both a new revision), refuses a second parent, applies a patch only when its
-# revision test passes, refuses a state the item's type doesn't have, and answers a type the project
-# doesn't have with an error. Every call is logged in $script:FakeAbCalls.
+# revision test passes, refuses a state the item's type doesn't have, merges an 'add' on System.Tags into
+# the tags already there, and answers a type the project doesn't have with an error. Every call is logged
+# in $script:FakeAbCalls.
 
 $script:FakeAb = @{
     Next   = 1
@@ -53,6 +54,18 @@ function Remove-FakeAbLink {
     }
 }
 
+function Join-FakeAbTags {
+    <# Azure DevOps's 'add' on System.Tags: the tags already there, plus the new ones (tags ignore case).
+       Only 'replace' sets the list. #>
+    param([string]$Old, [string]$New)
+    $tags = [System.Collections.Generic.List[string]]::new()
+    foreach ($t in @("$Old" -split ';') + @("$New" -split ';')) {
+        $t = $t.Trim()
+        if ($t -and -not ($tags | Where-Object { $_ -ieq $t })) { $tags.Add($t) }
+    }
+    $tags -join '; '
+}
+
 function New-FakeAbItem {
     <# A work item made by the test, as someone made it on the board. #>
     param([Parameter(Mandatory)][string]$Type, [string]$Title = '', [string]$Tags = '', [string]$State = '', [int]$Parent = 0)
@@ -85,6 +98,7 @@ function Set-FakeAbOps {
             if ($op.path -match '^/fields/(?<f>.+)$') {
                 $field = $Matches.f
                 if ($field -eq 'System.State' -and $script:FakeAb.States[$item.fields['System.WorkItemType']] -notcontains $op.value) { throw "TF401320: '$($op.value)' is not a state of $($item.fields['System.WorkItemType'])" }
+                if ($field -eq 'System.Tags' -and $op.op -eq 'add') { $item.fields[$field] = Join-FakeAbTags $item.fields[$field] $op.value; continue }
                 $item.fields[$field] = $op.value; continue
             }
             if ($op.op -eq 'add' -and $op.path -eq '/relations/-') { Add-FakeAbLink $Id $op.value.rel (Get-FakeAbTarget $op.value); continue }

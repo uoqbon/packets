@@ -247,7 +247,9 @@ function Get-PwAbFieldOps {
         }
         else { Stop-Pw "azure-boards has no field '$name' (Status, Priority, Size, Wave, Target)" }
     }
-    if ($tagsChanged) { $ops.Add(@{ op = 'add'; path = '/fields/System.Tags'; value = (($newTags | Select-Object -Unique) -join '; ') }) }
+    # 'replace', not 'add': on System.Tags, Azure DevOps merges an 'add' into the tags already there, so the
+    # status tag a status change drops (and an old size:, wave: or phase: tag) would stay.
+    if ($tagsChanged) { $ops.Add(@{ op = 'replace'; path = '/fields/System.Tags'; value = (($newTags | Select-Object -Unique) -join '; ') }) }
     , $ops
 }
 
