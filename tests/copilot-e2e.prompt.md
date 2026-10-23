@@ -34,7 +34,7 @@ Inputs (if one is still a literal `${input:…}` placeholder, ask me for it befo
 6. **Stop at every checkpoint** marked ⏸. Tell me in a short numbered list exactly what to do, and what to type when I come back (`/packet-kit-e2e <next stage>`, or paste this prompt again with that stage).
 7. Shell variables don't survive between terminal calls. Note values (packet IDs, PR numbers, SHAs) in `state.md` and type them literally later.
 
-Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`) and evidence. On `FAIL`, record what you expected, what happened, and the kit file and line you think is responsible. Then carry on with the stage unless a later check depends on the failed one.
+Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`, or `HOST` where a check allows it: the kit is right and the host doesn't honour it) and evidence. On `FAIL`, record what you expected, what happened, and the kit file and line you think is responsible. Then carry on with the stage unless a later check depends on the failed one.
 
 ## Stage 1 · Environment and discovery
 
@@ -42,6 +42,21 @@ Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`) a
 2. Remote default branch: `git symbolic-ref --short refs/remotes/origin/HEAD` prints `origin/<default>`.
 3. **Copilot discovery.** List the agent skills you can use in this session, with name and one-line description, without reading any files. Expected: `packet-plan`, `packet-board`, `packet-dispatch`, `packet-review`, `packet-progress`. Record any that are missing, extra or duplicated, including copies under `.claude/skills` or `.agents/skills`.
 4. **Custom agents.** List the custom agents you could start as subagents, without reading any files. Expected: `packet-implementer` and `packet-reviewer-light`, `-standard` and `-deep`, and **not** `packet-dispatcher` (it has `disable-model-invocation: true`: only a person starts it). Then ask me to open the agents dropdown and confirm that `packet-dispatcher` appears there and the other four don't (they are `user-invocable: false`). ⏸ only if I haven't answered yet.
+
+   If `packet-dispatcher` is in your list, only then read `.github/agents/packet-dispatcher.agent.md`, and never start it to find out more (stage 8 item 7 does that, in every harness). First rule out two things that aren't the host's doing:
+   - **A stale install.** If the installed file differs from `<kitSource>/agents/packet-dispatcher.agent.md` in any line but `model:` (the installer writes that one from `models`), it is an older kit that stage 2 hasn't upgraded yet: record `BLOCKED (stale install)` and run this check again after the install (S2.2).
+   - **Another definition.** Look for other agents named `packet-dispatcher`, in `.claude/agents/`, `~/.copilot/agents/` and the user's VS Code agent folder. If there is one, the host may be listing that one: record `BLOCKED (other definition)` with its path, ask me to remove it, and run this check again.
+
+   Then the installed file's frontmatter should have `disable-model-invocation: true` and an `agents:` line without `packet-dispatcher`, and its body should have the section `## Only a person starts you`. The result is:
+   - `FAIL`, a kit defect, if any of those three is missing or different. Name the file and line.
+   - `HOST`, if all three are there and the host lists the dispatcher anyway. Some hosts drop the key (for VS Code's Copilot SDK agent host, see [microsoft/vscode#340861](https://github.com/microsoft/vscode/issues/340861)), and the body's guard is then what stops a subagent start; stage 8 item 7 tests it. Record:
+     - the harness (Local or Copilot/CLI);
+     - the versions you can read: `code --version` (first line), the Copilot Chat extension (`code --list-extensions --show-versions`, the `github.copilot-chat` line), and for Copilot/CLI, `copilot --version` (that is the CLI on PATH; VS Code's agent host bundles its own runtime, so also give the runtime version if the session or its log shows it, and say which is which);
+     - the tool and the field that listed the dispatcher (for example the `task` tool's `agent_type`), and every agent name it listed;
+     - the line numbers of `disable-model-invocation: true`, of the `agents:` line, and of the guard's heading;
+     - the upstream issue it matches, if any.
+
+     `HOST` doesn't count as a failure of the kit. The report lists it under its own heading (stage 9).
 5. **Your tools.** Say which of these you have now: reading files, searching, editing, running terminal commands, starting subagents, a todo list. Record the harness I'm using (Local, or Copilot/CLI), asking me if you can't tell. For the Copilot harness, ask me to confirm that `github.copilot.chat.cli.customAgents.enabled` is on.
 6. **Static file checks** on the installed kit (`.github/agents/*.agent.md`, `.github/skills/*/SKILL.md`):
    - each file opens with a YAML frontmatter block;
@@ -190,15 +205,20 @@ Make each probe on a scratch branch `e2e/probe-<n>` from the default branch and 
 5. **Locks (optional).** If a packet holds a lock, open a draft PR touching a lock path from a scratch branch: `board locks <that packet>` must exit 1 and name it. Close the draft PR and delete the branch afterwards. If no packet holds one, record N/A (not MANUAL): the plan has nothing to probe.
 6. **Progress.** `pwsh -File <kit>/.github/skills/packet-progress/scripts/progress.ps1 -Phase e2e-textkit`, then run `/packet-progress e2e-textkit` in a new session. The numbers agree with the board, the health verdict has a reason, and the human task shows as due once its dependencies are Done.
 
+7. **The dispatcher refuses a subagent start**, in every harness (a host can start an agent by name that it leaves out of S1.4's list). First run `board reconcile` yourself, so a `status` run that got past the guard would have nothing to write, and note the mtime of `.git/FETCH_HEAD` and the `packet-kit-*` folders in the system temp directory (other than yours, `packet-kit-e2e*`). Then start `packet-dispatcher` through your subagent tool, naming it, with the task `status` and nothing else. The result is:
+   - PASS if the host refuses the call (record its error), or if the dispatcher's whole reply is `packet-dispatcher did nothing: started by another agent. Only a person starts it, from the agents dropdown.`, and `.git/FETCH_HEAD` and the temp folders are as before (Preflight fetches and pins a kit first).
+   - FAIL otherwise: record what it did. The kit file is `agents/packet-dispatcher.agent.md`, section `## Only a person starts you`.
+
 ## Stage 9 · Report
 
 Write `.packet-e2e/report.md` and show it to me:
 
-1. **Summary:** the date, the sandbox, the board provider, the harness, the models used, and the number of checks per result (PASS, FAIL, BLOCKED, MANUAL).
+1. **Summary:** the date, the sandbox, the board provider, the harness, the models used, and the number of checks per result (PASS, FAIL, BLOCKED, MANUAL, HOST).
 2. **Results table:** check ID, what it checks, result, and evidence (the command and its deciding line, or a PR or comment link).
 3. **Failures:** one entry each, with expected against actual, the most likely kit file and line, and a suggested change.
-4. **Copilot behaviour notes:** how skills were discovered and invoked; whether subagents ran in parallel; any tool or model the agent files name that wasn't available; anything an agent did that its instructions forbid, or skipped although they require it; prompts where the agent needed my help.
-5. **Clean-up list for me:** branches, worktrees (`git worktree list`), temp folders, open PRs, and the sandbox items to close or delete. Remove nothing yourself.
+4. **Host limitations:** one entry per `HOST` result, with the fields its check records. No kit change is suggested; name what the kit does instead, and whether a check tested it (for S1.4: the dispatcher's guard, and the result of stage 8 item 7).
+5. **Copilot behaviour notes:** how skills were discovered and invoked; whether subagents ran in parallel; any tool or model the agent files name that wasn't available; anything an agent did that its instructions forbid, or skipped although they require it; prompts where the agent needed my help.
+6. **Clean-up list for me:** branches, worktrees (`git worktree list`), temp folders, open PRs, and the sandbox items to close or delete. Remove nothing yourself.
 
 ## `status`
 
