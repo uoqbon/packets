@@ -2,7 +2,7 @@
 
 Pull requests always live on GitHub, so every provider needs the GitHub CLI (`gh`) signed in with access to the repository. The provider only decides where the board lives.
 
-Claims are judged by the board's clock, never the local one: a claim comment is stamped by the board, and the claim check reads how late the board's clock can be from a response's `Date` header (GitHub: a call to `rate_limit`, which costs no rate limit; Azure Boards: the comments read just before; local: the local clock, which stamps its comments).
+Claims are judged by the board's clock, never the local one: a claim comment is stamped by the board, and the claim check reads how late the board's clock can be from a response's `Date` header (GitHub: a call to `rate_limit`, which costs no rate limit, or to `user` where `rate_limit` isn't served; Azure Boards: the comments read just before; local: the local clock, which stamps its comments).
 
 ## github-project
 

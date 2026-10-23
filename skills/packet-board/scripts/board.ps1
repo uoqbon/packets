@@ -369,7 +369,9 @@ try {
             $line = '{0} {1} {2} {3}' -f $r.Result, $r.ClaimId, $r.CreatedAt.UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ'), $r.CommentId
             if ($r.Result -ne 'HOLD') { Write-Output $line; exit 1 }
             $left = [Math]::Max(0, [Math]::Floor($r.Left.TotalMinutes))
-            $how = if (-not $r.Renewed) { "kept, nothing posted; ${left}m of ${lease}m left, renews under $([string]::Format([Globalization.CultureInfo]::InvariantCulture, '{0:0.#}', $lease * 2 / 3))m" }
+            $deferred = if ($r.PSObject.Properties['Deferred']) { $r.Deferred } else { $null }
+            $how = if ($deferred) { "kept, renewal deferred: a claim comment $deferred left behind still fills the window; ${left}m left" }
+            elseif (-not $r.Renewed) { "kept, nothing posted; ${left}m of ${lease}m left, renews under $([string]::Format([Globalization.CultureInfo]::InvariantCulture, '{0:0.#}', $lease * 2 / 3))m" }
             elseif ($r.Lapsed) { "renewed after the lease had lapsed; ${left}m left" }
             else { "renewed; ${left}m left" }
             Write-Output "$line ($how)"
