@@ -1392,7 +1392,7 @@ try {
     $guardBody = if ($dispatcher -match ('(?ms)^' + $guard + '\r?$(.*?)^## ')) { $Matches[1] } else { '' }
     Assert-That ($guardBody -match 'Stop if either of these is true' -and $guardBody.Contains('`packet-dispatcher did nothing: started by another agent.') -and $guardBody.Contains('`packet-dispatcher did nothing: no subagent tool.') -and (Get-Content -Raw (Join-Path $kit 'tests/copilot-e2e.prompt.md')).Contains("``$guard``")) 'the dispatcher stops when another agent starts it, under the heading and with the line e2e S1.4 and S8.7 look for' $guardBody
     $dispatchSkillFront = ((Get-Content -Raw (Join-Path $target '.github/skills/packet-dispatch/SKILL.md')) -split '(?m)^---\r?$')[1]
-    Assert-That ($dispatchSkillFront -notmatch '(?m)^disable-model-invocation:' -and (Get-Content -Raw (Join-Path $kit 'README.md')).Contains('github/copilot-cli#4438')) 'the dispatch skill has no disable-model-invocation, which leaves it unreachable on some hosts, and the README says why' $dispatchSkillFront
+    Assert-That ($dispatchSkillFront -match '(?m)^name: packet-dispatch\r?$' -and $dispatchSkillFront -notmatch '(?m)^\s*[''"]?disable-model-invocation[''"]?\s*:' -and (Get-Content -Raw (Join-Path $kit 'README.md')).Contains('github/copilot-cli#4438')) 'the dispatch skill stays without disable-model-invocation, which would lock people out of it on some hosts, and the README says why' $dispatchSkillFront
     $subagents = @(Get-ChildItem -LiteralPath (Join-Path $kit 'agents') -Filter '*.agent.md' | Where-Object Name -ne 'packet-dispatcher.agent.md')
     $canStart = @($subagents | Where-Object {
         $front = ((Get-Content -Raw $_.FullName) -split '(?m)^---\r?$')[1]
