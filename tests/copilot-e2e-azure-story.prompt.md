@@ -158,12 +158,20 @@ Below, `<pkt>` is a packet's Task ID on the board, `<h>` the human task's.
 1. ⏸ As base stage 5 item 1, with `dispatch <foundation ID>`.
 2. When I'm back, run base S5.1 to S5.12 for the foundation, reading `board …` against this board, with these differences:
    - **S5.2 Status** maps to the Task's State and tags through `taskStatusMap` (Agile: In review is `Active` + `status:in-review`, Ready to merge `Active` + `status:ready-to-merge`; Basic: `Doing` + those tags). Exactly one `status:*` tag is on the Task.
-   - **S5.4 PR:** the body's first line equals `board ref <ID>`, which is `Fixes AB#<pkt>` with the **Task's** ID, never the story's. Grep the whole PR body: `AB#<story>` appears nowhere with `Fixes`, `Closes` or `Resolves` before it (a merge would close the story).
+   - **S5.4 PR:** the body's first line is the Task's reference, never the story's. The kit writes `board ref <ID>`, which is `Fixes AB#<pkt>` with the **Task's** ID. With the Azure Boards app installed, the app rewrites that mention into a link a few seconds after each body edit; the kit doesn't do that, and it is expected. Accept either form of the first line:
+     - **plain:** `board ref <ID>` exactly;
+     - **app-linked:** `Fixes [AB#<pkt>](<organization>/<project>/_workitems/edit/<pkt>)`, where `<pkt>` is the Task's ID (the same number in both places, so the story's ID never matches), `<organization>` is the whole configured `organization` value, scheme included (`https://dev.azure.com/<org>`), without a trailing slash, and `<project>` is the configured project's name, URL-encoded (a space is `%20`), or the project's GUID (`ab _apis/projects/<project>` returns it). Match the whole line, case-sensitively, as literal text (escape the dots and any other regex characters in the URL).
+
+     A stacked packet's first line (the PR template) adds ` · Stacked on #<n>; merge that first` after either form; allow that one suffix and no other text. Anything else on the line (another number, another organization or project, other text, `Closes` or `Resolves` in place of `Fixes`) is FAIL.
+
+     When the line is app-linked, also read the body's edit history and show who wrote each version of the line: `gh api graphql -f query='query{repository(owner:"<owner>",name:"<repo>"){pullRequest(number:<n>){author{login} userContentEdits(first:20){nodes{editedAt editor{login} diff}}}}}'`. PASS only if every edit that sets the line to the plain form was made by the PR's author (the dispatcher, whatever login `gh` runs as) and every edit that sets it to the linked form was made by the Azure Boards app (login `azure-boards`, or whatever login the first rewrite records, named in the report). An edit by anyone else that changes the first line (a person, or another bot) is FAIL, even if the result matches the pattern. If the history shows the author never wrote the plain form, or doesn't show the first line's changes at all, record FAIL with the output, not PASS. Record the PR number, the edit times and the logins in the report.
+
+     Grep the whole PR body, case-insensitively: no line has a closing keyword (`close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved`, with an optional colon) followed by `AB#<story>` or `[AB#<story>](`, in either form. For example `grep -iE '(clos|fix|resolv)(e|es|ed)?:?[[:space:]]+\[?AB#<story>([^0-9]|$)'` finds nothing (a merge would close the story).
    - **S5.13 Claims and markers as work item comments.** `ab '_apis/wit/workItems/<pkt>/comments?api-version=7.1-preview.4'`: the brief and the hand-off are there as Markdown comments by the user from stage 1 item 2, and no claim comment is left (`board release` deleted it).
    - **S5.14 PR linked.** With the Azure Boards app, the Task has an `ArtifactLink` relation named `GitHub Pull Request`. Without it, N/A.
    - **S5.15 Story still untouched.** As S4.5, against the story's updates since S4.7 (the parent-link removal and re-add for the excerpt packet's Task that S4.10 made, if the story recorded them, are the probe's, not the kit's): the dispatcher changed only its Task, never the story (its State included: record it, and if it moved, say whether a team rule did it, from the update's `revisedBy`).
 3. ⏸ If S5.12 found a contract question, handle it as in base stage 5 item 3. Then ask me to merge the PR. Then:
-   - **S5.16 Close on merge.** With the app, the Task is in a done state within a few minutes of the merge (`ab _apis/wit/workitems/<pkt>`); without it, ask me to close it and record MANUAL. The story is not closed.
+   - **S5.16 Close on merge.** Just before I merge, read the PR body's first line (`gh pr view <n> --json body`) and record which form it has: plain or app-linked (S5.4). With the app, the Task is in a done state within a few minutes of the merge (`ab _apis/wit/workitems/<pkt>`); without it, ask me to close it and record MANUAL. The story is not closed. The report states, for each PR, the form at merge and whether the Task closed, so the run shows whether the app-linked form closes the Task. If it was app-linked and the Task didn't close, that is FAIL, a finding about the app's link, not the dispatcher.
    - `board reconcile` makes the foundation Done, and `board next -Phase e2e-draftmeta` shows reading time and slug `START`.
 
 ## Stage 6 · Two dispatchers in parallel, then a conflict
@@ -177,7 +185,7 @@ Run base stage 7 as written, for the excerpt packet, with these differences:
 - The `packet:needs-human` comment is a comment on the excerpt packet's **Task** in Azure Boards (S5.13's API), and the Task carries `status:needs-human` and the task map's State for Needs human.
 - ⏸ I answer as a comment on that Task in Azure Boards, not on GitHub. `board comments <ID>` shows the answer under my unique name from stage 1 item 2.
 - The answer I post is: "Replace the timing criterion with: the best of 3 runs of `Get-Excerpt` on a 10,000-word input takes under 500 ms." (base stage 7 names TextKit's `Measure-Text`, which this phase doesn't have).
-- The amendment PR doesn't say `Fixes AB#` for any item.
+- The amendment PR doesn't say `Fixes AB#` for any item, in either form: its body has no closing keyword (`close`, `fix`, `resolve` and their forms, any case) followed by `AB#<n>` or `[AB#<n>](…)`.
 
 ## Stage 8 · Safety probes and the story at the end
 
