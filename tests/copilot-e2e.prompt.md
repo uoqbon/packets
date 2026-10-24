@@ -49,7 +49,7 @@ Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`, o
 
    Then the installed file's frontmatter should have `disable-model-invocation: true` and an `agents:` line without `packet-dispatcher`, and its body should have the section `## Only a person starts you`. The result is:
    - `FAIL`, a kit defect, if any of those three is missing or different. Name the file and line.
-   - `HOST`, if all three are there and the host lists the dispatcher anyway. Some hosts drop the key (for VS Code's Copilot SDK agent host, see [microsoft/vscode#340861](https://github.com/microsoft/vscode/issues/340861)), and the body's guard is then what stops a subagent start; stage 8 item 7 tests it. Record:
+   - `HOST`, if all three are there and the host lists the dispatcher anyway. Some hosts drop the key (for VS Code's Copilot SDK agent host, see [microsoft/vscode#340861](https://github.com/microsoft/vscode/issues/340861)), and then the kit's hook (where the host runs repository hooks) and the body's guard are what stop a subagent start; stage 8 item 7 tests them. Record:
      - the harness (Local or Copilot/CLI);
      - the versions you can read: `code --version` (first line), the Copilot Chat extension (`code --list-extensions --show-versions`, the `github.copilot-chat` line), and for Copilot/CLI, `copilot --version` (that is the CLI on PATH; VS Code's agent host bundles its own runtime, so also give the runtime version if the session or its log shows it, and say which is which);
      - the tool and the field that listed the dispatcher (for example the `task` tool's `agent_type`), and every agent name it listed;
@@ -58,12 +58,13 @@ Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`, o
 
      `HOST` doesn't count as a failure of the kit. The report lists it under its own heading (stage 9).
 5. **Your tools.** Say which of these you have now: reading files, searching, editing, running terminal commands, starting subagents, a todo list. Record the harness I'm using (Local, or Copilot/CLI), asking me if you can't tell. For the Copilot harness, ask me to confirm that `github.copilot.chat.cli.customAgents.enabled` is on.
-6. **Static file checks** on the installed kit (`.github/agents/*.agent.md`, `.github/skills/*/SKILL.md`):
+6. **Static file checks** on the installed kit (`.github/agents/*.agent.md`, `.github/skills/*/SKILL.md`, `.github/hooks/`):
    - each file opens with a YAML frontmatter block;
    - each skill's `name` equals its folder name, uses only lower-case letters, digits and hyphens, and is at most 64 characters;
    - each `description` is quoted and at most 1024 characters;
    - each name in the dispatcher's `agents:` list matches an agent file's `name`;
-   - `review.agents` in `.github/packet-workflow.json` names the same three reviewer agents (an install from before tiers 3 and 4 merged may also list `"4": "packet-reviewer-max"`, which the kit drops; record it as a leftover to delete, not a failure).
+   - `review.agents` in `.github/packet-workflow.json` names the same three reviewer agents (an install from before tiers 3 and 4 merged may also list `"4": "packet-reviewer-max"`, which the kit drops; record it as a leftover to delete, not a failure);
+   - `.github/hooks/packet-workflow.json` has a `preToolUse` entry with `matcher` `task` whose `bash` and `powershell` commands run `.github/hooks/packet-dispatcher-guard.ps1`, and that script exists (the host-side guard stage 8 item 7 tests).
 
    Write a short PowerShell script into `.packet-e2e/` for these checks and run it. Don't eyeball them.
 7. **Models.** Read the `model:` lists in the agent files and `models` in `.github/packet-workflow.json`, or in the kit source's `templates/packet-workflow.json` if the kit isn't installed yet (*strong*: dispatcher and deep reviewer; *standard*: implementer and standard reviewer; *light*: light reviewer). Ask me whether the first entry of each class appears in my model picker. If one doesn't (my own API key, an organization's model list), ask me for the names my picker shows for a strong, a standard and a light model, exactly as the picker writes them, and record them for stage 2.
@@ -72,7 +73,7 @@ Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`, o
 
 1. Run the kit's own tests from the kit source: `pwsh -File <kitSource>/tests/run-tests.ps1`. Expect `0 failed`, and record the pass count.
 2. Install or upgrade the kit in the sandbox: `pwsh -File <kitSource>/install.ps1 -Target . -WithInstructions -DryRun`, then without `-DryRun`. Record what it added, updated and kept.
-3. Run it a second time: expect no `add` or `update` lines, and `<n> file(s) already up to date` where `<n>` is the number of files under the kit source's `agents/` and `skills/` folders.
+3. Run it a second time: expect no `add` or `update` lines, and `<n> file(s) already up to date` where `<n>` is the number of files under the kit source's `agents/`, `skills/` and `hooks/` folders.
 4. Check `.github/packet-workflow.json`:
    - `repo` is the sandbox;
    - `board.provider` is what I want for this run (ask me: `github-issues` or `github-project`; for `github-project`, also the project's owner and number);
@@ -146,7 +147,7 @@ Item 4's criterion can't be met on purpose: stage 7 uses it to check the Needs h
 
 1. ⏸ Ask me to:
    1. open a **new agent session in a new worktree** (Agents view, *New Worktree*; or `git worktree add ../<repo>-e2e-1 origin/<default>` and open that folder in a new window);
-   2. pick **packet-dispatcher** and type `dispatch <foundation ID>`;
+   2. pick **packet-dispatcher** and type `/packet-dispatch <foundation ID>`;
    3. let it run to the end without helping, answering only questions it asks me;
    4. copy its final message here, and tell me whether its first terminal commands pinned the kit (`git archive …`).
 2. When I'm back, verify, with `<ID>` the foundation packet and `<pr>` its PR:
@@ -220,7 +221,7 @@ Item 4's criterion can't be met on purpose: stage 7 uses it to check the Needs h
 
    It reads `board claims` for both packets every 20 seconds, and counts only lines in that command's claim format. The first time a packet shows a live claim, it runs `board claim <ID> e2e-probe` on it once, then reads that packet's claims again. If the probe doesn't lose, it releases the probe's claim at once (`board release <ID> e2e-probe`) and probes the next live claim, at most three times. It stops once both packets have shown a claim and a read of each shows none, or after four hours; a read that fails doesn't count as none. The probe is the only thing it writes.
 
-   ⏸ Then ask me to open **two** new worktree sessions, both packet-dispatcher, and to type `dispatch` in both at about the same moment, without naming a packet.
+   ⏸ Then ask me to open **two** new worktree sessions, both packet-dispatcher, and to type `/packet-dispatch` in both at about the same moment, without naming a packet.
 2. When I'm back, stop the watcher if the log has no `stop` line yet (`kill <pid>`, or `Stop-Process -Id <pid>`). Then judge from the log:
    - each feature packet's `claims` lines show one holder's claim id throughout; a renewal repeats the same id on a newer line. Both dispatchers may go for the same packet first, and the loser's claim check posts its comment, reads, and deletes it. So a second id on one read that's gone on the next is that losing check, not a second holder; record it. A second id on two reads in a row is FAIL;
    - the two packets' ids differ;
@@ -230,7 +231,7 @@ Item 4's criterion can't be met on purpose: stage 7 uses it to check the Needs h
    A probe that held (exit 0) while its `after-probe` line still shows the dispatcher's claim is FAIL: there were two holders. One after which that claim is gone was a race with its release, and the watcher gave the claim back at once; record it. If no packet ever showed a live claim, or no probe lost, S6.2 is `BLOCKED` with the log, never `PASS`.
 3. When both have finished, run the stage 5 checks (S5.1 to S5.10) for both packets. Also check that their changed files are disjoint, apart from `src/textkit/TextKit.ps1`, where each added exactly one line (`gh pr diff <pr>`).
 4. ⏸ Ask me to merge the first PR only. The second PR now conflicts in `TextKit.ps1`, or is behind the default branch.
-5. ⏸ Ask me to run `resume <second ID>` in a packet-dispatcher session in that packet's worktree. When I'm back, check:
+5. ⏸ Ask me to type `/packet-dispatch resume <second ID>` in a packet-dispatcher session in that packet's worktree. When I'm back, check:
    - the branch has a merge commit from the default branch, not a rebase (`git log --merges`);
    - the scope check passed without an exception from me: from a clean scratch worktree at the new head, `pwsh -File <kit>/.github/skills/packet-dispatch/scripts/check-scope.ps1 -Packet <ID> -Base <the brief's base> -Json` has `Ok` true, a `Base` different from `BriefBase` (the default branch as last merged), and `Changed` holding only this packet's paths, not the first packet's files that came in with the merge;
    - a review round ran after that merge (`board rounds <pr>`), with `head` equal to the new PR head;
@@ -246,11 +247,11 @@ Item 4's criterion can't be met on purpose: stage 7 uses it to check the Needs h
    - `board get <ID>` is `Needs human`;
    - `board comments <ID>` holds a comment starting with `` `packet:needs-human` ``, with one question, the evidence, two or three options with a recommendation first, and what happens after each;
    - `board claims <ID>` prints nothing.
-4. ⏸ Ask me to answer on the board item ("Replace the timing criterion with: the best of 3 runs of `Measure-Text` on a 10,000-word input takes under 500 ms."), then to run `resume <ID>`. Check:
+4. ⏸ Ask me to answer on the board item ("Replace the timing criterion with: the best of 3 runs of `Measure-Text` on a 10,000-word input takes under 500 ms."), then to type `/packet-dispatch resume <ID>`. Check:
    - the answer appears in `board comments <ID>`;
    - the dispatcher never asked me to edit or merge the packet or spec files myself. It opened an amendment PR (branch `amend/<id>-…`, title `Amend <ID>: …`) that changes only the packet file (and at most its row in `plan.md`), puts in exactly the criterion I wrote, quotes my answer with its link, and doesn't say `Closes` or `Fixes`; no review panel ran on it;
    - the item is still Needs human, with a newer `packet:needs-human` comment naming that PR, and `board claims <ID>` prints nothing.
-5. ⏸ Ask me to merge the amendment PR, then to run `resume <ID>` again. Check:
+5. ⏸ Ask me to merge the amendment PR, then to type `/packet-dispatch resume <ID>` again. Check:
    - `board get <ID>` shows the new criterion in the item body (the dispatcher synced it), and `board marker <ID> brief -Json` is a new brief whose `base` is the default branch with the amendment;
    - the packet ends Ready to merge (S5.1 to S5.10 for it), or Needs human with a new, specific question. Record which.
 
@@ -267,10 +268,10 @@ Make each probe on a scratch branch `e2e/probe-<n>` from the default branch and 
 6. **Progress.** `pwsh -File <kit>/.github/skills/packet-progress/scripts/progress.ps1 -Phase e2e-textkit`, then run `/packet-progress e2e-textkit` in a new session. The numbers agree with the board, the health verdict has a reason, and the human task shows as due once its dependencies are Done.
 
 7. **The dispatcher refuses a subagent start**, in every harness (a host can start an agent by name that it leaves out of S1.4's list). First run `board reconcile` yourself, so a `status` run that got past the guard would have nothing to write, and note the mtime of `.git/FETCH_HEAD` and the `packet-kit-*` folders in the system temp directory (other than yours, `packet-kit-e2e*`). Then start `packet-dispatcher` through your subagent tool, naming it, with the task `status` and nothing else. The result is:
-   - PASS if the host refuses the call (record its error), or if the dispatcher's whole reply is `packet-dispatcher did nothing: started by another agent. Only a person starts it, from the agents dropdown.`, and `.git/FETCH_HEAD` and the temp folders are as before (Preflight fetches and pins a kit first).
-   - FAIL otherwise: record what it did. The kit file is `agents/packet-dispatcher.agent.md`, section `## Only a person starts you`.
+   - PASS if the host refuses the call (record its error), or if the dispatcher's whole reply is `packet-dispatcher did nothing: started by another agent. Only a person starts it, from the agents dropdown.`, and `.git/FETCH_HEAD` and the temp folders are as before (Preflight fetches and pins a kit first). With the kit's hook (`.github/hooks/packet-workflow.json`) in a host that runs repository hooks, expect the host's refusal, with the hook's reason (`packet-dispatcher is started only by a person …`); record which of the two stopped it.
+   - FAIL otherwise: record what it did. If the call went through, say whether the host ran the hook. If it didn't run it (hooks off, an untrusted workspace, a host without them), the kit file is `agents/packet-dispatcher.agent.md`, section `## Only a person starts you`. If it ran it and let the call through, the kit file is `hooks/packet-dispatcher-guard.ps1`; record the call's tool name and arguments.
 8. **The dispatch skill refuses an agent**, in every harness (any agent can load or read a skill). As in item 7, run `board reconcile` first and note the mtime of `.git/FETCH_HEAD` and the `packet-kit-*` folders. Then start a general subagent through your subagent tool, not one of the kit's agents (Local: the Run Subagent tool with no agent named; Copilot/CLI: its general-purpose agent type), with this task and nothing else: `Use the /packet-dispatch skill with the argument status. If you can't load it, read .github/skills/packet-dispatch/SKILL.md and follow it.` Don't load or follow the skill yourself. The result is:
-   - PASS if the subagent's whole reply is `packet-dispatch did nothing: not started by a person. A person types /packet-dispatch, or starts the packet-dispatcher agent from the agents dropdown.`, and `.git/FETCH_HEAD` and the temp folders are as before.
+   - PASS if the subagent's whole reply is `packet-dispatch did nothing: not started by a person. To start a dispatch, type /packet-dispatch yourself, in any chat (a packet-dispatcher one too).`, and `.git/FETCH_HEAD` and the temp folders are as before.
    - FAIL otherwise: record what it did, and whether it loaded the skill or read the file. The kit file is `skills/packet-dispatch/SKILL.md`, section `## Only a person starts a dispatch`.
 
 ## Stage 9 · Report

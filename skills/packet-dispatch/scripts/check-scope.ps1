@@ -19,7 +19,7 @@
 
   OUTSIDE    a path the packet neither owns nor lists as a touchpoint            (fails)
   LOCKED     a path under a lock (config locks) the packet doesn't hold          (fails)
-  MACHINERY  the kit, its config, agents, skills, prompts or workflows, not owned (fails)
+  MACHINERY  the kit, its config, agents, skills, hooks, prompts or workflows, not owned (fails)
   TOUCH      a shared touchpoint, with the edit the packet allows; more than 10 changed lines warns
   DIRTY      uncommitted or untracked changes in the worktree: commit or discard them first (fails)
 
@@ -36,7 +36,7 @@ param(
 
 . "$PSScriptRoot/../../packet-board/scripts/PacketWorkflow.ps1"
 
-$machineryRe = '(^|/)\.github/(workflows|actions|agents|skills|prompts|instructions|copilot)/|(^|/)\.github/copilot-instructions\.md$|(^|/)AGENTS\.md$|(^|/)\.github/packet-workflow\.json$|(^|/)\.claude/|(^|/)\.agents/|(^|/)\.github/packet-lenses/'
+$machineryRe = '(^|/)\.github/(workflows|actions|agents|skills|prompts|instructions|copilot|hooks)/|(^|/)\.github/copilot-instructions\.md$|(^|/)AGENTS\.md$|(^|/)\.github/packet-workflow\.json$|(^|/)\.claude/|(^|/)\.agents/|(^|/)\.github/packet-lenses/'
 
 function Get-RemoteDefaultTip([string]$Root) {
     <# The default branch's tip as origin reports it now (git ls-remote), fetched when it isn't here yet.

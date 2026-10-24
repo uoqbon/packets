@@ -10,7 +10,7 @@
     2 standard  ordinary code (the default)
     3 deep      the top tier: > 300 lines, > 8 files, >= 2 subsystems, a migration/schema, API contract,
                 auth/secret, infra/CI path, concurrency in added lines, review machinery (agents, skills,
-                prompts, instructions, workflows, the kit's config), a .gitattributes change, or a
+                hooks, prompts, instructions, workflows, the kit's config), a .gitattributes change, or a
                 review.deepPaths or review.maxPaths match
   then raised by the packet's **Review tier** line, and for rounds 2+ by -PreviousTier (plus one with
   -FixedConfirmed, capped at 3). A tier 4 from before tiers 3 and 4 merged (a packet's line, a previous
@@ -54,7 +54,7 @@ $ignoreRe = '(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|uv
 $docsRe = '\.(md|mdx|rst|txt|adoc)$|(^|/)(docs?|LICENSE|CHANGELOG|README)([./]|$)'
 $testsRe = '(^|/)(tests?|__tests__|spec|specs|fixtures)/|(^|/)test_[^/]+$|_test\.[a-z]+$|\.(test|spec)\.[a-z]+$|(^|/)conftest\.py$'
 $configRe = '\.(json|ya?ml|toml|ini|cfg|env|properties|editorconfig)$|(^|/)\.[^/]+rc$'
-$machineryRe = '(^|/)\.github/(workflows|actions|agents|skills|prompts|instructions|copilot)/|(^|/)\.github/copilot-instructions\.md$|(^|/)AGENTS\.md$|(^|/)CLAUDE\.md$|(^|/)\.claude/|(^|/)\.agents/|(^|/)\.github/packet-lenses/|(^|/)\.github/packet-workflow\.json$'
+$machineryRe = '(^|/)\.github/(workflows|actions|agents|skills|prompts|instructions|copilot|hooks)/|(^|/)\.github/copilot-instructions\.md$|(^|/)AGENTS\.md$|(^|/)CLAUDE\.md$|(^|/)\.claude/|(^|/)\.agents/|(^|/)\.github/packet-lenses/|(^|/)\.github/packet-workflow\.json$'
 $migrationRe = 'migrat|alembic|(^|/)schema|\.sql$|(^|/)prisma/|(^|/)db/'
 $contractRe = 'openapi|swagger|\.proto$|\.graphql$|(^|/)types?\.(py|ts)$|\.d\.ts$|(^|/)contracts?/'
 $authRe = 'auth|security|crypto|secret|token|password|permission|session|oauth|jwt|identity'

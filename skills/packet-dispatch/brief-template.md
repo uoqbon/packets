@@ -13,7 +13,7 @@ Packet file: `<packet path>` at `<base sha>` · Branch `<branch>` from `<base re
 - **Don't change contracts other packets rely on** (the names under "You build on") beyond what this brief says. If one is wrong or missing, stop and report.
 - **Locks:** <none | the locks this packet holds>. Don't touch a lock's paths unless this packet holds it.
 - **Never:** push, open or merge a PR, force anything, start or re-run CI, run `gh` or post anything to GitHub or the board, or run any of: <guardrails.forbiddenCommands>. <guardrails.rules, one per line>
-- **Don't edit** the workflow kit (`.github/skills/`, `.github/agents/`, `.github/packet-workflow.json`) or the packet files.
+- **Don't edit** the workflow kit (`.github/skills/`, `.github/agents/`, `.github/hooks/`, `.github/packet-workflow.json`) or the packet files.
 - **Conventions:** <the repository's language, framework, style and test conventions that apply here>.
 - **Tests:** run the commands under "Tests to run". Tests stay offline and deterministic: fakes or fixtures for external services, an injected clock for time.
 - **Commit** your work on this branch with clear messages. Write `<decision record path>` for every choice the packet left open.
