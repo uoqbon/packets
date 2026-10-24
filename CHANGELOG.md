@@ -23,8 +23,8 @@ The first release: the dispatcher, the implementer and three reviewer agents; th
   - Wherever packets are Tasks under a story and the task type lacks a state that `statusMap` uses (on Agile, `Resolved`): add `board.azureBoards.taskStatusMap`. [providers.md](skills/packet-board/providers.md) has starting points.
 
   Until the steps below, sync leaves an item laid out before the tree where it is and names it. Once the pull request has merged, work from an up-to-date checkout of the default branch, since sync reads the plan files from the working tree:
-  1. Where packets became Tasks under a story: sync never changes a work item's type, and changing it on the board resets the item's State. While no dispatch is running for the phase (`board claims <ID>` lists no claim), note each packet's status (`board show -Phase <phase>`), change each packet item to the task type, and put its status back with `board set <ID> "Status=<status>"`, Done included.
-  2. Run `board sync -DryRun` to list the bodies edited on the board (`skipped … edited on the board`), and `board sync -DryRun -Force` to see the moves and updates. Move those edits into the packet files in a pull request, merge it, and update the checkout.
+  1. Where packets became Tasks under a story: sync never changes a work item's type, and changing it on the board resets the item's State. While no packet of the phase has a live claim (`board claims <ID>` prints nothing), note each packet's status (`board show -Phase <phase>`), change each packet item to the task type, and put its status back with `board set <ID> "Status=<status>"`, Done included. A Removed item reads as Done too: set its State back to Removed on the board instead.
+  2. Run `board sync -DryRun`: each `skipped` line names a body edited on the board or an item sync didn't create. With `markdown: false` sync can't tell an edit, so compare the descriptions by hand. Then run `board sync -DryRun -Force` to see the moves and updates. Move those edits into the packet files in a pull request, merge it, and update the checkout.
   3. Run the dry run again, then run `board sync -Force` once.
 
 ### Added
