@@ -808,7 +808,7 @@ function Get-PwCreditSummary {
     $monthly = [int]$Config.budget.monthlyCredits
     [pscustomobject]@{
         Estimate = $true; Packets = $rows; Total = [Math]::Round($total); PerFinishedPacket = $avg
-        Month = $month.ToString('yyyy-MM'); ThisMonth = [Math]::Round($mtdAll); MonthlyCredits = $monthly
+        Month = $month.ToString('yyyy-MM', [Globalization.CultureInfo]::InvariantCulture); ThisMonth = [Math]::Round($mtdAll); MonthlyCredits = $monthly
         Left = $(if ($monthly) { [Math]::Round($monthly - $mtdAll) } else { $null })
         PacketsLeft = $(if ($monthly -and $avg) { [Math]::Max(0, [Math]::Floor(($monthly - $mtdAll) / $avg)) } else { $null })
     }
@@ -818,7 +818,7 @@ function New-PwClaimId {
     # Claims are public comments, so the machine shows only as a short hash: sessions on one machine
     # share it, and a public repository doesn't learn the host or user name.
     $machine = (Get-PwSha256 "$([System.Net.Dns]::GetHostName())|$([Environment]::UserName)").Substring(0, 8)
-    'session-{0}-{1}-{2}' -f $machine, [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'), (Get-Random -Minimum 10000 -Maximum 99999)
+    'session-{0}-{1}-{2}' -f $machine, [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ', [Globalization.CultureInfo]::InvariantCulture), (Get-Random -Minimum 10000 -Maximum 99999)
 }
 
 $script:PwTrusted = $null

@@ -367,7 +367,7 @@ try {
             $item = Resolve-PwItem $cfg $Rest[0]
             if (-not $Rest[1]) { Stop-Pw 'usage: board.ps1 claim <ID> <claim-id> (board.ps1 new-claim-id makes one)' }
             $r = Invoke-PwClaim -Ref $item.Ref -ClaimId $Rest[1] -LeaseMinutes $lease -Force:$Force
-            $line = '{0} {1} {2} {3}' -f $r.Result, $r.ClaimId, $r.CreatedAt.UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ'), $r.CommentId
+            $line = '{0} {1} {2} {3}' -f $r.Result, $r.ClaimId, $r.CreatedAt.UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture), $r.CommentId
             if ($r.Result -ne 'HOLD') { Write-Output $line; exit 1 }
             $left = [Math]::Max(0, [Math]::Floor($r.Left.TotalMinutes))
             $deferred = if ($r.PSObject.Properties['Deferred']) { $r.Deferred } else { $null }
@@ -388,7 +388,7 @@ try {
             $live = Get-PwLiveClaims -Ref $item.Ref -LeaseMinutes $lease
             foreach ($c in $live.Claims) {
                 $age = [int]($live.Now - $c.CreatedAt).TotalMinutes
-                Write-Output ('{0} {1} {2} ({3}m ago)' -f $c.ClaimId, $c.CreatedAt.UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ'), $c.CommentId, $age)
+                Write-Output ('{0} {1} {2} ({3}m ago)' -f $c.ClaimId, $c.CreatedAt.UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture), $c.CommentId, $age)
             }
         }
         'comment' {

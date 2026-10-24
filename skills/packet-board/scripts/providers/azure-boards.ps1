@@ -133,7 +133,7 @@ function ConvertTo-PwAbItem {
     $prio = $null
     if ($ab.priorityField -and $f.Contains($ab.priorityField) -and $f[$ab.priorityField]) { $prio = "P$([int]$f[$ab.priorityField] - 1)" }
     $target = $null
-    if ($ab.targetDateField -and $f.Contains($ab.targetDateField) -and $f[$ab.targetDateField]) { $target = ([DateTime]$f[$ab.targetDateField]).ToString('yyyy-MM-dd') }
+    if ($ab.targetDateField -and $f.Contains($ab.targetDateField) -and $f[$ab.targetDateField]) { $target = ([DateTime]$f[$ab.targetDateField]).ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture) }
     $body = if ($f.Contains('System.Description')) { [string]$f['System.Description'] } else { '' }
     # The service hands a Markdown description back with " and > as entities (&quot;, &gt;). Decoded, it is
     # the text sync wrote, so sync's hash finds only the edits someone made on the board. HtmlDecode undoes

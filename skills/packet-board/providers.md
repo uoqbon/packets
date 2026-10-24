@@ -77,7 +77,7 @@ The app rewrites that mention into a Markdown link a few seconds after each edit
 - **Descriptions** are written as Markdown (`markdown: true`, needs an organization with Markdown support for work item fields). The service returns them with `"` and `>` as HTML entities; the provider decodes them, so sync compares the text it wrote. With `markdown: false` the packet text goes in as preformatted HTML, and sync can no longer tell a board-side edit from its own, so it always rewrites.
 - **Dependencies** become Predecessor links. They don't move items in the tree.
 - **Comments** (claims, briefs) are posted as Markdown comments and deleted through the comments API. Each post and delete is a revision of the work item, which is why `board claim` posts only when a renewal is due. The service returns a Markdown comment with `"` and `>` as HTML entities, as it does a description; the provider decodes it, so a brief reads back as it was posted. A comment typed in the web UI is HTML and reads back as the service stores it, tags and entities included (a marker in it may be a `<code>` span): decoded, escaped text in it would read as markup.
-- **Untested against a live organization** in the kit's own tests; run `board setup` and a `sync -DryRun` first.
+- **Live coverage:** one end-to-end run (`tests/copilot-e2e-azure-story.prompt.md`), before the fixes it led to, on a Basic-process project with a story as the root. Only the Markdown decoding has been checked live since. Other processes, epic and feature roots, `markdown: false` and `targetDateField` are tested offline only. Run `board setup` and a `sync -DryRun` first.
 
 ## local
 

@@ -57,7 +57,7 @@ try {
         & git rev-parse --verify -q "$main^{commit}" *> $null
         if ($LASTEXITCODE -eq 0) { $main } else { '' }
     }
-    $asOf = if ($Today) { [DateTime]::ParseExact($Today, 'yyyy-MM-dd', $null) } else { [DateTime]::Today }
+    $asOf = if ($Today) { [DateTime]::ParseExact($Today, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture) } else { [DateTime]::Today }
     $all = @(Get-PwPackets -Config $cfg -Ref $src)
     foreach ($bad in @($all | Where-Object { -not $_.Id })) { Write-Warning "$($bad.Path) has no packet ID; left out (validate-packets.ps1 says why)" }
     $all = @($all | Where-Object { $_.Id })
@@ -134,7 +134,7 @@ try {
         foreach ($p in $scope) {
             $s = & $statusOf $p
             if (-not $p.Target -or $s -in 'Done', 'Ready to merge' -or (Test-PwItemDone $byId[$p.Id])) { continue }
-            $t = [DateTime]::ParseExact($p.Target, 'yyyy-MM-dd', $null)
+            $t = [DateTime]::ParseExact($p.Target, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
             $days = ($t - $asOf).Days
             if ($days -lt 0) { $late.Add([pscustomobject]@{ Id = $p.Id; Priority = $p.Priority; Status = $s; Target = $p.Target; DaysLate = - $days }) }
             elseif ($days -le 2 -and $s -in 'Backlog', 'Ready', 'Not on board') { $dueSoon.Add([pscustomobject]@{ Id = $p.Id; Priority = $p.Priority; Status = $s; Target = $p.Target; DaysLeft = $days }) }
@@ -200,7 +200,7 @@ try {
         }
 
         $report = [pscustomobject]@{
-            Phase = $ph; Title = $info.Title; Source = $(if ($src) { $src } else { 'working tree' }); Today = $asOf.ToString('yyyy-MM-dd')
+            Phase = $ph; Title = $info.Title; Source = $(if ($src) { $src } else { 'working tree' }); Today = $asOf.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
             Health = $health; HealthReasons = @($reasons)
             Totals = [pscustomobject]@{ Packets = $agent.Count; HumanTasks = $human.Count; Weight = $total; DoneWeight = $done; LandedWeight = $landed; DonePercent = if ($total) { [math]::Round(100 * $done / $total) } else { 0 }; LandedPercent = if ($total) { [math]::Round(100 * $landed / $total) } else { 0 } }
             Counts = $counts; ByPriority = $byPriority; ByWave = $byWave
