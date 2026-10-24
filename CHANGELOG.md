@@ -14,7 +14,12 @@ The first release: the dispatcher, the implementer and three reviewer agents; th
 - **The installer adds a hook:** `.github/hooks/packet-workflow.json` and `packet-dispatcher-guard.ps1`. Commit them with the rest of the kit ([#23]).
 - **Three review tiers instead of four.** The installer removes `packet-reviewer-max` unless you changed it. A packet or a previous round at tier 4 reads as tier 3; move a `review.agents."4"` of your own to `"3"` ([#3]).
 - **Agent models still come from your `models` map.** The installer never rewrites an existing `.github/packet-workflow.json`. The template now lists GPT-6.1 Sol first in every class, and a class your `models` map leaves out gets the template's new list ([#2]).
-- **Azure Boards with an epic root: the board gets a tree.** Packets now go under a Feature per workstream, not straight under the epic. Sync names each item that sits elsewhere and leaves it there. Run `board sync -DryRun -Force` to see the moves, move any edits made on the board into the packet files, then run `board sync -Force` once; it also overwrites bodies edited on the board. On the Basic process, first set `board.azureBoards.featureWorkItemType` to `""`, or sync stops before it writes ([#5]).
+- **Azure Boards: the plan's root line now builds a tree** that follows the process's levels, and three older setups stop sync before it writes, the dispatcher's sync after an amendment included ([#5]). Fix them in the pull request that upgrades the kit: sync reads the config and the plan files from the default branch, so a change counts only once it merges.
+  - A plan whose `**Epic:**` line names a Feature or a User Story: change the line to `**Feature:**` or `**User Story:**`.
+  - The Basic process: set `board.azureBoards.featureWorkItemType` to `""`.
+  - A config that made packets Tasks (`workItemType` the task type), with a plan that names a root: set `workItemType` back to the story type, and name a User Story as the root.
+
+  Once it has merged, sync leaves an item laid out before the tree where it is and names it. Run `board sync -DryRun -Force` to see the moves and updates, move any edits made on the board into the packet files, then run `board sync -Force` once.
 
 ### Added
 
@@ -27,7 +32,7 @@ The first release: the dispatcher, the implementer and three reviewer agents; th
 
 - **Three review tiers,** light, standard and deep, none above high reasoning effort. The deep reviewer takes over `packet-reviewer-max`'s adversarial checks ([#3]).
 - **Default models:** GPT-6.1 Sol first in every class, Claude Sonnet 5.5 second ([#2]).
-- **Sync never moves an item that has another parent,** on any board. It names the item and leaves it there; `sync -DryRun -Force` lists the moves and `sync -Force` makes them. On GitHub, sync used to add a second parent, which GitHub refused, and stop. A GitHub or local dry run now reads the board and prints what it would link and move ([#5], [#6]).
+- **Sync never moves an item that has another parent,** on any board. It names the item and leaves it there; `sync -DryRun -Force` lists the moves and `sync -Force` makes them. `-Force` also overwrites bodies edited on the board, so move those edits into the packet files first. On GitHub, sync used to add a second parent, which GitHub refused, and stop. A GitHub or local dry run now reads the board and prints what it would link and move ([#5], [#6]).
 - **Claims renew only when due,** by the board's clock: `board claim` posts a renewal once a third of the lease has passed, not at every milestone ([#12]).
 - **`/packet-dispatch status` runs on a checkout that isn't clean.** A dispatch or a resume still stops on one ([#20]).
 
