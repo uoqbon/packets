@@ -54,10 +54,10 @@ The ideas that make it work:
 
 ## Install
 
-Clone this repository next to (not inside) the repository you want to set up, then run its installer against that repository:
+Clone a release of this repository next to (not inside) the repository you want to set up, then run its installer against that repository:
 
 ```bash
-git clone https://github.com/uoqbon/packets.git
+git clone --branch v0.1.0 https://github.com/uoqbon/packets.git
 ```
 
 ```bash
@@ -66,7 +66,7 @@ pwsh -File packets/install.ps1 -Target <path to the repository> -WithInstruction
 
 It copies the agents to `<repo>/.github/agents/`, the skills to `<repo>/.github/skills/` (where Copilot discovers them) and the hook to `<repo>/.github/hooks/`, creates `.github/packet-workflow.json` from the template with the repository and default branch filled in, and with `-WithInstructions` adds the workflow's rules to `.github/copilot-instructions.md` between markers. `-DryRun` shows what it would do.
 
-To upgrade, pull this repository (`git -C packets pull`) and run the same command. The installer records hashes in `.github/packet-workflow.kit.json`, replaces only files you haven't changed since the last install, and lists the ones it kept (`-Force` replaces them). Put project-specific review lenses in `.github/packet-lenses/<name>.md`; the kit never touches that folder, and a lens there overrides the kit's lens of the same name.
+To upgrade, check out a newer release (`git -C packets fetch --tags`, then `git -C packets checkout <tag>`), read what it changes in [CHANGELOG.md](CHANGELOG.md), and run the same command. To follow `main` between releases instead, clone without `--branch` and upgrade with `git -C packets pull`. The installer records hashes in `.github/packet-workflow.kit.json`, replaces only files you haven't changed since the last install, and lists the ones it kept (`-Force` replaces them). Put project-specific review lenses in `.github/packet-lenses/<name>.md`; the kit never touches that folder, and a lens there overrides the kit's lens of the same name.
 
 Commit what it installs in a pull request; Copilot reads the files from the checkout, and worktree sessions see only committed files.
 
@@ -171,7 +171,7 @@ Before relying on a hosted provider, smoke-test it on a sandbox repository: `boa
 
 ## Known limitations
 
-- **Run end to end inside Copilot once, before the fixes it led to.** All nine stages of `tests/copilot-e2e.prompt.md` ran on kit 0.1.0 in the Copilot harness, with Claude models through the owner's API key, on labelled issues: planning, sync, a foundation packet through three review rounds, two dispatchers in parallel with a merge conflict, Needs human and resume, the safety probes and progress. Three implementation packets merged. Its failures led to the `models` map, the scope check's comparison base after a merge of the default branch, and the amendment PR for answers that change a packet; those fixes, and the cost profile, haven't been through the prompt yet. Not exercised live in that run: a forged round from a second account, a lock collision, an approved amendment carried through to Ready to merge, and the github-project and Azure Boards providers end to end. The Azure story run (above) has since covered a forged round from a second GitHub account outside `trustedAuthors`, which `board rounds` ignored, and the Azure Boards provider. Run the prompt on a sandbox repository before relying on the kit.
+- **Run end to end inside Copilot once, before the fixes it led to.** All nine stages of `tests/copilot-e2e.prompt.md` ran in the Copilot harness on the kit as it was before it moved to this repository, with Claude models through the owner's API key, on labelled issues: planning, sync, a foundation packet through three review rounds, two dispatchers in parallel with a merge conflict, Needs human and resume, the safety probes and progress. Three implementation packets merged. Its failures led to the `models` map, the scope check's comparison base after a merge of the default branch, and the amendment PR for answers that change a packet; those fixes, and the cost profile, haven't been through the prompt yet. Not exercised live in that run: a forged round from a second account, a lock collision, an approved amendment carried through to Ready to merge, and the github-project and Azure Boards providers end to end. The Azure story run (above) has since covered a forged round from a second GitHub account outside `trustedAuthors`, which `board rounds` ignored, and the Azure Boards provider. Run the prompt on a sandbox repository before relying on the kit.
 - **Azure Boards has met one live organization, before the fixes that run led to** (see *Inside Copilot* above). It used a Basic-process project with a story as the root; other processes, epic and feature roots, `markdown: false` and `targetDateField` are tested offline only.
 - **Other repositories are read only for dependencies.** With `remotes`, a packet can wait for a packet in another repository, as long as that repository's board keeps its packets as GitHub issues (`github-issues` or `github-project`). Locks, contract questions (`<ID> contract: …` follow-ups) and pull requests are still looked up in this repository only. A packet never stacks on another repository's packet, and reviewers don't see the other repository's code.
 - **Harnesses.** Written for the Local harness first. The Copilot harness needs `github.copilot.chat.cli.customAgents.enabled`; whether it runs two reviewer subagents at once depends on the harness (the panel falls back to one at a time). The Copilot cloud agent isn't wired in.
