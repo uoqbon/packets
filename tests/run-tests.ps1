@@ -1553,7 +1553,16 @@ try {
     }
     finally { Pop-Location; Copy-Item -LiteralPath (Join-Path $kit 'hooks/packet-dispatcher-guard.ps1') -Destination $hookScript -Force }
     $wrong = @($runs.Keys | Where-Object { $runs[$_] -ne $want[$_] })
-    Assert-That ($runs.Count -ge 8 -and $wrong.Count -eq 0) 'the hook commands pass on the refusal, and let the call through when pwsh or the script is missing or the script fails' (($runs.Keys | ForEach-Object { "$_=$($runs[$_])" }) -join ', ')
+    # When Windows PowerShell gets it wrong, say what it read from stdin and what the command printed.
+    $why = if ($wrong -contains 'Windows PowerShell') {
+        Push-Location $target
+        try {
+            "stdin as `$input / [Console]::In: " + (($dispatcherCall | & powershell.exe -NoProfile -Command '$a = @($input); "$($a.Count) line(s), then $([Console]::In.ReadToEnd().Length) char(s)"' 2>&1) -join ' ')
+            'output: ' + (($dispatcherCall | & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $hookEntry.powershell 2>&1) -join ' ')
+        }
+        finally { Pop-Location }
+    }
+    Assert-That ($runs.Count -ge 8 -and $wrong.Count -eq 0) 'the hook commands pass on the refusal, and let the call through when pwsh or the script is missing or the script fails' ((@($runs.Keys | ForEach-Object { "$_=$($runs[$_])" }) -join ', ') + "`n$($why -join "`n")")
     $guardCall = { param([string]$Json) $o = $Json | & pwsh -NoProfile -File $hookScript 2>$null; '{0}:{1}' -f $LASTEXITCODE, (($o | Out-String).Trim()) }
     $refuse = @(
         '{"toolName":"task","toolArgs":"{\"agent_type\":\"packet-dispatcher\",\"name\":\"x\",\"prompt\":\"status\",\"mode\":\"sync\"}"}'
