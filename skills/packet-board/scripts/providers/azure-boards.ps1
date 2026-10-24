@@ -336,6 +336,19 @@ function Update-ProvItem {
     [void](Update-PwAbWorkItem -Id $Item.Number -Ops $ops -Rev $fresh.Rev)
 }
 
+function Get-PwAbCommentText {
+    <# A comment's text as it was written. The service hands a Markdown comment (every one the kit posts) back
+       with " and > as entities, as it does a description, and a brief's implementer types its commands as
+       written. HtmlDecode undoes every entity; were one typed in the comment itself handed back as it is
+       (how the service treats & and < is unseen), it would read as its character. An HTML comment (typed in
+       the web UI) is left as the service stores it: decoded, escaped text in it such as a typed &lt;code&gt;
+       would read as markup, even as a marker. Trust goes by author, never by text. #>
+    param($Comment)
+    $text = [string]$Comment.text
+    if ($Comment.ContainsKey('format') -and $Comment.format -eq 'markdown') { $text = [System.Net.WebUtility]::HtmlDecode($text) }
+    $text
+}
+
 function Get-ProvComments {
     param([Parameter(Mandatory)][string]$Ref)
     $all = [System.Collections.Generic.List[object]]::new()
@@ -346,7 +359,7 @@ function Get-ProvComments {
         $r = Invoke-PwAb -Path $path -ApiVersion $script:AbCommentsApi
         foreach ($c in @($r.comments)) {
             if ($c.ContainsKey('isDeleted') -and $c.isDeleted) { continue }
-            $all.Add([pscustomobject]@{ Id = [long]$c.id; CreatedAt = [DateTimeOffset]$c.createdDate; Body = [string]$c.text; Author = $c.createdBy.uniqueName })
+            $all.Add([pscustomobject]@{ Id = [long]$c.id; CreatedAt = [DateTimeOffset]$c.createdDate; Body = (Get-PwAbCommentText $c); Author = $c.createdBy.uniqueName })
         }
         $token = if ($r.ContainsKey('continuationToken')) { $r.continuationToken } else { $null }
     } while ($token)
@@ -356,7 +369,7 @@ function Get-ProvComments {
 function Add-ProvComment {
     param([Parameter(Mandatory)][string]$Ref, [Parameter(Mandatory)][string]$Body)
     $c = Invoke-PwAb -Method POST -Path "_apis/wit/workItems/$Ref/comments?format=markdown" -Body @{ text = $Body } -ApiVersion $script:AbCommentsApi
-    [pscustomobject]@{ Id = [long]$c.id; CreatedAt = [DateTimeOffset]$c.createdDate; Body = [string]$c.text; Url = $null }
+    [pscustomobject]@{ Id = [long]$c.id; CreatedAt = [DateTimeOffset]$c.createdDate; Body = (Get-PwAbCommentText $c); Url = $null }
 }
 
 function Remove-ProvComment {

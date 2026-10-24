@@ -6,10 +6,11 @@
 # the tags already there, and answers a type the project doesn't have with an error. Once a patch makes an
 # item's description Markdown, it hands that description back the way the service does, with each " and >
 # outside an HTML tag as an entity (&quot;, &gt;: the two seen on the service), not as it was written. It
-# keeps work item comments too (list in pages with a continuation token, post, delete), stamped by its own
-# clock ($script:FakeAb.Clock, which the tests move and which needn't match the local one), and every
-# answer carries that clock as its Date header, in whole seconds. Each comment post and delete is a
-# revision of the work item, as on the service. Every call is logged in $script:FakeAbCalls.
+# keeps work item comments too (list in pages with a continuation token, post, delete), each with its
+# format: a Markdown one comes back with the same entities, an HTML one as it was posted. Comments are
+# stamped by the fake's own clock ($script:FakeAb.Clock, which the tests move and which needn't match the
+# local one), and every answer carries that clock as its Date header, in whole seconds. Each comment post
+# and delete is a revision of the work item, as on the service. Every call is logged in $script:FakeAbCalls.
 
 $script:FakeAb = @{
     Next   = 1
@@ -80,6 +81,13 @@ function Join-FakeAbTags {
     $tags -join '; '
 }
 
+function ConvertTo-FakeAbEscaped {
+    <# Markdown text as the service hands it back: each " and > outside an HTML tag as an entity. Tags such as
+       <details> stay as they are. #>
+    param([string]$Text)
+    [regex]::Replace($Text, '</?[A-Za-z][^<>]*>|"|>', { param($m) switch ($m.Value) { '"' { '&quot;' } '>' { '&gt;' } default { $m.Value } } })
+}
+
 function New-FakeAbItem {
     <# A work item made by the test, as someone made it on the board. #>
     param([Parameter(Mandatory)][string]$Type, [string]$Title = '', [string]$Tags = '', [string]$State = '', [int]$Parent = 0)
@@ -130,17 +138,19 @@ function Set-FakeAbOps {
     }
     $item.markdown = $markdown
     if ($markdown -and $described) {
-        $item.fields['System.Description'] = [regex]::Replace([string]$item.fields['System.Description'], '</?[A-Za-z][^<>]*>|"|>', { param($m) switch ($m.Value) { '"' { '&quot;' } '>' { '&gt;' } default { $m.Value } } })
+        $item.fields['System.Description'] = ConvertTo-FakeAbEscaped ([string]$item.fields['System.Description'])
     }
     $item.rev++
 }
 
 function Add-FakeAbComment {
-    <# A comment on a work item, stamped by the fake's clock (or -At), as -By posted it. #>
-    param([Parameter(Mandatory)][int]$Id, [Parameter(Mandatory)][string]$Text, [string]$By = $script:FakeAb.User, $At = $null)
+    <# A comment on a work item, stamped by the fake's clock (or -At), as -By posted it in -Format: a Markdown
+       one (as the kit posts them) kept the way the service hands it back, an HTML one (as the web UI posts
+       them) as given. #>
+    param([Parameter(Mandatory)][int]$Id, [Parameter(Mandatory)][string]$Text, [string]$By = $script:FakeAb.User, $At = $null, [ValidateSet('markdown', 'html')][string]$Format = 'markdown')
     if (-not $script:FakeAb.Items.ContainsKey($Id)) { throw "TF401232: work item $Id does not exist" }
     if (-not $script:FakeAb.Comments.ContainsKey($Id)) { $script:FakeAb.Comments[$Id] = [System.Collections.Generic.List[object]]::new() }
-    $c = @{ id = $script:FakeAb.NextComment++; workItemId = $Id; text = $Text; createdDate = $(if ($At) { [DateTimeOffset]$At } else { $script:FakeAb.Clock }).ToString('o'); createdBy = @{ uniqueName = $By }; isDeleted = $false }
+    $c = @{ id = $script:FakeAb.NextComment++; workItemId = $Id; text = $(if ($Format -eq 'markdown') { ConvertTo-FakeAbEscaped $Text } else { $Text }); format = $Format; createdDate = $(if ($At) { [DateTimeOffset]$At } else { $script:FakeAb.Clock }).ToString('o'); createdBy = @{ uniqueName = $By }; isDeleted = $false }
     $script:FakeAb.Comments[$Id].Add($c)
     $script:FakeAb.Items[$Id].rev++
     $c
@@ -183,7 +193,7 @@ function Invoke-PwAb {
             return $r
         }
         if ($Method -eq 'POST' -and -not $cid) {
-            $c = Add-FakeAbComment -Id $id -Text $Body.text
+            $c = Add-FakeAbComment -Id $id -Text $Body.text -Format $(if ($q -match '(?:^|&)format=markdown(?:&|$)') { 'markdown' } else { 'html' })
             if ($script:FakeAb.OnComment) { $hook = $script:FakeAb.OnComment; $script:FakeAb.OnComment = $null; & $hook $c }
             return (@{} + $c)
         }
