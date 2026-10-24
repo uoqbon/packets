@@ -33,6 +33,11 @@ function Invoke-Kit([string]$Script, [string[]]$KitArgs) {
     $out = & pwsh -NoProfile -File $Script @KitArgs 2>&1
     [pscustomobject]@{ Code = $LASTEXITCODE; Text = ($out | ForEach-Object { "$_" }) -join "`n" }
 }
+# Invoke-Kit under another culture, set inside the child (on Windows the environment can't set it). The
+# script is dot-sourced, so its functions are found as under `pwsh -File`; its own exit sets the code.
+$cultureRun = Join-Path ([System.IO.Path]::GetTempPath()) "pw-culture-$([guid]::NewGuid().ToString('n')).ps1"
+Set-Content -LiteralPath $cultureRun -Value "param([string]`$Culture, [string]`$Script)`n[cultureinfo]::CurrentCulture = `$Culture`n. `$Script @args`nexit 0"
+function Invoke-KitIn([string]$Culture, [string]$Script, [string[]]$KitArgs) { Invoke-Kit $cultureRun (@($Culture, $Script) + $KitArgs) }
 function Write-File([string]$Path, [string]$Text) {
     $full = Join-Path $repo $Path
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $full) | Out-Null
@@ -254,6 +259,16 @@ Click through it.
     $r = Invoke-Kit $board @('claim', 'PKT-01', 'session-c')
     Assert-That ($r.Code -eq 0) 'after release another session can hold' $r.Text
     [void](Invoke-Kit $board @('release', 'PKT-01', 'session-c'))
+    # Claim times and ids read the same whatever the culture: Thai counts years in the Buddhist era, and
+    # Finnish separates hours, minutes and seconds with dots.
+    $year = [DateTime]::UtcNow.Year
+    foreach ($culture in 'th-TH', 'fi-FI') {
+        $h = Invoke-KitIn $culture $board @('claim', 'PKT-01', 'session-d')
+        $l = Invoke-KitIn $culture $board @('claims', 'PKT-01')
+        $n = Invoke-KitIn $culture $board @('new-claim-id')
+        [void](Invoke-Kit $board @('release', 'PKT-01', 'session-d'))
+        Assert-That ($h.Text -match "^HOLD session-d $year-\d\d-\d\dT\d\d:\d\d:\d\dZ " -and $l.Text -match "^session-d $year-\d\d-\d\dT\d\d:\d\d:\d\dZ \d+ \(" -and $n.Text -match "^session-[0-9a-f]{8}-$year\d{4}T\d{6}Z-\d+$") "claim times and claim ids are in the invariant format under $culture" "$($h.Text)`n$($l.Text)`n$($n.Text)"
+    }
 
     Write-Host 'board: set, marker, reconcile'
     $r = Invoke-Kit $board @('set', 'PKT-01', 'Status=In progress')
@@ -687,6 +702,11 @@ if ($a[0] -eq 'api' -and $path -match '/issues/(\d+)/comments') { ConvertTo-Json
         $r = Invoke-Kit $progress @('-WorkingTree', '-Credits', '-Today', '2026-09-30', '-Json')
         $c = ($r.Text | ConvertFrom-Json).Credits
         Assert-That ($r.Code -eq 0 -and $c.Month -eq '2026-09' -and $c.ThisMonth -eq 1580) 'a round reported at 23:30 UTC on 30 September counts in September, with its packet''s base' $r.Text
+        # -Today is a Gregorian date under any culture: read as a Buddhist-era year, October 2026 would be
+        # October 1483, and no round would fall in it.
+        $r = Invoke-KitIn 'th-TH' $progress @('-WorkingTree', '-Credits', '-Today', '2026-10-20', '-Json')
+        $pj = try { $r.Text | ConvertFrom-Json } catch { $null }
+        Assert-That ($r.Code -eq 0 -and $pj -and $pj.Today -eq '2026-10-20' -and $pj.Credits.Month -eq '2026-10' -and $pj.Credits.ThisMonth -eq 1371) 'progress reads -Today and writes its dates the same under a Thai culture' $r.Text
         $r = Invoke-Kit $progress @('-WorkingTree', '-Credits')
         Assert-That ($r.Code -eq 0 -and $r.Text -match 'PKT-02\s+M\s+PR #12\s+1 round\(s\), 1 reviewer run\(s\), 2 implementer run\(s\)\s+768\s+\(in review\)' -and $r.Text -match "phase 2,951 · 2,183 per finished packet · $([DateTime]::UtcNow.ToString('yyyy-MM')):") 'progress -Credits text: the estimate per packet and the UTC month by default' $r.Text
 
@@ -1304,6 +1324,16 @@ $edited = $amended.Replace('Returns', 'Now returns')
 $read = @(Get-ProvItems -Refresh) | Where-Object { $_.Id -eq 'PKT-01' }
 "d-edited=$($read.Body -ceq $edited)"
 
+# 11. A Target date field reads back as the Gregorian date sync compares with the packet's, whatever the
+# culture (a Thai one counts years in the Buddhist era). The field holds a UTC date, as a REST read parses it.
+Reset-Board (New-TestConfig @{ targetDateField = 'Microsoft.VSTS.Scheduling.TargetDate' })
+$due = New-FakeAbItem 'User Story' 'PKT-01 · Work' -Tags 'packet'
+$script:FakeAb.Items[$due].fields['Microsoft.VSTS.Scheduling.TargetDate'] = [DateTime]::new(2026, 10, 29, 0, 0, 0, [DateTimeKind]::Utc)
+$culture = [cultureinfo]::CurrentCulture
+try { [cultureinfo]::CurrentCulture = 'th-TH'; $read = @(Get-ProvItems -Refresh) | Where-Object { $_.Id -eq 'PKT-01' } }
+finally { [cultureinfo]::CurrentCulture = $culture }
+"t-target=$($read.Target)"
+
 # 10. A Markdown comment comes back with " and > as entities too. A brief is one: the dispatcher writes it out
 # again from its marker comment (board marker) for the implementer, who types its commands as written. A
 # comment typed in the web UI is HTML and reads back as stored: decoded, the text in it would read as markup.
@@ -1404,6 +1434,7 @@ Assert-That ((& $abGet 'c-late-view') -eq 'LOST:session-b|HOLD:session-b:renewed
 Assert-That ((& $abGet 'c-skew-ahead') -eq 'HOLD:session-s:renewed,HOLD:session-s:kept,HOLD:session-s:renewed|live=2') 'Azure claims: with the board''s clock five hours ahead, keep and renew still follow the board''s clock' (& $abGet 'c-skew-ahead')
 Assert-That ((& $abGet 'd-created') -eq 'True|True|True') 'Azure descriptions: a Markdown body stored with " and > as entities reads back exactly as written, so sync doesn''t take it for an edit made on the board' (& $abGet 'd-created')
 Assert-That ((& $abGet 'd-updated') -eq 'True' -and (& $abGet 'd-edited') -eq 'True') 'Azure descriptions: so does a body sync updates, and an edit made on the board reads back as that edit' "$(& $abGet 'd-updated')`n$(& $abGet 'd-edited')"
+Assert-That ((& $abGet 't-target') -eq '2026-10-29') 'Azure Target dates read back in the Gregorian calendar under a Thai culture' (& $abGet 't-target')
 Assert-That ((& $abGet 'm-brief') -eq 'True|True|True|True|True|pkt/pkt-09-reading-time') 'Azure comments: a Markdown brief stored with " and > as entities reads back exactly as posted, from the post, the list and its marker; neither an untrusted brief nor an HTML comment quoting a marker as text takes its place' (& $abGet 'm-brief')
 Assert-That ((& $abGet 'm-html') -eq 'True|needs-human|trusted=3') 'Azure comments: an HTML comment typed in the web UI reads back as stored, and its <code> marker still counts' (& $abGet 'm-html')
 Assert-That ((& $abGet 'setup') -match 'hierarchy: Epic > Feature > User Story > Task' -and (& $abGet 'setup') -match "'Task' has every mapped state \(New, Active, Closed\)" -and (& $abGet 'setup') -match "'User Story' has every mapped state \(New, Active, Resolved, Closed\)") 'setup checks the hierarchy''s types, the task type against taskStatusMap' (& $abGet 'setup')
@@ -1536,6 +1567,7 @@ else {
     Assert-That (-not $wsErrors) 'no kit file has trailing whitespace or a blank line at the end' (@($wsErrors) -join "`n")
 }
 
+Remove-Item -LiteralPath $cultureRun -ErrorAction SilentlyContinue
 Write-Host ''
 Write-Host "$($script:passes) passed, $($script:failures) failed"
 if ($script:failures) { exit 1 }
