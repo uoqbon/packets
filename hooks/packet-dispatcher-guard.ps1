@@ -23,7 +23,8 @@
 
 $ErrorActionPreference = 'Stop'
 try {
-    $raw = [Console]::In.ReadToEnd()
+    # Windows PowerShell pipes the call on with a UTF-8 byte order mark in front, which ConvertFrom-Json rejects.
+    $raw = [Console]::In.ReadToEnd().TrimStart([char]0xFEFF)
     if (-not $raw.Trim()) { exit 0 }
     $call = $raw | ConvertFrom-Json -AsHashtable
     if ($call -isnot [System.Collections.IDictionary]) { exit 0 }

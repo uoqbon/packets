@@ -1574,7 +1574,9 @@ try {
         '{"toolName":"task","toolArgs":"{\"agent_type\":\"packet-dispatcher\",\"name\":\"x\",\"prompt\":\"status\",\"mode\":\"sync\"}"}'
         '{"toolName":"task","toolArgs":{"agent_type":"packet-dispatcher","prompt":"status"}}'
         '{"hook_event_name":"PreToolUse","tool_name":"Agent","tool_input":{"subagent_type":"Packet-Dispatcher"}}'
-        '{"tool_name":"runSubagent","tool_input":{"agentName":"packet-dispatcher","prompt":"dispatch"}}')
+        '{"tool_name":"runSubagent","tool_input":{"agentName":"packet-dispatcher","prompt":"dispatch"}}'
+        # As Windows PowerShell hands it on: after a byte order mark.
+        "$([char]0xFEFF){`"toolName`":`"task`",`"toolArgs`":{`"agent_type`":`"packet-dispatcher`"}}")
     $pass = @(
         '{"toolName":"task","toolArgs":{"agent_type":"packet-implementer","prompt":"the brief names packet-dispatcher"}}'
         '{"toolName":"task","toolArgs":"{\"agent_type\":\"packet-reviewer-deep\"}"}'
