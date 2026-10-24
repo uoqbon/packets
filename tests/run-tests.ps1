@@ -1287,6 +1287,23 @@ $script:FakeAb.OnComment = { param($c) [void](Add-FakeAbComment -Id $wi7 -Text '
 "c-late-view=$(Claim 'session-a')|$(Claim 'session-b')"
 $script:FakeAb.CommentPage = 200
 
+# 9. A Markdown description comes back with " and > as entities. Sync's check for edits made on the board
+# hashes the body it reads back, so that body must be the one sync wrote, and must still show a real edit.
+Reset-Board (New-TestConfig)
+$body = "Returns ""cafe"" for ""Café"" -> a slug.`n`n<details>`n<summary>Notes</summary>`nKeep it.`n</details>"
+$item = New-ProvItem -Packet (P 'PKT-01') -Title 'PKT-01 · Work' -Body $body
+$stored = [string]$script:FakeAb.Items[$item.Number].fields['System.Description']
+$read = @(Get-ProvItems -Refresh) | Where-Object { $_.Id -eq 'PKT-01' }
+"d-created=$($stored -match '&quot;cafe&quot; .* -&gt; a slug' -and $stored -match '(?m)^<details>$')|$($item.Body -ceq $body)|$($read.Body -ceq $body)"
+$amended = $body.Replace('-> a slug', '-> "a slug"')
+Update-ProvItem -Item $read -Packet (P 'PKT-01') -Title 'PKT-01 · Work' -Body $amended
+$read = @(Get-ProvItems -Refresh) | Where-Object { $_.Id -eq 'PKT-01' }
+"d-updated=$($read.Body -ceq $amended)"
+$edited = $amended.Replace('Returns', 'Now returns')
+[void](Invoke-PwAb -Method PATCH -Path "_apis/wit/workitems/$($item.Number)" -Body @(@{ op = 'add'; path = '/fields/System.Description'; value = $edited }) -ContentType 'application/json-patch+json')
+$read = @(Get-ProvItems -Refresh) | Where-Object { $_.Id -eq 'PKT-01' }
+"d-edited=$($read.Body -ceq $edited)"
+
 # 5. Setup checks each level's type, and the task type against its own map.
 Reset-Board (New-TestConfig)
 "setup=$((Initialize-ProvBoard) -join ' | ')"
@@ -1355,6 +1372,8 @@ Assert-That ((& $abGet 'c-leftover-floor') -eq 'HOLD:session-b:2|HOLD:session-a:
 Assert-That ((& $abGet 'c-leftover-stall') -eq 'LOST:session-b') 'Azure claims: a renewal that stalls past the lease measures it again and doesn''t defer' (& $abGet 'c-leftover-stall')
 Assert-That ((& $abGet 'c-late-view') -eq 'LOST:session-b|HOLD:session-b:renewed') 'Azure claims: a winning claim that shows up late is a LOST, never a deferral' (& $abGet 'c-late-view')
 Assert-That ((& $abGet 'c-skew-ahead') -eq 'HOLD:session-s:renewed,HOLD:session-s:kept,HOLD:session-s:renewed|live=2') 'Azure claims: with the board''s clock five hours ahead, keep and renew still follow the board''s clock' (& $abGet 'c-skew-ahead')
+Assert-That ((& $abGet 'd-created') -eq 'True|True|True') 'Azure descriptions: a Markdown body stored with " and > as entities reads back exactly as written, so sync doesn''t take it for an edit made on the board' (& $abGet 'd-created')
+Assert-That ((& $abGet 'd-updated') -eq 'True' -and (& $abGet 'd-edited') -eq 'True') 'Azure descriptions: so does a body sync updates, and an edit made on the board reads back as that edit' "$(& $abGet 'd-updated')`n$(& $abGet 'd-edited')"
 Assert-That ((& $abGet 'setup') -match 'hierarchy: Epic > Feature > User Story > Task' -and (& $abGet 'setup') -match "'Task' has every mapped state \(New, Active, Closed\)" -and (& $abGet 'setup') -match "'User Story' has every mapped state \(New, Active, Resolved, Closed\)") 'setup checks the hierarchy''s types, the task type against taskStatusMap' (& $abGet 'setup')
 Assert-That ((& $abGet 'setup-nomap') -match "MISSING states on 'Task': Resolved .*give the task type its own taskStatusMap") 'without taskStatusMap, setup names the missing task state and the fix' (& $abGet 'setup-nomap')
 Assert-That ((& $abGet 'cfg-template') -eq 'ok' -and (& $abGet 'cfg-task-map') -match "taskStatusMap needs a state for 'Ready to merge'") 'the config refuses an incomplete taskStatusMap' "$(& $abGet 'cfg-template')`n$(& $abGet 'cfg-task-map')"

@@ -135,6 +135,11 @@ function ConvertTo-PwAbItem {
     $target = $null
     if ($ab.targetDateField -and $f.Contains($ab.targetDateField) -and $f[$ab.targetDateField]) { $target = ([DateTime]$f[$ab.targetDateField]).ToString('yyyy-MM-dd') }
     $body = if ($f.Contains('System.Description')) { [string]$f['System.Description'] } else { '' }
+    # The service hands a Markdown description back with " and > as entities (&quot;, &gt;). Decoded, it is
+    # the text sync wrote, so sync's hash finds only the edits someone made on the board. HtmlDecode undoes
+    # every entity, as for an escaped & or <; were an entity typed in the packet itself handed back as it is,
+    # sync would report the item as edited and skip it, never overwrite it.
+    if ($ab.markdown) { $body = [System.Net.WebUtility]::HtmlDecode($body) }
     if (-not $target -and $body -match '\*\*Target:\*\*\s*(?<d>\d{4}-\d{2}-\d{2})') { $target = $Matches.d }
     $done = $ab.doneStates -contains $state
     [pscustomobject]@{
