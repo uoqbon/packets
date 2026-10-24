@@ -8,12 +8,13 @@ The first release: the dispatcher, the implementer and three reviewer agents; th
 
 ### If you installed the kit before this release
 
-`VERSION` has read 0.1.0 since the kit moved to this repository ([#1]), so an install made from `main` before this release records 0.1.0 too, with older files. To upgrade, check out `v0.1.0` and run the installer again. What changes for you:
+`VERSION` has read 0.1.0 since the kit moved to this repository ([#1]), so an install made from `main` before this release records 0.1.0 too, with older files. To upgrade, fetch the tag and check it out (`git -C packets fetch --tags`, then `git -C packets checkout v0.1.0`), and run the installer again. What changes for you:
 
 - **Start and resume a dispatch with `/packet-dispatch`.** The dispatch skill stops when no person started it, and it has refused a person's plain `dispatch` ([#16], [#23]).
 - **The installer adds a hook:** `.github/hooks/packet-workflow.json` and `packet-dispatcher-guard.ps1`. Commit them with the rest of the kit ([#23]).
 - **Three review tiers instead of four.** The installer removes `packet-reviewer-max` unless you changed it. A packet or a previous round at tier 4 reads as tier 3; move a `review.agents."4"` of your own to `"3"` ([#3]).
-- **Agent models still come from your `models` map.** The installer never rewrites an existing `.github/packet-workflow.json`. The template now lists GPT-6.1 Sol first in every class, and a class your config leaves out gets that default ([#2]).
+- **Agent models still come from your `models` map.** The installer never rewrites an existing `.github/packet-workflow.json`. The template now lists GPT-6.1 Sol first in every class, and a class your `models` map leaves out gets the template's new list ([#2]).
+- **Azure Boards with an epic root: the board gets a tree.** Packets now go under a Feature per workstream, not straight under the epic. Sync names each item that sits elsewhere and leaves it there. Run `board sync -DryRun -Force` to see the moves, move any edits made on the board into the packet files, then run `board sync -Force` once; it also overwrites bodies edited on the board. On the Basic process, first set `board.azureBoards.featureWorkItemType` to `""`, or sync stops before it writes ([#5]).
 
 ### Added
 
@@ -26,8 +27,9 @@ The first release: the dispatcher, the implementer and three reviewer agents; th
 
 - **Three review tiers,** light, standard and deep, none above high reasoning effort. The deep reviewer takes over `packet-reviewer-max`'s adversarial checks ([#3]).
 - **Default models:** GPT-6.1 Sol first in every class, Claude Sonnet 5.5 second ([#2]).
+- **Sync never moves an item that has another parent,** on any board. It names the item and leaves it there; `sync -DryRun -Force` lists the moves and `sync -Force` makes them. On GitHub, sync used to add a second parent, which GitHub refused, and stop. A GitHub or local dry run now reads the board and prints what it would link and move ([#5], [#6]).
 - **Claims renew only when due,** by the board's clock: `board claim` posts a renewal once a third of the lease has passed, not at every milestone ([#12]).
-- **`/packet-dispatch status` runs on a checkout with untracked files.** A dispatch or a resume still stops on one ([#20]).
+- **`/packet-dispatch status` runs on a checkout that isn't clean.** A dispatch or a resume still stops on one ([#20]).
 
 ### Fixed
 
