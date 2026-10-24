@@ -34,7 +34,7 @@ Inputs (if one is still a literal `${input:…}` placeholder, ask me for it befo
 6. **Stop at every checkpoint** marked ⏸. Tell me in a short numbered list exactly what to do, and what to type when I come back (`/packet-kit-e2e <next stage>`, or paste this prompt again with that stage).
 7. Shell variables don't survive between terminal calls. Note values (packet IDs, PR numbers, SHAs) in `state.md` and type them literally later.
 
-Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`, or `HOST` where a check allows it: the kit is right and the host doesn't honour it) and evidence. On `FAIL`, record what you expected, what happened, and the kit file and line you think is responsible. Then carry on with the stage unless a later check depends on the failed one.
+Each check gets an ID (`S2.3`), a result (`PASS`, `FAIL`, `BLOCKED`, `MANUAL`, or `HOST` where a check allows it: the kit is right and the host doesn't honour it, or doesn't show what the check needs) and evidence. On `FAIL`, record what you expected, what happened, and the kit file and line you think is responsible. Then carry on with the stage unless a later check depends on the failed one.
 
 ## Stage 1 · Environment and discovery
 
@@ -120,9 +120,10 @@ Work:
 3. Title case (after 1, in parallel with 2): src/textkit/TitleCase.ps1 with `ConvertTo-TitleCase
    [string]$Text` -> string, using Split-Words; small words (a, an, the, of, and, or, in) stay lower case
    except as the first word. Tests: tests/titlecase.tests.ps1.
-4. Slow path (optional, behind the cut line): src/textkit/Stats.ps1 with `Measure-Text` returning word
-   count and average word length, which must run in under 0 milliseconds for any input. Tests:
-   tests/stats.tests.ps1.
+4. Slow path (optional, behind the cut line): src/textkit/Stats.ps1 with `Measure-Text [string]$Text` ->
+   an object with `Words` (the Split-Words count) and `AverageLength` (their mean length in characters, as
+   `[Math]::Round(<mean>, 2)` gives it); both 0 when there are no words (null, empty, whitespace-only or
+   punctuation-only input). It must run in under 0 milliseconds for any input. Tests: tests/stats.tests.ps1.
 5. A person reads the output of 2 and 3 on three real paragraphs and says whether it looks right.
 
 Shared file: src/textkit/TextKit.ps1 dot-sources each module, one line per module; each packet adds its own line.
@@ -159,14 +160,74 @@ Item 4's criterion can't be met on purpose: stage 7 uses it to check the Needs h
    - **S5.8 Hand-off:** if Ready to merge, `board marker <ID> handoff -Json` has `head` equal to the PR head, and `gh pr checks <pr>` shows every check passed on that head.
    - **S5.9 No merge:** the PR is not merged and has no approving review from the agent.
    - **S5.10 Commits:** the commit subjects are clear; any fix commits are named `Round-<N> review fixes (<ID>)`; the decision record exists.
-   - **S5.11 Models:** ask me which model the implementer and each reviewer ran on (the subagent's header in the dispatcher session shows it), and compare with the class each agent belongs to in `models`. If the pinned models weren't offered, the dispatcher asked me once for all three classes before the implementer started, instead of choosing per agent, and it named the models in its final message. Each round report's header names the reviewers' model.
+   - **S5.11 Models:** ask me which model the implementer and each reviewer ran on (the subagent's header in the dispatcher session shows it, on a host that shows one), and compare with the class each agent belongs to in `models`. If the pinned models weren't offered, the dispatcher asked me once for all three classes before the implementer started, instead of choosing per agent, and it named the models in its final message. Each round report's header names the reviewers' model.
+
+     A model named in a round report or in the final message is the one the agent was told to use (its `model:` line, or my answer), not proof of the one that ran. If neither of us can see which model a subagent ran on, record `HOST`, but only if everything else here holds. That means no header shows it, and the host's session or logs don't either. Record:
+     - the harness and versions, as S1.4 records them;
+     - where we looked;
+     - the models the round reports and the final message name.
+
+     A named model below the agent's class, a model chosen per agent, or a report header with no model is still `FAIL`.
    - **S5.12 Contract questions:** if a round confirmed a finding about something the foundation **Provides** that wasn't fixed, its follow-up is titled `<ID> contract: …`, carries the `needs-human` label as well as `follow-up`, and names the feature packets; the hand-off comment has a `Decide before … start` line. Otherwise record N/A.
 3. ⏸ If S5.12 found a contract question, ask me to answer it on the issue and remove its `needs-human` label (or close it) before the feature packets start; until then `/packet-dispatch status` and `/packet-progress` should list it as blocking them. Then ask me to merge the PR. Then: `board reconcile` makes the item Done, and `board next -Phase e2e-textkit` shows both feature packets `START`.
 
 ## Stage 6 · Two dispatchers in parallel, then a conflict
 
-1. ⏸ Ask me to open **two** new worktree sessions, both packet-dispatcher, and to type `dispatch` in both at about the same moment, without naming a packet.
-2. While they run, check claims from here: `board claims <ID>` for each feature packet shows exactly one live claim id each (a refresh repeats the same id), and different ids for the two packets. Each id looks like `session-<8 hex>-<UTC time>-<number>` and doesn't contain this machine's host name (`hostname`). Then `board claim <ID> e2e-probe` on one of them must print `LOST` with exit 1 and leave no comment behind (`board claims <ID>` again).
+1. The claims live only while the dispatchers run, and your turn ends at the checkpoint, so a watcher has to read them for you. Before you stop, write `.packet-e2e/claim-watch.ps1`:
+
+   ```powershell
+   # claim-watch.ps1 -Kit <kit> -Ids <ID>,<ID> [-Every 20] [-Minutes 240]; run it from the repository root.
+   param([Parameter(Mandatory)][string]$Kit, [Parameter(Mandatory)][string]$Ids, [int]$Every = 20, [int]$Minutes = 240)
+   $board = Join-Path $Kit '.github/skills/packet-board/scripts/board.ps1'
+   $log = Join-Path $PSScriptRoot 'claim-watch.log'
+   function Invoke-Board { $out = @(& pwsh -NoProfile -File $board @args 2>&1 | ForEach-Object { "$_" }); [pscustomobject]@{ Code = $LASTEXITCODE; Out = $out } }
+   function Write-Log([string]$Text) { Add-Content -LiteralPath $log -Value "$([DateTime]::UtcNow.ToString('s'))Z $Text" }
+   $list = @($Ids -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
+   $seen = @{}; $tries = 0; $lost = $false; $end = [DateTime]::UtcNow.AddMinutes($Minutes)
+   Write-Log "start $($list -join ' ') every ${Every}s for ${Minutes}m"
+   while ([DateTime]::UtcNow -lt $end) {
+       $live = 0
+       foreach ($id in $list) {
+           $r = Invoke-Board claims $id
+           Write-Log "claims $id exit=$($r.Code) $($r.Out -join ' | ')"
+           # A failed read says nothing about the claims, so it doesn't let the watcher stop.
+           if ($r.Code -ne 0) { $live++; continue }
+           # Only claim lines count, not a warning the script printed. (The time separator follows the locale.)
+           $held = @($r.Out | Where-Object { $_ -match '^\S+ \d{4}-\d\d-\d\dT\d\d\D\d\d\D\d\dZ \S+ \(-?\d+m ago\)$' })
+           if (-not $held.Count) { continue }
+           $live++; $seen[$id] = $true
+           if ($lost -or $tries -ge 3) { continue }
+           # One probe while a claim is live: it must lose. Anything else gives the packet back at once.
+           $tries++
+           $p = Invoke-Board claim $id e2e-probe
+           Write-Log "probe $id exit=$($p.Code) $($p.Out -join ' | ')"
+           if ($p.Code -eq 1) { $lost = $true }
+           else { $x = Invoke-Board release $id e2e-probe; Write-Log "release $id exit=$($x.Code) $($x.Out -join ' | ')" }
+           $a = Invoke-Board claims $id
+           Write-Log "after-probe $id exit=$($a.Code) $($a.Out -join ' | ')"
+       }
+       if ($seen.Count -eq $list.Count -and $live -eq 0) { break }
+       Start-Sleep -Seconds $Every
+   }
+   Write-Log 'stop'
+   ```
+
+   Start it for the two feature packets, from the repository root, so it keeps running after your turn ends. Note its process id in `state.md`:
+   - macOS or Linux: `nohup pwsh -NoProfile -File .packet-e2e/claim-watch.ps1 -Kit '<kit>' -Ids '<ID>,<ID>' > /dev/null 2>&1 & echo $!`
+   - Windows: `(Start-Process pwsh -WindowStyle Hidden -PassThru -ArgumentList '-NoProfile -File .packet-e2e/claim-watch.ps1 -Kit "<kit>" -Ids "<ID>,<ID>"').Id`
+
+   Then check that `.packet-e2e/claim-watch.log` has its `start` line and a first `claims` line with `exit=0` for each packet. Any other exit means it can't read the board: stop it, fix the cause, and start it again.
+
+   It reads `board claims` for both packets every 20 seconds, and counts only lines in that command's claim format. The first time a packet shows a live claim, it runs `board claim <ID> e2e-probe` on it once, then reads that packet's claims again. If the probe doesn't lose, it releases the probe's claim at once (`board release <ID> e2e-probe`) and probes the next live claim, at most three times. It stops once both packets have shown a claim and a read of each shows none, or after four hours; a read that fails doesn't count as none. The probe is the only thing it writes.
+
+   ⏸ Then ask me to open **two** new worktree sessions, both packet-dispatcher, and to type `dispatch` in both at about the same moment, without naming a packet.
+2. When I'm back, stop the watcher if the log has no `stop` line yet (`kill <pid>`, or `Stop-Process -Id <pid>`). Then judge from the log:
+   - each feature packet's `claims` lines show one holder's claim id throughout; a renewal repeats the same id on a newer line. Both dispatchers may go for the same packet first, and the loser's claim check posts its comment, reads, and deletes it. So a second id on one read that's gone on the next is that losing check, not a second holder; record it. A second id on two reads in a row is FAIL;
+   - the two packets' ids differ;
+   - each id looks like `session-<8 hex>-<UTC time>-<number>` and doesn't contain this machine's host name (`hostname`);
+   - a `probe` line shows `LOST` with exit 1, on a packet whose `claims` line just before was live, and its `after-probe` line has no `e2e-probe` claim: it left no comment behind.
+
+   A probe that held (exit 0) while its `after-probe` line still shows the dispatcher's claim is FAIL: there were two holders. One after which that claim is gone was a race with its release, and the watcher gave the claim back at once; record it. If no packet ever showed a live claim, or no probe lost, S6.2 is `BLOCKED` with the log, never `PASS`.
 3. When both have finished, run the stage 5 checks (S5.1 to S5.10) for both packets. Also check that their changed files are disjoint, apart from `src/textkit/TextKit.ps1`, where each added exactly one line (`gh pr diff <pr>`).
 4. ⏸ Ask me to merge the first PR only. The second PR now conflicts in `TextKit.ps1`, or is behind the default branch.
 5. ⏸ Ask me to run `resume <second ID>` in a packet-dispatcher session in that packet's worktree. When I'm back, check:
@@ -219,7 +280,7 @@ Write `.packet-e2e/report.md` and show it to me:
 1. **Summary:** the date, the sandbox, the board provider, the harness, the models used, and the number of checks per result (PASS, FAIL, BLOCKED, MANUAL, HOST).
 2. **Results table:** check ID, what it checks, result, and evidence (the command and its deciding line, or a PR or comment link).
 3. **Failures:** one entry each, with expected against actual, the most likely kit file and line, and a suggested change.
-4. **Host limitations:** one entry per `HOST` result, with the fields its check records. No kit change is suggested; name what the kit does instead, and whether a check tested it (for S1.4: the dispatcher's guard, and the result of stage 8 item 7).
+4. **Host limitations:** one entry per `HOST` result, with the fields its check records. No kit change is suggested; name what the kit does instead, and whether a check tested it (for S1.4: the dispatcher's guard, and the result of stage 8 item 7; for S5.11: the models the round reports and the final message name, which say what was asked for, not what ran).
 5. **Copilot behaviour notes:** how skills were discovered and invoked; whether subagents ran in parallel; any tool or model the agent files name that wasn't available; anything an agent did that its instructions forbid, or skipped although they require it; prompts where the agent needed my help.
 6. **Clean-up list for me:** branches, worktrees (`git worktree list`), temp folders, open PRs, and the sandbox items to close or delete. Remove nothing yourself.
 
