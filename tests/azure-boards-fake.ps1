@@ -3,11 +3,13 @@
 # work items, their revisions, their states per type and their links. Like Azure DevOps it keeps both
 # ends of a link (and gives both a new revision), refuses a second parent, applies a patch only when its
 # revision test passes, refuses a state the item's type doesn't have, merges an 'add' on System.Tags into
-# the tags already there, and answers a type the project doesn't have with an error. It keeps work item
-# comments too (list in pages with a continuation token, post, delete), stamped by its own clock
-# ($script:FakeAb.Clock, which the tests move and which needn't match the local one), and every answer
-# carries that clock as its Date header, in whole seconds. Each comment post and delete is a revision of
-# the work item, as on the service. Every call is logged in $script:FakeAbCalls.
+# the tags already there, and answers a type the project doesn't have with an error. Once a patch makes an
+# item's description Markdown, it hands that description back the way the service does, with each " and >
+# outside an HTML tag as an entity (&quot;, &gt;: the two seen on the service), not as it was written. It
+# keeps work item comments too (list in pages with a continuation token, post, delete), stamped by its own
+# clock ($script:FakeAb.Clock, which the tests move and which needn't match the local one), and every
+# answer carries that clock as its Date header, in whole seconds. Each comment post and delete is a
+# revision of the work item, as on the service. Every call is logged in $script:FakeAbCalls.
 
 $script:FakeAb = @{
     Next   = 1
@@ -103,14 +105,17 @@ function Set-FakeAbOps {
     $item = $script:FakeAb.Items[$Id]
     $saved = @{ fields = @{} + $item.fields; relations = @($item.relations) }
     $others = @{}; foreach ($o in $script:FakeAb.Items.Values) { if ($o.id -ne $Id) { $others[$o.id] = @{ relations = @($o.relations); rev = $o.rev } } }
+    $markdown = [bool]$item['markdown']; $described = $false
     try {
         foreach ($op in @($Ops)) {
             if ($op.op -eq 'test' -and $op.path -eq '/rev') { if ([int]$op.value -ne $item.rev) { throw "TF26071: revision $($op.value) is out of date (now $($item.rev))" }; continue }
+            if ($op.path -eq '/multilineFieldsFormat/System.Description') { $markdown = $op.value -eq 'Markdown'; continue }
             if ($op.path -match '^/multilineFieldsFormat/') { continue }
             if ($op.path -match '^/fields/(?<f>.+)$') {
                 $field = $Matches.f
                 if ($field -eq 'System.State' -and $script:FakeAb.States[$item.fields['System.WorkItemType']] -notcontains $op.value) { throw "TF401320: '$($op.value)' is not a state of $($item.fields['System.WorkItemType'])" }
                 if ($field -eq 'System.Tags' -and $op.op -eq 'add') { $item.fields[$field] = Join-FakeAbTags $item.fields[$field] $op.value; continue }
+                if ($field -eq 'System.Description') { $described = $true }
                 $item.fields[$field] = $op.value; continue
             }
             if ($op.op -eq 'add' -and $op.path -eq '/relations/-') { Add-FakeAbLink $Id $op.value.rel (Get-FakeAbTarget $op.value); continue }
@@ -122,6 +127,10 @@ function Set-FakeAbOps {
         $item.fields = $saved.fields; $item.relations = [System.Collections.Generic.List[object]]::new([object[]]$saved.relations)
         foreach ($k in $others.Keys) { $script:FakeAb.Items[$k].relations = [System.Collections.Generic.List[object]]::new([object[]]$others[$k].relations); $script:FakeAb.Items[$k].rev = $others[$k].rev }
         Stop-FakeAb $Method $Path $_.Exception.Message
+    }
+    $item.markdown = $markdown
+    if ($markdown -and $described) {
+        $item.fields['System.Description'] = [regex]::Replace([string]$item.fields['System.Description'], '</?[A-Za-z][^<>]*>|"|>', { param($m) switch ($m.Value) { '"' { '&quot;' } '>' { '&gt;' } default { $m.Value } } })
     }
     $item.rev++
 }

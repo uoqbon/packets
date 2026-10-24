@@ -74,7 +74,7 @@ The app rewrites that mention into a Markdown link a few seconds after each edit
   | Needs human | Active + `status:needs-human` | In Progress + `status:needs-human` | Doing + `status:needs-human` |
   | Done | Closed | Done | Done |
 - **Tags:** `packet`, `human-task`, `size:<S|M|L>`, `wave:<value>`, `phase:<slug>` and the status tags. Priority uses the Priority field (P0 = 1 … P3 = 4).
-- **Descriptions** are written as Markdown (`markdown: true`, needs an organization with Markdown support for work item fields). With `markdown: false` the packet text goes in as preformatted HTML, and sync can no longer tell a board-side edit from its own, so it always rewrites.
+- **Descriptions** are written as Markdown (`markdown: true`, needs an organization with Markdown support for work item fields). The service returns them with `"` and `>` as HTML entities; the provider decodes them, so sync compares the text it wrote. With `markdown: false` the packet text goes in as preformatted HTML, and sync can no longer tell a board-side edit from its own, so it always rewrites.
 - **Dependencies** become Predecessor links. They don't move items in the tree.
 - **Comments** (claims, briefs) are posted as Markdown comments and deleted through the comments API. Each post and delete is a revision of the work item, which is why `board claim` posts only when a renewal is due.
 - **Untested against a live organization** in the kit's own tests; run `board setup` and a `sync -DryRun` first.
