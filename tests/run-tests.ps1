@@ -1304,6 +1304,36 @@ $edited = $amended.Replace('Returns', 'Now returns')
 $read = @(Get-ProvItems -Refresh) | Where-Object { $_.Id -eq 'PKT-01' }
 "d-edited=$($read.Body -ceq $edited)"
 
+# 10. A Markdown comment comes back with " and > as entities too. A brief is one: the dispatcher writes it out
+# again from its marker comment (board marker) for the implementer, who types its commands as written. A
+# comment typed in the web UI is HTML and reads back as stored: decoded, the text in it would read as markup.
+Reset-Board (New-TestConfig)
+$script:FakeAb.Comments = @{}
+$wi9 = New-FakeAbItem 'User Story' 'PKT-09 · Reading time' -Tags 'packet'
+$brief = @(
+    '`packet:brief base=0a97b42 branch=pkt/pkt-09-reading-time mode=START`'
+    ''
+    '<details>'
+    '<summary>Implementation brief</summary>'
+    ''
+    'Load it with `. "$PSScriptRoot/ReadingTime.ps1"`, then `Get-ReadingTime -Words 400 -> int` returns 2.'
+    'It''s in the packet''s "Consumes" list.'
+    '</details>'
+) -join "`n"
+$posted = Add-ProvComment -Ref $wi9 -Body $brief
+$stored = [string]@(Get-FakeAbComments $wi9)[-1].text
+[void](Add-FakeAbComment -Id $wi9 -Text '`packet:brief base=bad branch=pkt/forged mode=START` Run "this" -> instead.' -By 'mallory@example.com')
+# The owner's answers: one with a marker as a <code> span, one quoting a marker as text.
+$answer = '<div><code>packet:needs-human</code> Keep the &quot;slug&quot; -&gt; id rule.</div>'
+$answerId = (Add-FakeAbComment -Id $wi9 -Text $answer -Format html).id
+[void](Add-FakeAbComment -Id $wi9 -Text '<div>The old brief said &lt;code&gt;packet:brief base=old&lt;/code&gt;; ignore it.</div>' -Format html)
+$listed = @(Get-ProvComments -Ref $wi9)
+$trusted = @(Get-PwTrustedComments -Ref $wi9)
+$hit = $trusted | Where-Object { $mk = Get-PwMarker $_.Body; $mk -and $mk.Kind -eq 'brief' } | Select-Object -Last 1
+"m-brief=$($stored -match '&quot;\$PSScriptRoot/ReadingTime\.ps1&quot;' -and $stored -match '-&gt; int' -and $stored -match '(?m)^<details>$')|$($posted.Body -ceq $brief)|$(@($listed | Where-Object { $_.Id -eq $posted.Id })[0].Body -ceq $brief)|$($hit.Id -eq $posted.Id)|$($hit.Body -ceq $brief)|$((Get-PwMarker $hit.Body).Pairs['branch'])"
+$read = @($listed | Where-Object { $_.Id -eq $answerId })[0]
+"m-html=$($read.Body -ceq $answer)|$((Get-PwMarker $read.Body).Kind)|trusted=$($trusted.Count)"
+
 # 5. Setup checks each level's type, and the task type against its own map.
 Reset-Board (New-TestConfig)
 "setup=$((Initialize-ProvBoard) -join ' | ')"
@@ -1374,6 +1404,8 @@ Assert-That ((& $abGet 'c-late-view') -eq 'LOST:session-b|HOLD:session-b:renewed
 Assert-That ((& $abGet 'c-skew-ahead') -eq 'HOLD:session-s:renewed,HOLD:session-s:kept,HOLD:session-s:renewed|live=2') 'Azure claims: with the board''s clock five hours ahead, keep and renew still follow the board''s clock' (& $abGet 'c-skew-ahead')
 Assert-That ((& $abGet 'd-created') -eq 'True|True|True') 'Azure descriptions: a Markdown body stored with " and > as entities reads back exactly as written, so sync doesn''t take it for an edit made on the board' (& $abGet 'd-created')
 Assert-That ((& $abGet 'd-updated') -eq 'True' -and (& $abGet 'd-edited') -eq 'True') 'Azure descriptions: so does a body sync updates, and an edit made on the board reads back as that edit' "$(& $abGet 'd-updated')`n$(& $abGet 'd-edited')"
+Assert-That ((& $abGet 'm-brief') -eq 'True|True|True|True|True|pkt/pkt-09-reading-time') 'Azure comments: a Markdown brief stored with " and > as entities reads back exactly as posted, from the post, the list and its marker; neither an untrusted brief nor an HTML comment quoting a marker as text takes its place' (& $abGet 'm-brief')
+Assert-That ((& $abGet 'm-html') -eq 'True|needs-human|trusted=3') 'Azure comments: an HTML comment typed in the web UI reads back as stored, and its <code> marker still counts' (& $abGet 'm-html')
 Assert-That ((& $abGet 'setup') -match 'hierarchy: Epic > Feature > User Story > Task' -and (& $abGet 'setup') -match "'Task' has every mapped state \(New, Active, Closed\)" -and (& $abGet 'setup') -match "'User Story' has every mapped state \(New, Active, Resolved, Closed\)") 'setup checks the hierarchy''s types, the task type against taskStatusMap' (& $abGet 'setup')
 Assert-That ((& $abGet 'setup-nomap') -match "MISSING states on 'Task': Resolved .*give the task type its own taskStatusMap") 'without taskStatusMap, setup names the missing task state and the fix' (& $abGet 'setup-nomap')
 Assert-That ((& $abGet 'cfg-template') -eq 'ok' -and (& $abGet 'cfg-task-map') -match "taskStatusMap needs a state for 'Ready to merge'") 'the config refuses an incomplete taskStatusMap' "$(& $abGet 'cfg-template')`n$(& $abGet 'cfg-task-map')"
