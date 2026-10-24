@@ -1469,6 +1469,9 @@ try {
     $skillGuardFirst = [regex]::Match($dispatchSkill, '(?m)^## .*?(?=\r?$)').Value -eq $skillGuard
     $skillGuardInE2e = $e2ePrompt.Contains("``$skillGuard``") -and $e2ePrompt.Contains($skillStop.Trim('`'))
     Assert-That ($skillGuardFirst -and $skillGuardMissing.Count -eq 0 -and $skillGuardInE2e) 'the dispatch skill stops, before anything else, unless a person typed /packet-dispatch or started the dispatcher, under the heading and with the line e2e S8.8 looks for' ("first section: $skillGuardFirst; in e2e: $skillGuardInE2e; missing: $($skillGuardMissing -join ' | ')")
+    $preflight = if ($dispatchSkill -match '(?ms)^## 0 · Preflight\r?$(.*?)^## ') { $Matches[1] } else { '' }
+    $cleanStep = [regex]::Match($preflight, '(?m)^\d+\. \*\*Clean tree\*\*.*$').Value
+    Assert-That ($cleanStep -match '^\d+\. \*\*Clean tree\*\* \(not for `status`\)\.' -and $cleanStep.Contains('`git status --porcelain` prints nothing). If not, stop:')) 'Preflight''s clean-tree step stops a dispatch or resume on a dirty tree, and not status, which changes nothing in the checkout' $cleanStep
     $dispatchSkillFront = ($dispatchSkill -split '(?m)^---\r?$')[1]
     Assert-That ($dispatchSkillFront -match '(?m)^name: packet-dispatch\r?$' -and $dispatchSkillFront -notmatch '(?m)^\s*[''"]?disable-model-invocation[''"]?\s*:' -and (Get-Content -Raw (Join-Path $kit 'README.md')).Contains('github/copilot-cli#4438')) 'the dispatch skill stays without disable-model-invocation, which would lock people out of it on some hosts, and the README says why' $dispatchSkillFront
     $subagents = @(Get-ChildItem -LiteralPath (Join-Path $kit 'agents') -Filter '*.agent.md' | Where-Object Name -ne 'packet-dispatcher.agent.md')

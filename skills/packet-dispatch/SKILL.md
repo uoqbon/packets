@@ -66,7 +66,7 @@ Every call runs this first, right after the check above, `resume` and `status` i
 
    If `symbolic-ref` fails, run `git remote set-head origin --auto` once and retry. If `git archive` finds no `.github/skills`, the kit isn't merged on the default branch yet: stop. Note the commit you archived (`git rev-parse <the ref it printed>`) as `<kit sha>`: reviewers read their lens texts from it (packet-review, Setup step 6).
 2. `.github/packet-workflow.json` exists. `gh auth status` succeeds (with the `project` scope for `github-project`); for `azure-boards`, `AZURE_DEVOPS_EXT_PAT` is set or `az login` works.
-3. The working tree is clean (`git status --porcelain` prints nothing). If not, stop: packet work never mixes with other changes.
+3. **Clean tree** (not for `status`). The working tree is clean (`git status --porcelain` prints nothing). If not, stop: packet work never mixes with other changes. `status` changes nothing in the checkout and runs nothing from it, so a stray file such as Finder's `.DS_Store` can't change its answer.
 4. If this is the repository's main checkout (`git rev-parse --git-dir` equals `git rev-parse --git-common-dir`), tell the owner that only one dispatcher may run in a checkout, and suggest a worktree session for the next one.
 5. `board reconcile` (closed items become Done).
 6. Read `guardrails` from the config (`board` and the scripts use the config as merged on the default branch) and the repository instructions. They bind you and every agent you start.
