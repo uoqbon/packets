@@ -1553,13 +1553,19 @@ try {
     }
     finally { Pop-Location; Copy-Item -LiteralPath (Join-Path $kit 'hooks/packet-dispatcher-guard.ps1') -Destination $hookScript -Force }
     $wrong = @($runs.Keys | Where-Object { $runs[$_] -ne $want[$_] })
-    # When Windows PowerShell gets it wrong, say what it read from stdin and what the command printed.
+    # When Windows PowerShell gets it wrong, trace each step of the command from inside it.
     $why = if ($wrong -contains 'Windows PowerShell') {
+        $inner = "`$x = [Console]::In.ReadToEnd(); 'inner chars ' + `$x.Length; 'ConvertFrom-Json from ' + (Get-Command ConvertFrom-Json).Module.Path; try { `$h = `$x | ConvertFrom-Json -AsHashtable; 'parsed toolName ' + `$h['toolName'] } catch { 'parse error: ' + `$_ }"
+        $trace = @(
+            '$c = @($input) -join [char]10'
+            "'outer chars ' + `$c.Length"
+            "'pwsh at ' + (Get-Command pwsh -ErrorAction SilentlyContinue).Source"
+            "'script there: ' + (Test-Path -LiteralPath .github/hooks/packet-dispatcher-guard.ps1)"
+            "`$c | pwsh -NoProfile -EncodedCommand $([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner)))"
+            '$c | pwsh -NoProfile -ExecutionPolicy Bypass -File .github/hooks/packet-dispatcher-guard.ps1 2>&1'
+            "'guard exit ' + `$LASTEXITCODE") -join '; '
         Push-Location $target
-        try {
-            "stdin as `$input / [Console]::In: " + (($dispatcherCall | & powershell.exe -NoProfile -Command '$a = @($input); "$($a.Count) line(s), then $([Console]::In.ReadToEnd().Length) char(s)"' 2>&1) -join ' ')
-            'output: ' + (($dispatcherCall | & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $hookEntry.powershell 2>&1) -join ' ')
-        }
+        try { 'trace: ' + (($dispatcherCall | & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $trace 2>&1) -join ' | ') }
         finally { Pop-Location }
     }
     Assert-That ($runs.Count -ge 8 -and $wrong.Count -eq 0) 'the hook commands pass on the refusal, and let the call through when pwsh or the script is missing or the script fails' ((@($runs.Keys | ForEach-Object { "$_=$($runs[$_])" }) -join ', ') + "`n$($why -join "`n")")
