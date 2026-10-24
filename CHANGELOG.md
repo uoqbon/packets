@@ -14,12 +14,14 @@ The first release: the dispatcher, the implementer and three reviewer agents; th
 - **The installer adds a hook:** `.github/hooks/packet-workflow.json` and `packet-dispatcher-guard.ps1`. Commit them with the rest of the kit ([#23]).
 - **Three review tiers instead of four.** The installer removes `packet-reviewer-max` unless you changed it. A packet or a previous round at tier 4 reads as tier 3; move a `review.agents."4"` of your own to `"3"` ([#3]).
 - **Agent models still come from your `models` map.** The installer never rewrites an existing `.github/packet-workflow.json`. The template now lists GPT-6.1 Sol first in every class, and a class your `models` map leaves out gets the template's new list ([#2]).
-- **Azure Boards: the plan's root line now builds a tree** that follows the process's levels, and three older setups stop sync before it writes, the dispatcher's sync after an amendment included ([#5]). Fix them in the pull request that upgrades the kit: sync reads the config and the plan files from the default branch, so a change counts only once it merges.
-  - A plan whose `**Epic:**` line names a Feature or a User Story: change the line to `**Feature:**` or `**User Story:**`.
-  - The Basic process: set `board.azureBoards.featureWorkItemType` to `""`.
+- **Azure Boards: the plan's root line now builds a tree** that follows the process's levels ([#5]). Some older setups now stop sync before it writes, the dispatcher's sync after an amendment included. Fix them in the pull request that upgrades the kit: the scripts read the config from the default branch, and the dispatcher's sync reads the plan files there too.
+  - The Basic process, with an `**Epic:**` root: set `board.azureBoards.featureWorkItemType` to `""`.
+  - A plan whose `**Epic:**` line names a Feature: change the line to `**Feature:**`.
+  - A plan whose `**Epic:**` line names a User Story: change the line to `**User Story:**`. Its packets then become Tasks. Where the task type lacks a state that `statusMap` uses (on Agile, `Resolved`), add `board.azureBoards.taskStatusMap`; [providers.md](skills/packet-board/providers.md) has starting points. After the merge, change each existing packet item on the board to the task type: sync never changes a work item's type.
   - A config that made packets Tasks (`workItemType` the task type), with a plan that names a root: set `workItemType` back to the story type, and name a User Story as the root.
+  - A custom process whose types aren't named Epic, Feature and Task: set `epicWorkItemType`, `featureWorkItemType` and `taskWorkItemType` to its names.
 
-  Once it has merged, sync leaves an item laid out before the tree where it is and names it. Run `board sync -DryRun -Force` to see the moves and updates, move any edits made on the board into the packet files, then run `board sync -Force` once.
+  Until the next step, sync leaves an item laid out before the tree where it is and names it. Once the pull request has merged, run sync from an up-to-date checkout of the default branch, since it reads the plan files from the working tree. Run `board sync -DryRun -Force` to see the moves and updates, move any edits made on the board into the packet files, run the dry run again, then run `board sync -Force` once.
 
 ### Added
 
