@@ -15,13 +15,17 @@ The first release: the dispatcher, the implementer and three reviewer agents; th
 - **Three review tiers instead of four.** The installer removes `packet-reviewer-max` unless you changed it. A packet or a previous round at tier 4 reads as tier 3; move a `review.agents."4"` of your own to `"3"` ([#3]).
 - **Agent models still come from your `models` map.** The installer never rewrites an existing `.github/packet-workflow.json`. The template now lists GPT-6.1 Sol first in every class, and a class your `models` map leaves out gets the template's new list ([#2]).
 - **Azure Boards: the plan's root line now builds a tree** that follows the process's levels ([#5]). Some older setups now stop sync before it writes, the dispatcher's sync after an amendment included. Fix them in the pull request that upgrades the kit: the scripts read the config from the default branch, and the dispatcher's sync reads the plan files there too.
-  - The Basic process, with an `**Epic:**` root: set `board.azureBoards.featureWorkItemType` to `""`.
+  - The Basic process, with an `**Epic:**` line naming an Epic: set `board.azureBoards.featureWorkItemType` to `""`.
   - A plan whose `**Epic:**` line names a Feature: change the line to `**Feature:**`.
-  - A plan whose `**Epic:**` line names a User Story: change the line to `**User Story:**`. Its packets then become Tasks. Where the task type lacks a state that `statusMap` uses (on Agile, `Resolved`), add `board.azureBoards.taskStatusMap`; [providers.md](skills/packet-board/providers.md) has starting points. After the merge, change each existing packet item on the board to the task type: sync never changes a work item's type.
+  - A plan whose `**Epic:**` line names a story-level item (a User Story; a Product Backlog Item on Scrum, a Requirement on CMMI, an Issue on Basic): change the line to `**User Story:**`. Its packets then become Tasks (step 1 below).
   - A config that made packets Tasks (`workItemType` the task type), with a plan that names a root: set `workItemType` back to the story type, and name a User Story as the root.
   - A custom process whose types aren't named Epic, Feature and Task: set `epicWorkItemType`, `featureWorkItemType` and `taskWorkItemType` to its names.
+  - Wherever packets are Tasks under a story and the task type lacks a state that `statusMap` uses (on Agile, `Resolved`): add `board.azureBoards.taskStatusMap`. [providers.md](skills/packet-board/providers.md) has starting points.
 
-  Until the next step, sync leaves an item laid out before the tree where it is and names it. Once the pull request has merged, run sync from an up-to-date checkout of the default branch, since it reads the plan files from the working tree. Run `board sync -DryRun -Force` to see the moves and updates, move any edits made on the board into the packet files, run the dry run again, then run `board sync -Force` once.
+  Until the steps below, sync leaves an item laid out before the tree where it is and names it. Once the pull request has merged, work from an up-to-date checkout of the default branch, since sync reads the plan files from the working tree:
+  1. Where packets became Tasks under a story: sync never changes a work item's type, and changing it on the board resets the item's State. Note each packet's status (`board show -Phase <phase>`), change each packet item that isn't Done to the task type, and put its status back with `board set <ID> "Status=<status>"`. A Done packet can keep its type; sync names it on every run.
+  2. Run `board sync -DryRun -Force` to see the moves and updates. Move any edits made on the board into the packet files in a pull request, merge it, and update the checkout.
+  3. Run the dry run again, then run `board sync -Force` once.
 
 ### Added
 
@@ -34,7 +38,7 @@ The first release: the dispatcher, the implementer and three reviewer agents; th
 
 - **Three review tiers,** light, standard and deep, none above high reasoning effort. The deep reviewer takes over `packet-reviewer-max`'s adversarial checks ([#3]).
 - **Default models:** GPT-6.1 Sol first in every class, Claude Sonnet 5.5 second ([#2]).
-- **Sync never moves an item that has another parent,** on any board. It names the item and leaves it there; `sync -DryRun -Force` lists the moves and `sync -Force` makes them. `-Force` also overwrites bodies edited on the board, so move those edits into the packet files first. On GitHub, sync used to add a second parent, which GitHub refused, and stop. A GitHub or local dry run now reads the board and prints what it would link and move ([#5], [#6]).
+- **Sync never moves an item that has another parent,** on any board. It names the item and leaves it there; `sync -DryRun -Force` lists the moves and `sync -Force` makes them. `-Force` also overwrites bodies edited on the board, so merge those edits into the packet files first. On GitHub, sync used to add a second parent, which GitHub refused, and stop. A GitHub or local dry run now reads the board and prints what it would link and move ([#5], [#6]).
 - **Claims renew only when due,** by the board's clock: `board claim` posts a renewal once a third of the lease has passed, not at every milestone ([#12]).
 - **`/packet-dispatch status` runs on a checkout that isn't clean.** A dispatch or a resume still stops on one ([#20]).
 
