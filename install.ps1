@@ -8,6 +8,7 @@
   Copies the kit into the target repository where GitHub Copilot finds it:
     agents/*.agent.md  -> <target>/.github/agents/
     skills/<name>/     -> <target>/.github/skills/<name>/
+    hooks/*            -> <target>/.github/hooks/  (the hook that refuses to start packet-dispatcher as a subagent)
   and, when they don't exist yet:
     templates/packet-workflow.json -> <target>/.github/packet-workflow.json  (repo and default branch filled in)
 
@@ -102,6 +103,9 @@ foreach ($f in Get-ChildItem -LiteralPath (Join-Path $kit 'skills') -File -Recur
     $rel = [System.IO.Path]::GetRelativePath((Join-Path $kit 'skills'), $f.FullName).Replace('\', '/')
     $plan.Add(@{ Source = $f.FullName; Dest = ".github/skills/$rel"; ModelClass = $null })
 }
+foreach ($f in Get-ChildItem -LiteralPath (Join-Path $kit 'hooks') -File) {
+    $plan.Add(@{ Source = $f.FullName; Dest = ".github/hooks/$($f.Name)"; ModelClass = $null })
+}
 
 $installed = [ordered]@{}
 $kept = [System.Collections.Generic.List[string]]::new()
@@ -182,6 +186,6 @@ Write-Output @'
 Next:
   1. Review .github/packet-workflow.json (board provider, prefixes, commands, guardrails, locks).
   2. pwsh -File .github/skills/packet-board/scripts/board.ps1 setup -DryRun
-  3. Commit .github/agents, .github/skills, .github/packet-workflow*.json in a pull request.
+  3. Commit .github/agents, .github/skills, .github/hooks, .github/packet-workflow*.json in a pull request.
   4. In Copilot Chat: /packet-plan <your plan>, then /packet-board sync, then the packet-dispatcher agent.
 '@

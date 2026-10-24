@@ -506,7 +506,12 @@ Click through it.
     & git add -A; & git commit -qm 'lens in configured dir' | Out-Null
     $r = Invoke-Kit $reviewScope @('-Base', 'HEAD~1', '-Json'); $s = $r.Text | ConvertFrom-Json
     Assert-That ($s.Tier -eq 3 -and ($s.Reasons -join ' ') -match 'review machinery path: review/lenses/') 'a lens edit under a configured paths.lenses is review machinery too' $r.Text
-    & git reset -q --hard HEAD~5
+    # A hook runs commands inside the agent runtime, so a hook file is review machinery as well.
+    Write-File '.github/hooks/extra.json' "{`"version`": 1, `"hooks`": {}}`n"
+    & git add -A; & git commit -qm 'hook' | Out-Null
+    $r = Invoke-Kit $reviewScope @('-Base', 'HEAD~1', '-Json'); $s = $r.Text | ConvertFrom-Json
+    Assert-That ($s.Tier -eq 3 -and ($s.Reasons -join ' ') -match 'review machinery path: \.github/hooks/extra\.json') 'a hook file is review machinery (tier 3)' $r.Text
+    & git reset -q --hard HEAD~6
 
     Write-Host 'check-scope'
     $r = Invoke-Kit $checkScope @('-Packet', 'PKT-03', '-Base', 'main')
@@ -515,6 +520,11 @@ Click through it.
     & git reset -q --hard HEAD~3
     $r = Invoke-Kit $checkScope @('-Packet', 'PKT-03', '-Base', 'main')
     Assert-That ($r.Code -eq 0) 'a diff inside Owns passes' $r.Text
+    Write-File '.github/hooks/extra.json' "{`"version`": 1, `"hooks`": {}}`n"
+    & git add -A; & git commit -qm 'hook' | Out-Null
+    $r = Invoke-Kit $checkScope @('-Packet', 'PKT-03', '-Base', 'main')
+    Assert-That ($r.Code -eq 1 -and $r.Text -match 'MACHINERY\s+\.github/hooks/extra\.json') 'a hook file the packet adds is machinery, and fails the scope check' $r.Text
+    & git reset -q --hard HEAD~1
     Write-File 'src/Api/Leftover.cs' "class Leftover {}`n"
     $r = Invoke-Kit $checkScope @('-Packet', 'PKT-03', '-Base', 'main')
     Assert-That ($r.Code -eq 1 -and $r.Text -match 'DIRTY\s+src/Api/Leftover\.cs') 'uncommitted changes fail the scope check' $r.Text
@@ -1476,7 +1486,7 @@ try {
     $dispatchSkill = Get-Content -Raw (Join-Path $target '.github/skills/packet-dispatch/SKILL.md')
     $skillGuard = '## Only a person starts a dispatch'
     $skillGuardBody = if ($dispatchSkill -match ('(?ms)^' + $skillGuard + '\r?$(.*?)^## ')) { $Matches[1] } else { '' }
-    $skillStop = '`packet-dispatch did nothing: not started by a person. A person types /packet-dispatch, or starts the packet-dispatcher agent from the agents dropdown.`'
+    $skillStop = '`packet-dispatch did nothing: not started by a person. To start a dispatch, type /packet-dispatch yourself, in any chat (a packet-dispatcher one too).`'
     $e2ePrompt = Get-Content -Raw (Join-Path $kit 'tests/copilot-e2e.prompt.md')
     # Each rule of the guard, so an edit that drops or inverts one fails here rather than in a live run.
     $skillGuardRules = @(
@@ -1511,6 +1521,75 @@ try {
         $tools = if ($front -match '(?m)^tools: *\[(.*)\]\r?$') { @($Matches[1] -split ',' | ForEach-Object { $_.Trim().Trim("'", '"', ' ') }) } else { @('(no tools line)') }
         $front -notmatch '(?m)^user-invocable: false\r?$' -or @($tools | Where-Object { ($_ -split '/')[-1] -in 'agent', 'custom-agent', 'task', 'runSubagent', '(no tools line)' }).Count -gt 0 })
     Assert-That ($subagents.Count -eq 4 -and $canStart.Count -eq 0) 'the other agents are subagent-only, with a tools list that has no subagent tool' (($canStart | ForEach-Object Name) -join ', ')
+    # The host-side guard: a preToolUse hook on the subagent tool that refuses to start packet-dispatcher,
+    # read from the call's arguments in both hosts' input forms, and lets everything else through.
+    $hookConfig = Get-Content -Raw (Join-Path $target '.github/hooks/packet-workflow.json') | ConvertFrom-Json -AsHashtable
+    $hookEntry = @($hookConfig.hooks.preToolUse)[0]
+    $hookScript = Join-Path $target '.github/hooks/packet-dispatcher-guard.ps1'
+    Assert-That ($hookConfig.version -eq 1 -and $hookEntry.matcher -eq 'task' -and $hookEntry.bash.Contains('-File .github/hooks/packet-dispatcher-guard.ps1') -and $hookEntry.powershell.Contains('-File .github/hooks/packet-dispatcher-guard.ps1') -and (Test-Path -LiteralPath $hookScript)) 'the installer adds the preToolUse hook on the subagent tool, and the script it runs' ($hookConfig | ConvertTo-Json -Depth 5)
+    # Copilot's runtime denies the call when a preToolUse command fails, so the commands pass on only the
+    # script's exit 2, and let the call through when pwsh or the script is missing or the script fails.
+    # They run from the repository root, with the call on stdin; on Windows also under Windows PowerShell,
+    # which the hosts use there for the powershell command.
+    $dispatcherCall = '{"toolName":"task","toolArgs":{"agent_type":"packet-dispatcher"}}'
+    $runHook = { param([string[]]$Exe) $dispatcherCall | & $Exe[0] @($Exe | Select-Object -Skip 1) *> $null; $LASTEXITCODE }
+    $noPwsh = "`$env:PATH = (`$env:PATH -split [IO.Path]::PathSeparator | Where-Object { `$_ -and -not (Get-ChildItem -LiteralPath `$_ -Filter 'pwsh*' -ErrorAction SilentlyContinue) }) -join [IO.Path]::PathSeparator; "
+    $shells = [ordered]@{ 'pwsh' = { param($c) & $runHook @('pwsh', '-NoProfile', '-Command', $c) } }
+    if ($IsWindows -and (Get-Command powershell.exe -ErrorAction SilentlyContinue)) { $shells['Windows PowerShell'] = { param($c) & $runHook @('powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $c) } }
+    if (-not $IsWindows) { $shells['bash'] = { param($c) & $runHook @('/bin/bash', '-c', $c) } }
+    $runs = [ordered]@{}; $want = @{}
+    Push-Location $target
+    try {
+        foreach ($name in $shells.Keys) {
+            $cmd = if ($name -eq 'bash') { $hookEntry.bash } else { $hookEntry.powershell }
+            $runs["$name"] = & $shells[$name] $cmd; $want["$name"] = 2
+            $runs["$name without pwsh"] = if ($name -eq 'bash') { & $runHook @('env', 'PATH=/nonexistent', '/bin/bash', '-c', $cmd) } else { & $shells[$name] ($noPwsh + $cmd) }
+            $want["$name without pwsh"] = 0
+        }
+        Set-Content -LiteralPath $hookScript -Value "#Requires -Version 99.0`nexit 0"
+        foreach ($name in $shells.Keys) { $runs["$name, script fails"] = & $shells[$name] $(if ($name -eq 'bash') { $hookEntry.bash } else { $hookEntry.powershell }); $want["$name, script fails"] = 0 }
+        Remove-Item -LiteralPath $hookScript
+        foreach ($name in $shells.Keys) { $runs["$name, no script"] = & $shells[$name] $(if ($name -eq 'bash') { $hookEntry.bash } else { $hookEntry.powershell }); $want["$name, no script"] = 0 }
+    }
+    finally { Pop-Location; Copy-Item -LiteralPath (Join-Path $kit 'hooks/packet-dispatcher-guard.ps1') -Destination $hookScript -Force }
+    $wrong = @($runs.Keys | Where-Object { $runs[$_] -ne $want[$_] })
+    # When Windows PowerShell gets it wrong, trace each step of the command from inside it.
+    $why = if ($wrong -contains 'Windows PowerShell') {
+        $inner = "`$x = [Console]::In.ReadToEnd(); 'inner chars ' + `$x.Length; 'ConvertFrom-Json from ' + (Get-Command ConvertFrom-Json).Module.Path; try { `$h = `$x | ConvertFrom-Json -AsHashtable; 'parsed toolName ' + `$h['toolName'] } catch { 'parse error: ' + `$_ }"
+        $trace = @(
+            '$c = @($input) -join [char]10'
+            "'outer chars ' + `$c.Length"
+            "'pwsh at ' + (Get-Command pwsh -ErrorAction SilentlyContinue).Source"
+            "'script there: ' + (Test-Path -LiteralPath .github/hooks/packet-dispatcher-guard.ps1)"
+            "`$c | pwsh -NoProfile -EncodedCommand $([Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner)))"
+            '$c | pwsh -NoProfile -ExecutionPolicy Bypass -File .github/hooks/packet-dispatcher-guard.ps1 2>&1'
+            "'guard exit ' + `$LASTEXITCODE") -join '; '
+        Push-Location $target
+        try { 'trace: ' + (($dispatcherCall | & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $trace 2>&1) -join ' | ') }
+        finally { Pop-Location }
+    }
+    Assert-That ($runs.Count -ge 8 -and $wrong.Count -eq 0) 'the hook commands pass on the refusal, and let the call through when pwsh or the script is missing or the script fails' ((@($runs.Keys | ForEach-Object { "$_=$($runs[$_])" }) -join ', ') + "`n$($why -join "`n")")
+    $guardCall = { param([string]$Json) $o = $Json | & pwsh -NoProfile -File $hookScript 2>$null; '{0}:{1}' -f $LASTEXITCODE, (($o | Out-String).Trim()) }
+    $refuse = @(
+        '{"toolName":"task","toolArgs":"{\"agent_type\":\"packet-dispatcher\",\"name\":\"x\",\"prompt\":\"status\",\"mode\":\"sync\"}"}'
+        '{"toolName":"task","toolArgs":{"agent_type":"packet-dispatcher","prompt":"status"}}'
+        '{"hook_event_name":"PreToolUse","tool_name":"Agent","tool_input":{"subagent_type":"Packet-Dispatcher"}}'
+        '{"tool_name":"runSubagent","tool_input":{"agentName":"packet-dispatcher","prompt":"dispatch"}}'
+        # As Windows PowerShell hands it on: after a byte order mark.
+        "$([char]0xFEFF){`"toolName`":`"task`",`"toolArgs`":{`"agent_type`":`"packet-dispatcher`"}}")
+    $pass = @(
+        '{"toolName":"task","toolArgs":{"agent_type":"packet-implementer","prompt":"the brief names packet-dispatcher"}}'
+        '{"toolName":"task","toolArgs":"{\"agent_type\":\"packet-reviewer-deep\"}"}'
+        '{"toolName":"task","toolArgs":{"agent_type":"general-purpose","prompt":"start packet-dispatcher"}}'
+        '{"toolName":"task","toolArgs":{"agent_type":"packet-dispatcher-v2"}}'
+        '{"toolName":"task","toolArgs":{"agent_type":"my-packet-dispatcher"}}'
+        '{"toolName":"bash","toolArgs":{"command":"echo packet-dispatcher"}}'
+        '{"toolName":"task","toolArgs":'
+        '')
+    $refused = @($refuse | ForEach-Object { & $guardCall $_ })
+    $passed = @($pass | ForEach-Object { & $guardCall $_ })
+    Assert-That (@($refused | Where-Object { $_ -match '^2:\{"permissionDecision":"deny",.*"hookSpecificOutput":\{"hookEventName":"PreToolUse","permissionDecision":"deny"' }).Count -eq $refuse.Count) 'the hook refuses a subagent start of packet-dispatcher, from the Copilot and Local input forms, with exit 2 and the deny in both forms' ($refused -join "`n")
+    Assert-That (@($passed | Where-Object { $_ -eq '0:' }).Count -eq $pass.Count) 'and lets every other call through, even one it can''t read' ($passed -join "`n")
     $cfgPath = Join-Path $target '.github/packet-workflow.json'
     $cfgIn = Get-Content -Raw $cfgPath | ConvertFrom-Json -AsHashtable
     $cfgIn.models.light = @("Claude Sonnet 5.5 (Anthropic)", "it's fine")
@@ -1541,7 +1620,7 @@ try {
     Remove-Item -LiteralPath (Join-Path $target '.github/agents/packet-reviewer-gone.agent.md')
     $vendored = Join-Path $target 'packet-kit'
     New-Item -ItemType Directory -Path $vendored | Out-Null
-    foreach ($item in 'install.ps1', 'VERSION', 'agents', 'skills', 'templates') { Copy-Item -Recurse -LiteralPath (Join-Path $kit $item) -Destination $vendored }
+    foreach ($item in 'install.ps1', 'VERSION', 'agents', 'skills', 'hooks', 'templates') { Copy-Item -Recurse -LiteralPath (Join-Path $kit $item) -Destination $vendored }
     $r = Invoke-Kit (Join-Path $vendored 'install.ps1') @('-Target', $target, '-DryRun')
     Assert-That ($r.Code -eq 0 -and $r.Text -match 'Installing into the repository the kit lives in') 'installing into the repository that holds the kit warns' $r.Text
 }

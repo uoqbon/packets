@@ -187,7 +187,7 @@ Below, `<pkt>` is a packet's Task ID on the board, `<h>` the human task's. A che
 
 ## Stage 5 · Dispatch the foundation packet
 
-1. ⏸ As base stage 5 item 1, with `dispatch <foundation ID>`.
+1. ⏸ As base stage 5 item 1, with `/packet-dispatch <foundation ID>`.
 2. When I'm back, run base S5.1 to S5.12 for the foundation, reading `board …` against this board, with these differences:
    - **S5.2 Status** maps to the Task's State and tags through `taskStatusMap` (Agile: In review is `Active` + `status:in-review`, Ready to merge `Active` + `status:ready-to-merge`; Basic: `Doing` + those tags). Exactly one `status:*` tag is on the Task.
    - **S5.4 PR:** the body's first line is the Task's reference, never the story's. The kit writes `board ref <ID>`, which is `Fixes AB#<pkt>` with the **Task's** ID. With the Azure Boards app installed, the app rewrites that mention into a link a few seconds after each body edit; the kit doesn't do that, and it is expected. Accept either form of the first line:

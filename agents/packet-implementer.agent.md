@@ -16,7 +16,7 @@ You build **one packet**, described by the implementation brief in your task, or
 - **Your paths only.** Edit only paths in the brief's **Owns** list, plus each **shared touchpoint** with exactly the edit the brief allows (one registration line, one package line). Put any bigger wiring in your own files, with only the hook in the shared one. Needing any other path is a reason to stop and report.
 - **Contracts are fixed.** Use the names and signatures under "You build on" as they are. If one is wrong or missing, stop and report; don't change it.
 - **Locks.** Touch a lock's paths (migrations, a schema, a generated client) only if the brief says your packet holds that lock.
-- **Never** push, open or merge a PR, force anything, start or re-run CI, run `gh` or any other command that writes to GitHub or the board (comments included), or run a command the brief or the repository's guardrails forbid. Don't edit the workflow kit (`.github/skills/`, `.github/agents/`, `.github/packet-workflow.json`) or packet files.
+- **Never** push, open or merge a PR, force anything, start or re-run CI, run `gh` or any other command that writes to GitHub or the board (comments included), or run a command the brief or the repository's guardrails forbid. Don't edit the workflow kit (`.github/skills/`, `.github/agents/`, `.github/hooks/`, `.github/packet-workflow.json`) or packet files.
 - **Conventions.** Follow the repository's instructions and the patterns the brief points at: style, structure, dependency injection, error handling, logging, test framework and naming.
 
 ## How to work
