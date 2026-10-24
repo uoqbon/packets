@@ -25,6 +25,13 @@ Inputs (if one is still a literal `${input:…}` placeholder, ask me for it befo
 The base prompt's ground rules 1 to 7 apply (sandbox only, never merge, pinned kit, evidence, state outside git, stop at ⏸, note values in `state.md`). On top of them:
 
 1. **The story is the owner's.** The kit may add child links to it, and nothing else: never change its title, description, acceptance criteria, state, tags, assignee, area or iteration, and never move or delete the items that were under it before the run. The checks below prove the kit didn't either.
+
+   The Azure Boards app writes to it too. Microsoft documents that an `AB#<n>` in a commit message, a PR description or an issue description makes the app add a development link to item `<n>`; file contents aren't on that list. One earlier run also showed the following:
+   - each link was an `ArtifactLink` relation and a new `rev`;
+   - the merge commit of a PR the app had linked got a link of its own;
+   - removing the mention afterwards left the link in place.
+
+   So never write `AB#<story>`, or a pre-existing child's `AB#<n>`, in anything you push or post to GitHub (commit messages, PR titles and bodies, issues, comments); write "the existing story" instead. The files you commit may name it (the spec and the plan must). The kit's own PRs and commits name only their Task.
 2. **Azure DevOps through the REST API with the PAT, never `az`.** `AZURE_DEVOPS_EXT_PAT` must be set in the terminal VS Code runs (a PAT with Work Items Read & write); the kit reads it, and so do you. Never print it, never write it to a file, never put it in a URL. In stage 1, write `.packet-e2e/ab.ps1`, a helper that every Azure check below goes through:
 
    ```powershell
@@ -52,7 +59,8 @@ The base prompt's ground rules 1 to 7 apply (sandbox only, never merge, pinned k
 4. **The story.** `ab '_apis/wit/workitems/<story>?$expand=all'`:
    - its `System.WorkItemType` is the process's story type (User Story in Agile, Product Backlog Item in Scrum, Issue in Basic, Requirement in CMMI), and it has no `packet` tag;
    - record its `rev`, `System.State`, `System.Title`, `System.Tags`, `System.AreaPath`, `System.IterationPath`, `System.AssignedTo`, and a SHA-256 of `System.Description` and of the acceptance-criteria field (`Microsoft.VSTS.Common.AcceptanceCriteria`, where the type has it), in `state.md` and in `.packet-e2e/story-before.json`;
-   - record its children (relations with `rel` = `System.LinkTypes.Hierarchy-Forward`): their IDs, types, titles and `rev`. These are the **pre-existing children**; the run must leave every one of them as it is.
+   - record the `id` of its last update (`ab _apis/wit/workItems/<story>/updates`, oldest first): the protection checks read every update with a higher `id`. Every update gets the next `id`, including a link added from the child's side, which need not move the story's `rev`. So the `rev` alone can't show what changed;
+   - record its children (relations with `rel` = `System.LinkTypes.Hierarchy-Forward`): their IDs, types, titles, `rev` and last update `id`. These are the **pre-existing children**; the run must leave every one of them as it is.
 5. **Azure Boards app.** Ask me whether the Azure Boards app for GitHub is installed on the sandbox and connected to this project (Project settings > GitHub connections). With it, `Fixes AB#<task>` in a PR body links the PR to the Task and closes the Task when the PR merges. Without it, I close each Task by hand after its merge: record that, and in stage 5 the merge-close check becomes MANUAL.
 
 ## Stage 2 · Offline suite, installer and Azure config
@@ -81,7 +89,13 @@ The base prompt's ground rules 1 to 7 apply (sandbox only, never merge, pinned k
    - the excerpt packet has `**Initial status:** Backlog` and still has the "under 0 milliseconds" criterion (otherwise FAIL, restore it in the packet and the plan, and rerun the validator).
 5. `pwsh -File .github/skills/packet-plan/scripts/validate-packets.ps1 -Phase e2e-draftmeta` reports 0 errors.
 6. **Negative probe: two roots.** Temporarily add a second root line, `- **Epic:** AB#<story>`, to `plan.md` and run the validator: expect an `ERROR` that the plan `names more than one root item`. Restore the file and confirm 0 errors again.
-7. ⏸ Commit all of this (the kit from stage 2, the spec, the scaffold and the plan) on a branch `e2e/setup`, push it, and open a PR. Ask me to merge it, then to come back for stage 4.
+7. ⏸ Commit all of this (the kit from stage 2, the spec, the scaffold and the plan) on a branch `e2e/setup`, push it, and open a PR. Nothing you write there names a work item (ground rule 1):
+   - before you push, `git log --format=%B origin/<default>..HEAD | grep -iE 'AB#[0-9]'` finds nothing; before `gh pr create`, `grep -iE 'AB#[0-9]' <body file>` finds nothing, and the title has no `AB#` either;
+   - a minute after the PR is open, read the updates of the story and of each pre-existing child: none since stage 1's last one. Treat any update you find as S4.5 says.
+
+   A mention in the setup commit, the PR, or (checked at S4.2) the merge commit's message makes S3.7 FAIL. You'd see it as an app link that S4.5 traces to that text, now or later. Record the update and the text that caused it, and leave the link where it is: removing it would be another change to the owner's items. This is your own slip, not a kit finding, so the report's Failures entry names the setup text, not a kit file.
+
+   Ask me to merge it, keeping `AB#` out of the merge commit's message too, and then to come back for stage 4.
 
 ### Mini plan (write this to `docs/specs/draftmeta.md`)
 
@@ -122,15 +136,18 @@ Item 4's criterion can't be met on purpose: stage 7 uses it to check the Needs h
 
 ## Stage 4 · Board: Tasks under the existing story
 
-Below, `<pkt>` is a packet's Task ID on the board, `<h>` the human task's.
+Below, `<pkt>` is a packet's Task ID on the board, `<h>` the human task's. A check that says an item has "no new update" means none with an `id` above the one you record just before the step it checks, so record the last update `id` of each item it names then.
 
 1. **S4.1 Setup.** `board setup -DryRun`, then `board setup`. Expect a `hierarchy:` line with the process's levels (Agile: `Epic > Feature > User Story > Task`; Basic: `Epic > Issue > Task`), a line saying the story type and the task type each have every mapped state, and the GitHub labels for follow-ups. A `MISSING` line is a FAIL of stage 2's config: fix the config, record it, and rerun.
-2. **S4.2 Before.** Count the work items tagged `packet` in the project (WIQL `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.Tags] CONTAINS 'packet'`): expect 0. Record the story's `rev` again; it equals stage 1's.
+2. **S4.2 Before.** Count the work items tagged `packet` in the project (WIQL `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND [System.Tags] CONTAINS 'packet'`): expect 0. Read the story's updates:
+   - Since stage 1's last update there are none, apart from app links (S4.5), such as one for the setup PR's merge commit. List those apart and charge each as S4.5 says. One traced to the setup's own text makes S3.7 FAIL, so mark it now if it isn't marked already.
+   - The setup PR's merge commit message (`git log -1 --format=%B <merge sha>`) has no `AB#` either; if it does, that also makes S3.7 FAIL.
+   - Any other update is FAIL, sorted into S4.5's kinds (one by another identity isn't a kit finding).
 3. **S4.3 Dry run.** `board sync -Phase e2e-draftmeta -DryRun`:
    - it would create one item per packet and the human task, and would put each of them under `AB#<story>`;
    - it would create no Feature and nothing at any other level;
    - if the human task names a Parent, a note says its Parent line has no effect under `AB#<story>` (a Task can't go under a packet's Task);
-   - afterwards the WIQL count is still 0 and the story's `rev` is unchanged: a dry run writes nothing.
+   - afterwards the WIQL count is still 0, and the story has no new update apart from app links (S4.5): a dry run writes nothing.
 4. **S4.4 Sync.** `board sync -Phase e2e-draftmeta`. Record each item's ID in `state.md`. For each, `ab '_apis/wit/workitems/<pkt>?$expand=all'`:
    - `System.WorkItemType` is the task type (Task), for packets and the human task alike: never the story type;
    - exactly one `System.LinkTypes.Hierarchy-Reverse` relation, and its URL ends in `/<story>`;
@@ -140,10 +157,22 @@ Below, `<pkt>` is a packet's Task ID on the board, `<h>` the human task's.
    - each `Depends on` shows as a `System.LinkTypes.Dependency-Reverse` (Predecessor) relation to that dependency's Task; nothing else adds a parent.
 5. **S4.5 The story is untouched.** Read the story again and `ab _apis/wit/workItems/<story>/updates`:
    - Title, State, Tags, AreaPath, IterationPath and AssignedTo equal stage 1's; the description's and acceptance criteria's hashes equal stage 1's;
-   - its `rev` may not have moved at all: a parent link added from the child's side need not revise the parent (adding the pre-existing child left this project's story at rev 1). Every update after stage 1's `rev`, if any, changes relations only (`relations.added` holding `Hierarchy-Forward` links to the new Tasks) and no `fields` other than the system ones a link bumps (`System.Rev`, `System.ChangedDate`, `System.ChangedBy`, `System.AuthorizedDate`, `System.RevisedDate`, `System.Watermark`); list any other field as a FAIL;
+   - every update since stage 1's last one is one of three kinds, and the report lists them apart:
+     - **Kit changes:** updates by the user from stage 1 item 2, since the kit writes as that user. Each changes relations only (`relations.added` holding `Hierarchy-Forward` links to the phase's Tasks) and no `fields` other than the system ones a link bumps (`System.Rev`, `System.ChangedDate`, `System.ChangedBy`, `System.AuthorizedDate`, `System.RevisedDate`, `System.Watermark`). These links come from the child's side and need not move the story's `rev` (adding the pre-existing child left this project's story at rev 1). Anything else in such an update is FAIL.
+     - **App links:** updates by the Azure Boards app. In the earlier run its `revisedBy` had a `displayName` starting `Azure Boards` and no `uniqueName`; record the identity you see. Each update only adds `ArtifactLink` relations named `GitHub Commit` or `GitHub Pull Request`, plus system fields (those above, `System.AuthorizedAs` and `System.PersonId`). An app update that does anything else is FAIL.
+
+       For each, name the commit or PR from the end of the link's `vstfs:///GitHub/…` URL. Then find the text that mentioned the item, in every version of it (a PR body's edit history, as S5.4 reads it). That also shows the link is the sandbox's. A commit can be checked directly (`gh api repos/<sandbox>/commits/<sha>`), but a PR link names a number that other repositories on the same GitHub connection have too. So a sandbox PR whose text never held the mention isn't the one linked. An app link isn't the kit's change, so it doesn't fail this check by itself. It fails the check that owns its mention:
+       - S3.7, for your setup commit, PR or merge commit;
+       - that packet's S5.4, for a dispatcher's PR or its commits;
+       - S7.4, for the amendment PR.
+
+       Otherwise it is FAIL here, with the update and what you found. That covers a mention you can't find, one in an issue or another repository, and one in a merge message I wrote for a packet or amendment PR. Only one the kit's own text caused is a kit finding; for the rest, name who wrote the mention, not a kit file.
+     - **Anything else:** an update by any other identity (a person, a team rule, another service) is FAIL, with its `revisedBy` and what it changed. It isn't a kit finding either.
+
+     Count each failing update once: the check that owns its mention, or else the first check that finds it. Later checks list it as already counted.
    - its children are now the pre-existing children plus exactly the phase's Tasks.
-6. **S4.6 The other children are untouched.** Each pre-existing child still has the story as its parent and the `rev` from stage 1. `board show -Phase e2e-draftmeta` doesn't list them, and `board reconcile -DryRun` doesn't name them (it reads only items tagged `packet`).
-7. **S4.7 Idempotent.** A second `board sync -Phase e2e-draftmeta` reports `0 created, 0 updated` and no link or move lines; the story's `rev` doesn't change.
+6. **S4.6 The other children are untouched.** Each pre-existing child still has the story as its parent. Every update since its stage 1 last update is an app link, listed and charged as S4.5 says. Any other update is FAIL, sorted into S4.5's kinds (one by another identity isn't a kit finding). So its `rev` is still stage 1's unless the app linked it. `board show -Phase e2e-draftmeta` doesn't list them, and `board reconcile -DryRun` doesn't name them (it reads only items tagged `packet`).
+7. **S4.7 Idempotent.** A second `board sync -Phase e2e-draftmeta` reports `0 created, 0 updated` and no link or move lines, and the story has no new update apart from app links (S4.5). Record the story's last update `id` now: S5.15 reads the updates after it.
 8. **S4.8 Show and next.** `board show -Phase e2e-draftmeta`: the excerpt packet is Backlog and the rest are Ready. `board next -Phase e2e-draftmeta`: only the foundation is `START`; reading time and slug are `BLOCKED` on it.
 9. **S4.9 Edit probe.** Change one word in the slug packet's Task description through the REST API (a JSON-patch `replace` on `/fields/System.Description` with `/multilineFieldsFormat/System.Description` = `Markdown`; keep the old text in `.packet-e2e/`), then change one word in that packet's file locally and run `board sync -Phase e2e-draftmeta -WorkingTree`: expect `skipped … edited on the board`. Revert both (the description to its exact old text, the file with `git checkout`), then `board sync -Phase e2e-draftmeta`: unchanged.
 10. **S4.10 A Task under another parent.** Create a scratch story, `e2e scratch parent`, of the story type with tag `e2e-scratch`. Move the excerpt packet's Task under it through the REST API (remove its `Hierarchy-Reverse` relation by index, add one to the scratch story). Then:
@@ -151,7 +180,7 @@ Below, `<pkt>` is a packet's Task ID on the board, `<h>` the human task's.
     - `board sync -Phase e2e-draftmeta -DryRun -Force` prints `would move … under AB#<story> (now under AB#<scratch>)` and writes nothing;
     - `board sync -Phase e2e-draftmeta -Force` prints `moved …`, and the Task's only parent is the story again.
     Retire the scratch story as ground rule 3 says and record its ID for the report.
-11. **S4.11 A wrong root stops sync before it writes.** In the working tree only, change `plan.md`'s root line to `**Epic:** AB#<story>` and run `board sync -Phase e2e-draftmeta -WorkingTree -DryRun`: expect exit 2 and a message that `AB#<story>` is of the story type and the line should name an Epic or use the line for its type. On a process without features (Basic, `featureWorkItemType` `""`), also try `**Feature:** AB#<story>`: exit 2, saying the process has no features. Then make it `**User Story:** AB#<a pre-existing child Task>` (if the story has none, a phase Task): exit 2 again, naming the Task type. Restore `plan.md` (`git checkout`) and check that no work item changed (`rev`s of the story and of each phase Task as before).
+11. **S4.11 A wrong root stops sync before it writes.** In the working tree only, change `plan.md`'s root line to `**Epic:** AB#<story>` and run `board sync -Phase e2e-draftmeta -WorkingTree -DryRun`: expect exit 2 and a message that `AB#<story>` is of the story type and the line should name an Epic or use the line for its type. On a process without features (Basic, `featureWorkItemType` `""`), also try `**Feature:** AB#<story>`: exit 2, saying the process has no features. Then make it `**User Story:** AB#<a pre-existing child Task>` (if the story has none, a phase Task): exit 2 again, naming the Task type. Restore `plan.md` (`git checkout`) and check that no work item changed: since before the first probe, the story and each phase Task have no new update apart from app links (S4.5).
 
 ## Stage 5 · Dispatch the foundation packet
 
@@ -166,7 +195,7 @@ Below, `<pkt>` is a packet's Task ID on the board, `<h>` the human task's.
 
      When the line is app-linked, also read the body's edit history and show who wrote each version of the line: `gh api graphql -f query='query{repository(owner:"<owner>",name:"<repo>"){pullRequest(number:<n>){author{login} userContentEdits(first:20){nodes{editedAt editor{login} diff}}}}}'`. PASS only if every edit that sets the line to the plain form was made by the PR's author (the dispatcher, whatever login `gh` runs as) and every edit that sets it to the linked form was made by the Azure Boards app (login `azure-boards`, or whatever login the first rewrite records, named in the report). An edit by anyone else that changes the first line (a person, or another bot) is FAIL, even if the result matches the pattern. If the history shows the author never wrote the plain form, or doesn't show the first line's changes at all, record FAIL with the output, not PASS. Record the PR number, the edit times and the logins in the report.
 
-     Grep the whole PR body, case-insensitively: no line has a closing keyword (`close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved`, with an optional colon) followed by `AB#<story>` or `[AB#<story>](`, in either form. For example `grep -iE '(clos|fix|resolv)(e|es|ed)?:?[[:space:]]+\[?AB#<story>([^0-9]|$)'` finds nothing (a merge would close the story).
+     Grep the whole PR body, case-insensitively: no line has a closing keyword (`close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`, `resolves`, `resolved`, with an optional colon) followed by `AB#<story>` or `[AB#<story>](`, in either form. For example `grep -iE '(clos|fix|resolv)(e|es|ed)?:?[[:space:]]+\[?AB#<story>([^0-9]|$)'` finds nothing (a merge would close the story). Nor does the title, the body, or any commit message the branch adds name the story or a pre-existing child at all, in either form. The commit messages come from `git log --first-parent --format=%B <brief base>..<head>`, which leaves out commits a merge of the default branch brought in. `grep -iE 'AB#(<story>|<child>|…)([^0-9]|$)'` finds nothing in any of them. The app would link a mention (S4.5's app links), and GitHub puts the title in the merge commit's message. If the story or a pre-existing child has an app link to this PR or one of its commits, read every version of the body (the edit history query above, all of it) for the mention: S5.4 is FAIL whichever version held it.
    - **S5.13 Claims and markers as work item comments.** `ab '_apis/wit/workItems/<pkt>/comments?api-version=7.1-preview.4'`: the brief and the hand-off are there as Markdown comments by the user from stage 1 item 2, and no claim comment is left (`board release` deleted it).
    - **S5.14 PR linked.** With the Azure Boards app, the Task has an `ArtifactLink` relation named `GitHub Pull Request`. Without it, N/A.
    - **S5.15 Story still untouched.** As S4.5, against the story's updates since S4.7 (the parent-link removal and re-add for the excerpt packet's Task that S4.10 made, if the story recorded them, are the probe's, not the kit's): the dispatcher changed only its Task, never the story (its State included: record it, and if it moved, say whether a team rule did it, from the update's `revisedBy`).
@@ -185,13 +214,13 @@ Run base stage 7 as written, for the excerpt packet, with these differences:
 - The `packet:needs-human` comment is a comment on the excerpt packet's **Task** in Azure Boards (S5.13's API), and the Task carries `status:needs-human` and the task map's State for Needs human.
 - ⏸ I answer as a comment on that Task in Azure Boards, not on GitHub. `board comments <ID>` shows the answer under my unique name from stage 1 item 2.
 - The answer I post is: "Replace the timing criterion with: the best of 3 runs of `Get-Excerpt` on a 10,000-word input takes under 500 ms." (base stage 7 names TextKit's `Measure-Text`, which this phase doesn't have).
-- The amendment PR doesn't say `Fixes AB#` for any item, in either form: its body has no closing keyword (`close`, `fix`, `resolve` and their forms, any case) followed by `AB#<n>` or `[AB#<n>](…)`.
+- The amendment PR doesn't say `Fixes AB#` for any item, in either form: its body has no closing keyword (`close`, `fix`, `resolve` and their forms, any case) followed by `AB#<n>` or `[AB#<n>](…)`. Nor do its title, body or commits name the story or a pre-existing child at all (S5.4's grep); an app link to it fails S7.4, as S4.5 says.
 
 ## Stage 8 · Safety probes and the story at the end
 
 1. Run base stage 8, items 1 to 3 and 6 to 8, with `src/draftmeta/` in place of `src/textkit/` and `e2e-draftmeta` in place of `e2e-textkit` (the reading-time and slug packets are the two feature packets). Item 4 (a forged round) stays MANUAL without a second account; item 5 (locks) is N/A, since no packet holds one. Record items 7 and 8 as Base S8.7 and Base S8.8, apart from this stage's S8.7, and read base S1.4 and base stage 9's "S1.4" as Base S1.4.
 2. **Forged board answer (needs a second Azure DevOps user; otherwise MANUAL).** As that user, comment on a packet's Task a line starting with `` `packet:round 9 `` or an answer to a Needs human question. `board comments <ID>` and `board marker <ID> needs-human` don't show it.
-3. **S8.7 The story at the end.** As S4.5, against every update since stage 1, exempting S4.10's parent-link removal and re-add for the excerpt packet's Task: over the whole run, the kit changed only the story's child links. Its children are the pre-existing ones (each with its stage 1 `rev`) and the phase's Tasks. Ask me whether to close the story now that its Tasks are done; the kit never does it, and the check is that it didn't.
+3. **S8.7 The story at the end.** As S4.5, against every update since stage 1's last one, exempting S4.10's parent-link removal and re-add for the excerpt packet's Task: over the whole run, the kit changed only the story's child links. App links are listed apart, and each failing update is counted once, as S4.5 says. Its children are the pre-existing ones (each untouched, as S4.6 says) and the phase's Tasks. Ask me whether to close the story now that its Tasks are done; the kit never does it, and the check is that it didn't.
 
 ## Stage 9 · Report
 
@@ -200,6 +229,7 @@ Write `.packet-e2e/report.md` as in base stage 9, and add:
 - **Summary:** the Azure DevOps organization, project, process, the story's ID and title, and whether the Azure Boards app was connected.
 - **Board tree:** the story with its children after the run, each with type, State, tags and the PR that closed it.
 - **Azure notes:** anything Azure Boards did that the kit didn't expect (a rule that moved the story's State, a Markdown field that rendered as raw text, a comment API that rejected a call), with the update or response that shows it.
+- **App links:** every development link the Azure Boards app added to the story or a pre-existing child (S4.5), with its update, the commit or PR, the text that mentioned the item, who wrote it, and the check that counts it.
 - **Clean-up list for me:** as in base stage 9, plus every work item the run created (the phase's Tasks and the scratch story from S4.10, already retired) and the story itself. Remove nothing else yourself.
 
 ## `status`
