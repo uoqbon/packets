@@ -307,7 +307,7 @@ function Set-ProvHierarchy {
             $from = if ([string]$parent.repository_url -like "*/repos/$($cfg.repo)") { "#$($parent.number)" } else { "$(([string]$parent.repository_url) -replace '^.*/repos/', '')#$($parent.number)" }
         }
         catch { if ($_.Exception.Message -notmatch 'HTTP 404') { throw } }
-        if ($from -and -not $Force) { "note: $($p.Id) #$($item.Number) is under $from, and its place is under ${label}: sync -Phase $($Tree.Phase.Slug) -Force moves it, and also overwrites any body this sync skipped as edited on the board, so move those edits into the packet files first (with -DryRun, it shows every change)"; continue }
+        if ($from -and -not $Force) { "note: $($p.Id) #$($item.Number) is under $from, and its place is under ${label}: sync -Phase $($Tree.Phase.Slug) -Force moves it, and also overwrites any body this sync skipped as edited on the board, so first move those edits into the packet files in a pull request, merge it and update this checkout (sync -Phase $($Tree.Phase.Slug) -DryRun -Force shows every change)"; continue }
         if ($DryRun) { "would $(if ($from) { 'move' } else { 'put' }) $($p.Id) #$($item.Number) under $label$(if ($from) { " (now under $from)" })"; continue }
         $replace = @(if ($from) { '-F', 'replace_parent=true' })
         [void](Invoke-PwGh api -X POST "repos/$($cfg.repo)/issues/$target/sub_issues" -F "sub_issue_id=$($item.DbId)" @replace)
