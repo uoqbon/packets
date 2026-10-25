@@ -2,6 +2,24 @@
 
 What each release of the kit changes, newest first. `VERSION` holds the release's version, and the installer records it in `.github/packet-workflow.kit.json`. The [README](README.md#install) shows how to install a release and upgrade to the next one.
 
+## 0.1.1 (2026-10-25)
+
+A fix to what the board skill tells the owner to do with edits made on the board. What sync does is unchanged.
+
+### If you installed 0.1.0
+
+Fetch the tag and check it out (`git -C packets fetch --tags`, then `git -C packets checkout v0.1.1`), and run the installer again. It replaces the board skill's `SKILL.md`, `providers.md`, `board.ps1`, and `azure-boards.ps1`, `github-common.ps1` and `local.ps1` under `scripts/providers/`, and lists any of them you changed and it kept. Commit what it installs in a pull request. Nothing in `.github/packet-workflow.json` changes.
+
+If you followed 0.1.0's message and ran `board sync -Force` after moving edits made on the board into a packet file you hadn't merged, the board may show the old text again: the dispatcher's sync after an amendment writes it back. Move those edits into the packet file in a pull request, merge it, update the checkout, then run `board sync -DryRun` and `board sync`. Until then, the uncommitted packet file may be the only copy of those edits: don't discard it to get past `/packet-dispatch`'s clean-tree check.
+
+### Fixed
+
+- **Merge board edits before `sync -Force`.** `board sync`'s `skipped` line for a body edited on the board, the note on an item outside its place in the tree, and the board skill's docs said to move edits made on the board into the packet files, then run `sync -Force`. They now say to do it in a pull request, merge it and update the checkout first, and the `skipped` line for an item sync didn't create says the same. Sync reads the packet files from the working tree, but the dispatcher's sync after an amendment reads them from the default branch, so an edit left in the checkout reached the board and was then written back. The uncommitted file also stopped a dispatch or a resume at its clean-tree check ([#26]).
+
+### Tests
+
+- The offline tests pin the new note on every board, and both `skipped` lines. On the local board they show that the dispatcher's sync writes back an edit that isn't merged and keeps one that is ([#26]).
+
 ## 0.1.0 (2026-10-25)
 
 The first release: the dispatcher, the implementer and three reviewer agents; the plan, board, dispatch, review and progress skills; the hook that refuses to start the dispatcher as a subagent; the installer; and the offline tests, which CI runs on Linux, macOS and Windows. The [README](README.md) explains how it works, and its [known limitations](README.md#known-limitations) say what has run end to end and what hasn't.
@@ -78,3 +96,4 @@ The first release: the dispatcher, the implementer and three reviewer agents; th
 [#22]: https://github.com/uoqbon/packets/pull/22
 [#23]: https://github.com/uoqbon/packets/pull/23
 [#24]: https://github.com/uoqbon/packets/pull/24
+[#26]: https://github.com/uoqbon/packets/pull/26
