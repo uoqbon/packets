@@ -57,7 +57,7 @@ The ideas that make it work:
 Clone a release of this repository next to (not inside) the repository you want to set up, then run its installer against that repository:
 
 ```bash
-git clone --branch v0.1.0 https://github.com/uoqbon/packets.git
+git clone --branch v0.1.1 https://github.com/uoqbon/packets.git
 ```
 
 ```bash
