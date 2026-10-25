@@ -171,7 +171,7 @@ function Set-ProvHierarchy {
         $from = [string]$item.Parent
         if ($target -and $from -eq $target) { continue }
         # As on GitHub and Azure Boards: an item under another parent is named, and -Force moves it.
-        if ($from -and -not $Force) { "note: $($p.Id) #$($item.Number) is under #$from, and its place is under ${label}: sync -Phase $($Tree.Phase.Slug) -Force moves it, and also overwrites any body this sync skipped as edited on the board, so move those edits into the packet files first (with -DryRun, it shows every change)"; continue }
+        if ($from -and -not $Force) { "note: $($p.Id) #$($item.Number) is under #$from, and its place is under ${label}: sync -Phase $($Tree.Phase.Slug) -Force moves it, and also overwrites any body this sync skipped as edited on the board, so first move those edits into the packet files in a pull request, merge it and update this checkout (sync -Phase $($Tree.Phase.Slug) -DryRun -Force shows every change)"; continue }
         if ($DryRun) { "would $(if ($from) { 'move' } else { 'put' }) $($p.Id) #$($item.Number) under $label$(if ($from) { " (now under #$from)" })"; continue }
         [void](Update-PwLocalRow -Number $item.Number -Change { param($row) $row.parent = $target })
         "$(if ($from) { 'moved' } else { 'linked' }) $($p.Id) under $label$(if ($from) { " (was under #$from)" })"

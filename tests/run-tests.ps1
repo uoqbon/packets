@@ -22,6 +22,9 @@ $validate = Join-Path $skills 'packet-plan/scripts/validate-packets.ps1'
 $reviewScope = Join-Path $skills 'packet-review/scripts/review-scope.ps1'
 $checkScope = Join-Path $skills 'packet-dispatch/scripts/check-scope.ps1'
 $progress = Join-Path $skills 'packet-progress/scripts/progress.ps1'
+# How every board's note on a misplaced item ends: the edits made on the board go into the packet files
+# and are merged before -Force, because the dispatcher's sync reads the packet files on origin/main.
+$mergeFirst = ', and also overwrites any body this sync skipped as edited on the board, so first move those edits into the packet files in a pull request, merge it and update this checkout \(sync -Phase phase-1 -DryRun -Force shows every change\)'
 
 $script:failures = 0
 $script:passes = 0
@@ -334,7 +337,7 @@ Click through it.
     & $setH1Parent 'pkt-03'
     $r = Invoke-Kit $board @('sync')
     $g = (Invoke-Kit $board @('get', 'H-1')).Text | ConvertFrom-Json
-    Assert-That ($r.Code -eq 0 -and $r.Text -match "note: H-1 #$($h1.Number) is under #99, and its place is under PKT-03 #$($pkt03.Number): sync -Phase phase-1 -Force moves it" -and $g.Parent -eq '99') 'a Parent line names a human task''s new place; without -Force an item under another parent stays there' $r.Text
+    Assert-That ($r.Code -eq 0 -and $r.Text -match "note: H-1 #$($h1.Number) is under #99, and its place is under PKT-03 #$($pkt03.Number): sync -Phase phase-1 -Force moves it$mergeFirst" -and $g.Parent -eq '99') 'a Parent line names a human task''s new place; without -Force an item under another parent stays there' $r.Text
     $r = Invoke-Kit $board @('sync', '-DryRun', '-Force')
     $g = (Invoke-Kit $board @('get', 'H-1')).Text | ConvertFrom-Json
     Assert-That ($r.Code -eq 0 -and $r.Text -match "would move H-1 #$($h1.Number) under PKT-03 #$($pkt03.Number) \(now under #99\)" -and $g.Parent -eq '99') 'sync -DryRun -Force shows the move and makes none' $r.Text
@@ -384,6 +387,34 @@ Click through it.
     $r = Invoke-Kit $board @('show', '-WorkingTree')
     Assert-That ($r.Code -eq 0 -and $r.Text -match 'board: local') 'a local defaultBranch edit cannot redirect board to another config' $r.Text
     Write-File '.github/packet-workflow.json' $cfgText
+
+    # An edit made on the board goes into the packet file in a merged pull request before -Force: the
+    # dispatcher's sync after an amendment reads origin/main, so it writes back over an edit that is only
+    # in this checkout.
+    $setBoardBody = {
+        param([string]$Id, [scriptblock]$Change)
+        $lb = Get-Content -Raw -LiteralPath $boardFile | ConvertFrom-Json -AsHashtable
+        foreach ($row in $lb.items) { if ($row.id -eq $Id) { $row.body = & $Change $row.body } }
+        [System.IO.File]::WriteAllText($boardFile, ($lb | ConvertTo-Json -Depth 64), [System.Text.UTF8Encoding]::new($false))
+    }
+    $boardBody = { param($Id) ((Invoke-Kit $board @('get', $Id)).Text | ConvertFrom-Json).Body }
+    $p2Path = Join-Path $repo 'docs/plan/phase-1/packets/PKT-02.md'
+    $p2 = (Invoke-Kit $board @('get', 'PKT-02')).Text | ConvertFrom-Json
+    & $setBoardBody 'PKT-02' { param($b) $b.Replace('Build Persistence.', 'Build Persistence with an outbox.') }
+    & $setBoardBody 'PKT-03' { param($b) $b.Substring(0, $b.IndexOf('`packet:source ')) }
+    [System.IO.File]::WriteAllText($p2Path, (Get-Content -Raw $p2Path).Replace('Build Persistence.', 'Build Persistence with an outbox.'), [System.Text.UTF8Encoding]::new($false))
+    $r = Invoke-Kit $board @('sync')
+    Assert-That ($r.Code -eq 1 -and $r.Text -match "skipped PKT-02 #$($p2.Number): its body was edited on the board since the last sync\. Move those edits into docs/plan/phase-1/packets/PKT-02\.md in a pull request, merge it and update this checkout, then sync -DryRun -Force, and sync -Force once the owner has seen what it changes\." -and $r.Text -match "skipped PKT-03 #\d+: the item wasn't created by sync \(no source marker\)\. Check it against docs/plan/phase-1/packets/PKT-03\.md, move anything only the item has into that file in a pull request, merge it and update this checkout, then sync -DryRun -Force, and sync -Force once the owner has seen what it changes\.") 'sync skips a body edited on the board, and an item with no marker, and says to merge the edits into the packet file before -Force' $r.Text
+    $r = Invoke-Kit $board @('sync', '-Force')
+    $forced = & $boardBody 'PKT-02'
+    $r2 = Invoke-Kit $board @('sync', '-Phase', 'phase-1', '-Ref', 'origin/main')
+    Assert-That ($r.Text -match 'updated PKT-02' -and $forced -match 'with an outbox' -and $r2.Text -match 'updated PKT-02' -and (& $boardBody 'PKT-02') -notmatch 'with an outbox') 'an edit moved into the checkout but not merged reaches the board with -Force, and the dispatcher''s sync from origin/main writes the old text back' "$($r.Text)`n$($r2.Text)"
+    & git add -- $p2Path; & git commit -qm 'PKT-02: the edit made on the board' | Out-Null; & git push -q origin main 2>$null; & git fetch -q origin
+    $r = Invoke-Kit $board @('sync', '-Force')
+    $r2 = Invoke-Kit $board @('sync', '-Phase', 'phase-1', '-Ref', 'origin/main')
+    Assert-That ($r.Text -match 'updated PKT-02' -and $r2.Code -eq 0 -and $r2.Text -match 'sync: 0 created, 0 updated' -and (& $boardBody 'PKT-02') -match 'with an outbox') 'once the edit is merged and the checkout updated, -Force puts it on the board and the dispatcher''s sync keeps it' "$($r.Text)`n$($r2.Text)"
+    & git reset -q --hard HEAD~1
+    [void](Invoke-Kit $board @('sync'))
     & git remote remove origin; Remove-Item -Recurse -Force -LiteralPath $bare
 
     Write-Host 'review-scope'
@@ -965,7 +996,7 @@ Assert-That ((& $ghGet 'gh-dry-force') -match 'would move PKT-02 #2 under epic #
 $missing = "note: H-2 #7 was left where it is: its Parent PKT-09 isn't on the board"
 Assert-That ((& $ghGet 'gh-dry') -match "note: H-4 \(new\) would get no parent: its Parent PKT-09 isn't on the board") 'GitHub: a dry run tells a new task whose Parent has no issue that it would get no parent' (& $ghGet 'gh-dry')
 Assert-That ((@('gh-dry', 'gh-dry-force', 'gh', 'gh-force') | Where-Object { (& $ghGet $_) -match [regex]::Escape($missing) -and (& $ghGet $_) -notmatch 'PKT-09 \(new\)' }).Count -eq 4) 'GitHub: a Parent packet sync won''t create is named the same way in a dry run, with -Force, and in a real run' $r.Text
-Assert-That ((& $ghGet 'gh') -match 'note: PKT-02 #2 is under #57, and its place is under epic #99: sync -Phase phase-1 -Force moves it' -and (& $ghGet 'gh') -match 'note: PKT-04 #4 is under example/other#12' -and (& $ghGet 'gh') -match 'linked H-1 under PKT-03 #3' -and (& $ghGet 'gh') -match "note: H-2 #7 was left where it is: its Parent PKT-09 isn't on the board" -and (& $ghGet 'gh') -match '\|posts=api -X POST repos/example/sample/issues/3/sub_issues -F sub_issue_id=1006\|') 'GitHub: a human task becomes a sub-issue of its Parent packet; an issue under another parent is named, not re-parented, so sync no longer fails on it' (& $ghGet 'gh')
+Assert-That ((& $ghGet 'gh') -match "note: PKT-02 #2 is under #57, and its place is under epic #99: sync -Phase phase-1 -Force moves it$mergeFirst" -and (& $ghGet 'gh') -match 'note: PKT-04 #4 is under example/other#12' -and (& $ghGet 'gh') -match 'linked H-1 under PKT-03 #3' -and (& $ghGet 'gh') -match "note: H-2 #7 was left where it is: its Parent PKT-09 isn't on the board" -and (& $ghGet 'gh') -match '\|posts=api -X POST repos/example/sample/issues/3/sub_issues -F sub_issue_id=1006\|') 'GitHub: a human task becomes a sub-issue of its Parent packet; an issue under another parent is named, not re-parented, so sync no longer fails on it' (& $ghGet 'gh')
 Assert-That ((& $ghGet 'gh-force') -match 'moved PKT-02 under epic #99 \(was under #57\)' -and (& $ghGet 'gh-force') -match 'moved PKT-04 under epic #99 \(was under example/other#12\)' -and (& $ghGet 'gh-force') -match 'issues/99/sub_issues -F sub_issue_id=1002 -F replace_parent=true') 'GitHub: sync -Force moves it, with replace_parent' (& $ghGet 'gh-force')
 Assert-That ((& $ghGet 'gh-502') -match '^error:.*HTTP 502') 'GitHub: an error other than 404 reading a parent stops sync' (& $ghGet 'gh-502')
 Assert-That ((& $ghGet 'gh-again') -eq "note: H-2 #7 was left where it is: its Parent PKT-09 isn't on the board | note: H-3 #8 was left where it is: its Parent PKT-08 isn't on the board | note: H-4 (new) would get no parent: its Parent PKT-09 isn't on the board|posts=|reads=") 'GitHub: a human task already under its Parent packet''s issue is left alone, and no parent is read' (& $ghGet 'gh-again')
@@ -1399,7 +1430,7 @@ $r = Invoke-Kit $abTest @('-Kit', $kit)
 $ab = @{}; foreach ($line in ($r.Text -split "`n")) { if ($line -match '^(?<k>[\w-]+)=(?<v>.*)$') { $ab[$Matches.k] = $Matches.v } }
 $abGet = { param($k) if ($ab.ContainsKey($k)) { $ab[$k] } else { '' } }
 Assert-That ($r.Code -eq 0) 'the hierarchy scenarios run' $r.Text
-Assert-That ((& $abGet 's1-dry') -match "would create Feature 'Checkout' under AB#1" -and (& $abGet 's1-dry') -match "would create Feature 'Storefront' under AB#1" -and (& $abGet 's1-dry') -match 'would put PKT-02 \(new\) under Feature ''Checkout'' \(new\)' -and (& $abGet 's1-dry') -match "note: PKT-01 AB#5 is under AB#1, and its place is under Feature 'Payments' AB#3: sync -Phase phase-1 -Force moves it" -and (& $abGet 's1-dry') -notmatch 'would move' -and (& $abGet 's1-dry') -match '\|writes=0$') 'a dry run says which features it would create and what it would link, names misplaced items, and writes nothing' (& $abGet 's1-dry')
+Assert-That ((& $abGet 's1-dry') -match "would create Feature 'Checkout' under AB#1" -and (& $abGet 's1-dry') -match "would create Feature 'Storefront' under AB#1" -and (& $abGet 's1-dry') -match 'would put PKT-02 \(new\) under Feature ''Checkout'' \(new\)' -and (& $abGet 's1-dry') -match "note: PKT-01 AB#5 is under AB#1, and its place is under Feature 'Payments' AB#3: sync -Phase phase-1 -Force moves it$mergeFirst" -and (& $abGet 's1-dry') -notmatch 'would move' -and (& $abGet 's1-dry') -match '\|writes=0$') 'a dry run says which features it would create and what it would link, names misplaced items, and writes nothing' (& $abGet 's1-dry')
 Assert-That ((& $abGet 's1-plain') -match '\|tree=PKT-01>Storefront revamp:User Story,PKT-02>Checkout:User Story,H-1>Storefront revamp:Task$' -and (& $abGet 's1-plain') -match 'note: H-1 AB#6 is under AB#1' -and (& $abGet 's1-plain') -notmatch 'moved') 'without -Force, sync moves nothing (the dispatcher''s sync never moves an item): it links new items and names the misplaced' (& $abGet 's1-plain')
 Assert-That ((& $abGet 's1-dry-force') -match "would move PKT-01 AB#5 under Feature 'Payments' AB#3 \(now under AB#1\)" -and (& $abGet 's1-dry-force') -match 'would move H-1 AB#6 under PKT-03 AB#\d+ \(now under AB#1\)' -and (& $abGet 's1-dry-force') -match '\|writes=0$') 'a dry run with -Force lists every move, and writes nothing' (& $abGet 's1-dry-force')
 Assert-That ((& $abGet 's1-tree') -eq 'PKT-01>Payments:User Story,PKT-02>Checkout:User Story,PKT-03>Storefront:User Story,H-1>PKT-03:Task,H-2>PKT-02:Task,H-3>none:Task') 'under an epic: a feature per workstream (none: the phase''s name), packets as its stories, a human task under the story it unblocks or follows' "$(& $abGet 's1-tree')`n$(& $abGet 's1')"

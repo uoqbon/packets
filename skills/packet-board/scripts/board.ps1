@@ -239,12 +239,12 @@ function Invoke-PwSync {
         if ($roundTrips -and $split.Marker -and -not $Force) {
             $boardSha = (Get-PwSha256 $split.Content).Substring(0, 16)
             if ($boardSha -ne $split.Marker.Pairs['body']) {
-                Write-Output "skipped $($p.Id) $(Get-PwItemRefLabel $item): its body was edited on the board since the last sync. Move those edits into $($p.Path), then sync -DryRun -Force, and sync -Force once the owner has seen what it changes."
+                Write-Output "skipped $($p.Id) $(Get-PwItemRefLabel $item): its body was edited on the board since the last sync. Move those edits into $($p.Path) in a pull request, merge it and update this checkout, then sync -DryRun -Force, and sync -Force once the owner has seen what it changes."
                 $counts.skipped++; continue
             }
         }
         if (-not $split.Marker -and -not $Force) {
-            Write-Output "skipped $($p.Id) $(Get-PwItemRefLabel $item): the item wasn't created by sync (no source marker). Check it matches $($p.Path), then sync -DryRun -Force, and sync -Force once the owner has seen what it changes."
+            Write-Output "skipped $($p.Id) $(Get-PwItemRefLabel $item): the item wasn't created by sync (no source marker). Check it against $($p.Path), move anything only the item has into that file in a pull request, merge it and update this checkout, then sync -DryRun -Force, and sync -Force once the owner has seen what it changes."
             $counts.skipped++; continue
         }
         if ($DryRun) { Write-Output "would update $($p.Id) $(Get-PwItemRefLabel $item)"; $counts.updated++; continue }

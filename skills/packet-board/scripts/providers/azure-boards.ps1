@@ -630,7 +630,7 @@ function Set-ProvHierarchy {
             })
         if ($target -and $parents.Count -eq 1 -and $parents[0].Id -eq $target) { continue }
         $from = ($parents | ForEach-Object { "AB#$($_.Id)" }) -join ', '
-        if ($from -and -not $Force) { "note: $($place.Id) AB#$($item.Number) is under $from, and its place is under ${label}: sync -Phase $($ph.Slug) -Force moves it, and also overwrites any body this sync skipped as edited on the board, so move those edits into the packet files first (with -DryRun, it shows every change)"; continue }
+        if ($from -and -not $Force) { "note: $($place.Id) AB#$($item.Number) is under $from, and its place is under ${label}: sync -Phase $($ph.Slug) -Force moves it, and also overwrites any body this sync skipped as edited on the board, so first move those edits into the packet files in a pull request, merge it and update this checkout (sync -Phase $($ph.Slug) -DryRun -Force shows every change)"; continue }
         $verb = if ($parents.Count) { 'move' } else { 'put' }
         if ($DryRun) { "would $verb $($place.Id) AB#$($item.Number) under $label$(if ($from) { " (now under $from)" })"; continue }
         # Outside a dry run every feature and item exists by now.
