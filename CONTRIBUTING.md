@@ -21,6 +21,14 @@ Issues and pull requests are welcome. The kit is the agents, skills and scripts 
 - Instructions (agents, skills, templates) say what to do, in order, and when to stop. When a script can decide something, check it in the script rather than in an instruction.
 - Leave `VERSION` alone; it changes with a release.
 
+## Releasing
+
+The owner releases from `main`:
+
+1. In a pull request, set `VERSION`, add the release's entry at the top of [CHANGELOG.md](CHANGELOG.md) (with what an install of the previous release needs to do), and change the tag in the README's install command.
+2. Once it is merged and CI has passed on the merge commit, tag that commit `v<VERSION>` with an annotated tag and push the tag.
+3. Publish a GitHub release from the tag, with the changelog entry as its notes.
+
 ## License
 
 By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE).

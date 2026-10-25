@@ -2,7 +2,7 @@
 
 This page estimates what the packet workflow costs in GitHub AI Credits, and how to run it on a limited team allowance, with 12,500 credits a month as the example.
 
-The run counts per packet come from three sources: the kit's rules, the stage 5 end-to-end run, and 73 merged packets of the Drafter project, where the workflow started. The tokens per run are estimates. The end-to-end run used the owner's own API key, so Copilot billed nothing and nothing recorded tokens. [Calibrate](#calibrate) says how to replace the estimates with measurements.
+The run counts per packet come from three sources: the kit's rules, the stage 5 end-to-end run, and 73 merged packets of the private project where the workflow started. The tokens per run are estimates. The end-to-end run used the owner's own API key, so Copilot billed nothing and nothing recorded tokens. [Calibrate](#calibrate) says how to replace the estimates with measurements.
 
 **Written for four review tiers.** The figures on this page were worked out for the four-tier panel (1 light, 2 standard, 3 deep, 4 max) on the Opus 5.5 and Sonnet 5.5 classes. The panel now has three tiers, all on GPT-6.1 Sol: 1 light (low effort), 2 standard (medium) and 3 deep (high, the top). Tier 3 takes every diff that went to tier 4, with its adversarial remit, so where this page says tier 4, read tier 3. `budget.creditsPerRun.reviewerByTier` now lists three numbers, tier 3 at this page's tier-4 rate (a four-number list from an older install still works: its third number is dropped), so a packet whose rounds ran at the old tier 3 estimates higher than the tables below. The tables haven't been recalculated.
 
@@ -113,9 +113,9 @@ Per phase: `packet-plan` about 400 (5 packets), 550 (10) or 900 (20); a board or
 
 ## One packet
 
-Typical counts come from Drafter's 73 merged packets, which ran the same panel under Claude Code:
+Typical counts come from the original project's 73 merged packets, which ran the same panel under Claude Code:
 
-| Drafter, 73 packets | Value |
+| Original project, 73 packets | Value |
 | --- | --- |
 | Rounds | 1: 8 packets, 2: 12, 3: 53. 73% used all three. |
 | Reviewer runs per packet | 6.6 on average; 4.8 under 500 changed lines, 11 above 1,500 |
@@ -124,7 +124,7 @@ Typical counts come from Drafter's 73 merged packets, which ran the same panel u
 | Round-2 fix rounds with a blocking finding | **9 of 53**; the other 44 had only should-fix findings |
 | Round-3 outcomes | 46 pass, 7 Needs human |
 
-Drafter's tier settings put 96% of its reviewer runs at tier 4. So the tiers below come from the kit's own thresholds instead:
+The original project's tier settings put 96% of its reviewer runs at tier 4. So the tiers below come from the kit's own thresholds instead:
 
 - **S** (about 150 lines of logic, plus tests and a decision record, about 300 lines) starts at tier 2. With a shared touchpoint it starts at tier 3, because it touches two subsystems.
 - **M** (above 300 lines) starts at tier 3.
@@ -144,7 +144,7 @@ Credits per packet under the defaults:
 | Stage 5 (PKT-1), as run | 3 (4, 4, 4) | 4, 3, 1 | 8 | 3 | 1,240 | 1,440 | 185 | – | **2,870** |
 | Stage 5 without `ci.yml` | 3 (2, 3, 4) | 4, 3, 1 | 8 | 3 | 1,240 | 640 | 185 | – | **2,070** |
 
-"Best case" is one clean round. "Typical" is three rounds with two fix runs, Drafter's most common path. Each figure is rounded on its own, so a row's parts can miss its total by up to 10.
+"Best case" is one clean round. "Typical" is three rounds with two fix runs, the original project's most common path. Each figure is rounded on its own, so a row's parts can miss its total by up to 10.
 
 **Stage 5 calibration.** PKT-1 went to tier 4 only because it added `.github/workflows/ci.yml`, a review-machinery path. Without that file the same diff (227 lines, 6 files, one code subsystem) starts at tier 2, and the +1 rule lifts it to 3, then 4. The CI file cost that packet about 800 credits, 28% of its total.
 
@@ -195,7 +195,7 @@ The safety column covers the four properties that must hold:
 
 | Lever | Saves | Quality lost | Safety | Change |
 | --- | --- | --- | --- | --- |
-| **From round 2, a round with only should-fix findings passes** and opens follow-ups, as the last round already did. A blocking finding still gets a fix and another round (in the last round it goes to the owner, as before). | 20% (7,300) | low to medium: should-fix findings found from round 2 on become follow-up issues instead of in-PR fixes; in Drafter that would have ended 44 of 53 second rounds | none: tier, trust, CI and merge unchanged | kit: `review.shouldFixPassFromRound` |
+| **From round 2, a round with only should-fix findings passes** and opens follow-ups, as the last round already did. A blocking finding still gets a fix and another round (in the last round it goes to the owner, as before). | 20% (7,300) | low to medium: should-fix findings found from round 2 on become follow-up issues instead of in-PR fixes; in the original project that would have ended 44 of 53 second rounds | none: tier, trust, CI and merge unchanged | kit: `review.shouldFixPassFromRound` |
 | **Two lenses per reviewer run.** Every lens still runs, at the round's tier; one reviewer reads the diff once for both. | 16% (5,800) | low to medium: a reviewer splits its attention between two questions | none | kit: `review.lensesPerReviewer` |
 
 **Mixed: real savings, some review strength lost**
@@ -212,13 +212,13 @@ The safety column covers the four properties that must hold:
 
 | Lever | Saves | Why not |
 | --- | --- | --- |
-| `maxRounds` 2 | 24% (8,800) | The should-fix rule gets 83% of this saving. With 2 rounds, a blocking finding in round 2 goes to the owner instead of the panel; that is 9 of 53 packets in Drafter. |
-| At most 3 lenses in round 1 and 2 after (or 2 and 1) | 17% (35%) | A lens that doesn't run finds nothing, and 76% of Drafter's lens runs confirmed a finding. Grouping lenses saves almost as much and keeps them all. |
+| `maxRounds` 2 | 24% (8,800) | The should-fix rule gets 83% of this saving. With 2 rounds, a blocking finding in round 2 goes to the owner instead of the panel; that is 9 of 53 packets in the original project. |
+| At most 3 lenses in round 1 and 2 after (or 2 and 1) | 17% (35%) | A lens that doesn't run finds nothing, and 76% of the original project's lens runs confirmed a finding. Grouping lenses saves almost as much and keeps them all. |
 | Implementer on Claude Haiku 5.5 | 7% (2,600) | The implementer is 9% of the cost. More findings mean more rounds, which likely eat the saving, and contexts above 100K cost five times as much. |
 | Light class on Haiku 5.5 or GPT-5.6 Luna | about 0 | Tier 1 needs a docs-only or tiny diff, so it is rare. Fine to do, but it saves nothing. |
 | `packet-plan` on the standard class | 1% (270) | Ownership lines and contracts are the hardest judgement in the kit, and everything later trusts them. |
 | A fresh dispatcher session per round (`resume`) | 4% (1,600) | It costs the owner one click per round. |
-| Skip later-round lenses that had no findings | about 1% | The kit already runs only the lenses that confirmed a finding, plus those whose paths the fix touched: 16 of Drafter's 291 later-round runs. Dropping those leaves a fix's new surface unreviewed by its lens. |
+| Skip later-round lenses that had no findings | about 1% | The kit already runs only the lenses that confirmed a finding, plus those whose paths the fix touched: 16 of the original project's 291 later-round runs. Dropping those leaves a fix's new surface unreviewed by its lens. |
 | Hold the panel until CI is green | negative | The dispatcher already runs `commands.ci` (when it is set) before the PR, and waiting adds a `resume` session (80) per packet. The cheap version is free: when CI has already failed on the head under review, add the failure to that round's fixes rather than finding it after the pass. |
 
 ## Recommended budget profile

@@ -1,6 +1,6 @@
 # Packet workflow kit for GitHub Copilot
 
-A way of working for building planned software with several coding agents at once, packaged as GitHub Copilot custom agents and agent skills for VS Code. It came out of Drafter, a private project where it ran on Claude Code; this is the portable, provider-neutral version.
+A way of working for building planned software with several coding agents at once, packaged as GitHub Copilot custom agents and agent skills for VS Code. It came out of a private project where it ran on Claude Code; this is the portable, provider-neutral version.
 
 ```text
 implementation plan
@@ -54,10 +54,10 @@ The ideas that make it work:
 
 ## Install
 
-Clone this repository next to (not inside) the repository you want to set up, then run its installer against that repository:
+Clone a release of this repository next to (not inside) the repository you want to set up, then run its installer against that repository:
 
 ```bash
-git clone https://github.com/uoqbon/packets.git
+git clone --branch v0.1.0 https://github.com/uoqbon/packets.git
 ```
 
 ```bash
@@ -66,7 +66,7 @@ pwsh -File packets/install.ps1 -Target <path to the repository> -WithInstruction
 
 It copies the agents to `<repo>/.github/agents/`, the skills to `<repo>/.github/skills/` (where Copilot discovers them) and the hook to `<repo>/.github/hooks/`, creates `.github/packet-workflow.json` from the template with the repository and default branch filled in, and with `-WithInstructions` adds the workflow's rules to `.github/copilot-instructions.md` between markers. `-DryRun` shows what it would do.
 
-To upgrade, pull this repository (`git -C packets pull`) and run the same command. The installer records hashes in `.github/packet-workflow.kit.json`, replaces only files you haven't changed since the last install, and lists the ones it kept (`-Force` replaces them). Put project-specific review lenses in `.github/packet-lenses/<name>.md`; the kit never touches that folder, and a lens there overrides the kit's lens of the same name.
+To upgrade, check out a newer release (`git -C packets fetch --tags`, then `git -C packets checkout <tag>`), read what it changes in [CHANGELOG.md](CHANGELOG.md), and run the same command. To follow `main` between releases instead, clone without `--branch` and upgrade with `git -C packets pull`. The installer records hashes in `.github/packet-workflow.kit.json`, replaces only files you haven't changed since the last install, and lists the ones it kept (`-Force` replaces them). Put project-specific review lenses in `.github/packet-lenses/<name>.md`; the kit never touches that folder, and a lens there overrides the kit's lens of the same name.
 
 Commit what it installs in a pull request; Copilot reads the files from the checkout, and worktree sessions see only committed files.
 
@@ -171,7 +171,11 @@ Before relying on a hosted provider, smoke-test it on a sandbox repository: `boa
 
 ## Known limitations
 
-- **Run end to end inside Copilot once, before the fixes it led to.** All nine stages of `tests/copilot-e2e.prompt.md` ran on kit 0.1.0 in the Copilot harness, with Claude models through the owner's API key, on labelled issues: planning, sync, a foundation packet through three review rounds, two dispatchers in parallel with a merge conflict, Needs human and resume, the safety probes and progress. Three implementation packets merged. Its failures led to the `models` map, the scope check's comparison base after a merge of the default branch, and the amendment PR for answers that change a packet; those fixes, and the cost profile, haven't been through the prompt yet. Not exercised live in that run: a forged round from a second account, a lock collision, an approved amendment carried through to Ready to merge, and the github-project and Azure Boards providers end to end. The Azure story run (above) has since covered a forged round from a second GitHub account outside `trustedAuthors`, which `board rounds` ignored, and the Azure Boards provider. Run the prompt on a sandbox repository before relying on the kit.
+- **Run end to end inside Copilot twice, each time before the fixes it led to.**
+  - All nine stages of `tests/copilot-e2e.prompt.md` ran in the Copilot harness on the kit as it was before it moved to this repository, with Claude models through the owner's API key, on labelled issues: planning, sync, a foundation packet through three review rounds, two dispatchers in parallel with a merge conflict, Needs human and resume, the safety probes and progress. Three implementation packets merged. Its failures led to the `models` map, the scope check's comparison base after a merge of the default branch, and the amendment PR for answers that change a packet.
+  - All nine stages of `tests/copilot-e2e-azure-story.prompt.md` ran in VS Code's Copilot harness (VS Code 1.143.1) on the kit at `0a97b42`, on 2026-10-23 and 24, on a Basic-process Azure Boards project with a story as the root and the Azure Boards app connected. The config listed GPT-6.1 Sol, then Claude Sonnet 5.5, for every class; which model each agent ran on wasn't visible. Its base stages took the first run's three fixes through: the models map, the scope base after a resume merged the default branch, and the amendment PR. Three implementation packets merged, and a forged round from a second GitHub account and a forged answer from a second Azure DevOps account, both outside `trustedAuthors`, were ignored. Of 75 checks, 62 passed, 7 failed, 3 were blocked, 1 was `HOST` and 2 were N/A. Five of the failures came from the verifier's own setup commit and PR, which named the story and its existing child, so the Azure Boards app linked them; the other two led to the Markdown decoding and the dispatcher hook. Blocked: the model each agent ran on, the live claims of two dispatchers in parallel, and the brief after the amendment, since the resumed packet stopped at Needs human again.
+
+  Not exercised live in either run: a lock collision, an approved amendment carried through to Ready to merge, the github-project provider end to end, and the cost profile. The fixes the Azure story run led to haven't been through a full run yet. Run the prompts on a sandbox repository before relying on the kit.
 - **Azure Boards has met one live organization, before the fixes that run led to** (see *Inside Copilot* above). It used a Basic-process project with a story as the root; other processes, epic and feature roots, `markdown: false` and `targetDateField` are tested offline only.
 - **Other repositories are read only for dependencies.** With `remotes`, a packet can wait for a packet in another repository, as long as that repository's board keeps its packets as GitHub issues (`github-issues` or `github-project`). Locks, contract questions (`<ID> contract: …` follow-ups) and pull requests are still looked up in this repository only. A packet never stacks on another repository's packet, and reviewers don't see the other repository's code.
 - **Harnesses.** Written for the Local harness first. The Copilot harness needs `github.copilot.chat.cli.customAgents.enabled`; whether it runs two reviewer subagents at once depends on the harness (the panel falls back to one at a time). The Copilot cloud agent isn't wired in.
@@ -179,14 +183,6 @@ Before relying on a hosted provider, smoke-test it on a sandbox repository: `boa
 - **Copilot loads agents and skills from the workspace.** Scripts always run from the pinned kit, and the dispatcher re-reads skills from it, but the agent definitions (and a skill Copilot loads on its own) come from the checkout. If a packet branch changes `.github/agents/` or `.github/skills/`, `check-scope.ps1` flags it as MACHINERY and the dispatcher restores those paths from the base before any review.
 - **A host can offer the dispatcher as a subagent** (see *Who can start which agent* above). The kit's hook refuses such a start where the host runs repository hooks, though not a dispatcher session an agent opens from a terminal. Elsewhere, nothing stops another agent from starting it except the dispatcher's own check, which is an instruction a model follows, not a host rule; in the Copilot harness it rests on the model's judgement alone. The e2e prompt records the listing as `HOST` in S1.4 and tests the guard with a harmless `status` start in stage 8. In the first run that did, the Azure story run in the Copilot harness, before the hook existed, the check failed: the dispatcher went on into its Preflight instead of refusing. The hook is tested offline against the input formats the host documents, and against the `task` call that run recorded. One live run has used it since: a rerun of that `status` start alone, in VS Code's Copilot harness on macOS. The hook refused the start and left `.git/FETCH_HEAD` and the `packet-kit-*` temp folders untouched. The dispatcher never started, so its own check wasn't reached. That run didn't cover the Local harness, Copilot CLI, the Copilot app, Windows or a dispatcher session an agent opens from a terminal. The `packet-dispatch` skill has a check of the same kind, meant to stop an agent that loads or reads the procedure on its own; it is also only an instruction, resting on the model's judgement in every harness (apart from a Local subagent's missing subagent tool). Stage 8 tests the judgement with a subagent's `status` start the same way; in the Azure story run the skill's check refused correctly.
 - **Azure board-edit detection** compares against the item as read at the start of sync, so an edit made during a sync can be overwritten.
-
-## Compared with the Claude Code original
-
-Kept: packets with owned paths and touchpoints, contracts first, locks, one decision record per packet, the claim lease, verified briefs, scope checks, the lens panel with tiers, triage, three rounds, follow-ups, Needs human, CI on the reviewed head, the owner as the only merge gate.
-
-Changed: PowerShell instead of Bash, so the scripts run on Windows; three board providers instead of one GitHub Project; packet files in the repository as the source of truth (sync renders board items from them); markers are visible code spans so they survive every board's renderer; one session per worktree with stateless subagents instead of a background implementer in a separate worktree; tiers configured per repository.
-
-Left out, on purpose: Drafter's cloud-session token checks, its GraphQL budget accounting, the detailed CI-failure classification and the many recovery paths its dispatcher grew for one tight deadline. Add them back per project if you need them.
 
 ## Contributing
 
