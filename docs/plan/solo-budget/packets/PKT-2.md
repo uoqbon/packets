@@ -35,7 +35,7 @@ An engineer whose seat can't pay for a dispatch still gets planning and the boar
 - `skills/packet-board/SKILL.md`, a short "Without a dispatcher" section:
   - `board set <ID> "Status=In progress"` before a hand-off, and `board assign <ID>` when a person takes it;
   - the PR body's closing line is what `board ref <ID>` prints;
-  - before review, the scope check on the PR's branch: `pwsh -File .github/skills/packet-dispatch/scripts/check-scope.ps1 -Packet <ID> -Base origin/<default branch>` (it compares from the merge base);
+  - before review, the scope check, run from a kit pinned from origin's default branch as packet-dispatch's Preflight step 1 makes it, never from the PR branch's copy (the PR could change the script): `pwsh -File <kit>/.github/skills/packet-dispatch/scripts/check-scope.ps1 -Packet <ID> -Base origin/<default branch> -Head <PR branch>` (it compares from the merge base);
   - after a merge, `board reconcile`.
 - `README.md`:
   - The Install section mentions `-PlanOnly`.
@@ -79,7 +79,7 @@ An engineer whose seat can't pay for a dispatch still gets planning and the boar
 
 - [ ] `-PlanOnly` into a fresh repository writes exactly the files under `.github/skills/packet-plan`, `packet-board` and `packet-progress`, `.github/skills/packet-dispatch/scripts/check-scope.ps1` and no other packet-dispatch file, plus the config (the template with `repo` and the default branch filled in) and the manifest (mode plan-only, listing only those files). `-DryRun` writes nothing.
 - [ ] `-PlanOnly` succeeds on an existing config with `"models": { "strong": [] }`; the same config without `-PlanOnly` still fails as it does today.
-- [ ] From the plan-only install, with a config holding only `repo` and `board.provider` `local` (no `commands`, `models`, `guardrails`, `claims` or `review` keys), these all exit 0 on the sample phase: `validate-packets.ps1`; `board setup`, `sync`, `show`, `next` and `reconcile`; and `progress.ps1 -Json`. The validator warns on a lens `perfromance` and not on `performance`. From the same install, `check-scope.ps1` exits 0 on a branch inside its packet's Owns and 1 on one that edits another packet's path.
+- [ ] From the plan-only install, with a config holding only `repo` and `board.provider` `local` (no `commands`, `models`, `guardrails`, `claims` or `review` keys), these all exit 0 on the sample phase: `validate-packets.ps1`; `board setup`, `sync`, `show`, `next` and `reconcile`; and `progress.ps1 -Json`. The validator warns on a lens `perfromance` and not on `performance`. From the same install, `check-scope.ps1` exits 0 on a branch inside its packet's Owns and 1 on one that edits another packet's path. Run from a pinned kit with `-Head`, it still exits 1 when the branch also edits its own `check-scope.ps1` to print OK.
 - [ ] A full run on a plan-only install adds the agents, the dispatch and review skills and the hook, records mode full and says so. A `-PlanOnly` run on a full install exits 1, lists what it would remove, and leaves every file under `.github` and the manifest byte-identical.
 - [ ] After any sequence of `-WithInstructions` runs, in either mode, `.github/copilot-instructions.md` holds one marked block: the current mode's.
 - [ ] Every existing installer test passes unchanged, so a default install is the same as at the base.

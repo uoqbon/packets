@@ -29,7 +29,7 @@ This packet recomputes every table for the three-tier panel on GPT-6.1 Sol in ev
   | `dispatcherPerReviewerRun` | 35 | 18 |
   | `reviewerByTier` tier 3 (S, M, L) | 195, 280, 380 | 98, 140, 190 |
 
-  `implementer`, `implementerFix`, tiers 1 and 2, and `laterRoundFactor` were already priced at Sonnet rates, so they stay. An existing config keeps the values written in it: the installer never rewrites a config.
+  `implementer`, `implementerFix`, tiers 1 and 2, and `laterRoundFactor` were already priced at Sonnet rates, so they stay. Tiers 1 and 2 now run at low and medium effort, below the reasoning their rates were worked out at, so the page keeps their token shapes as written and calls those two rates upper bounds until H-2 measures them. An existing config keeps the values written in it: the installer never rewrites a config.
 - **The tests that pin today's rates.** Re-pin the credit figures in `tests/run-tests.ps1` (the stage 5 estimate, the grouped run, the summary, the four-tier list and the `progress -Credits` end-to-end lines) to the new rates. The decision record derives each new number by hand.
 - **Finished packets in `progress.ps1 -Credits`.** `Get-PwCreditSummary` counts a packet as finished when a `settle-check` follows its last round, as well as when that round passed or went to the owner. A settle after a budget stop (PKT-6) leaves the last round at `outcome=fix`.
 - **The page.** Recompute, or mark as history, each of these in docs/cost.md:
@@ -50,6 +50,7 @@ This packet recomputes every table for the three-tier panel on GPT-6.1 Sol in ev
   15. **"Applied in order"**: the 5,800, 6,300 and 800.
   16. **Running it within the pool**: 2,400 a packet, US$240, about 4,000 for an L packet, 350 overhead, and "1.8× an M one".
   17. **Calibrate step 1**: "Opus 5.5 tokens … eight tier-4 reviewer runs" now describes a run on other models; mark it as history.
+  18. **Recommended budget profile**: the `creditsPerRun` its JSON restates (0.1.1's), and "Leave `budget.creditsPerRun` out to use the defaults shown", which must show the new defaults.
 - **On the page, also:**
   - Remove the "Written for four review tiers" paragraph.
   - State once that the page assumes GPT-6.1 Sol in every class, and add one sentence saying that a dearer strong class (Opus 5.5, GPT-5.6 Sol) doubles the dispatcher's and tier 3's parts.
@@ -80,7 +81,7 @@ This packet recomputes every table for the three-tier panel on GPT-6.1 Sol in ev
 
 ## Provides
 
-- The default `budget.creditsPerRun` on GPT-6.1 Sol rates, which PKT-4's solo template copies.
+- The default `budget.creditsPerRun` on GPT-6.1 Sol rates, which the solo overlay (PKT-4) inherits.
 - A three-tier cost page that PKT-8 adds the solo profile to.
 
 ## Acceptance criteria
@@ -88,7 +89,7 @@ This packet recomputes every table for the three-tier panel on GPT-6.1 Sol in ev
 - [ ] `budget.creditsPerRun` in the template and in `$script:Defaults` holds the new values above, and nothing else changes in either file but `Get-PwCreditSummary`'s finished rule.
 - [ ] A packet whose last round says `outcome=fix` and whose rows end with a `settle-check` counts as finished in `Get-PwCreditSummary`.
 - [ ] The only existing tests that change are the credit figures named above, and the decision record derives each new figure by hand.
-- [ ] Each of the 17 items above is recomputed for tiers 1 to 3 on GPT-6.1 Sol, or marked as history; the "Written for four review tiers" paragraph is gone, and no table has a tier-4 row.
+- [ ] Each of the 18 items above is recomputed for tiers 1 to 3 on GPT-6.1 Sol, or marked as history; the "Written for four review tiers" paragraph is gone, and no table has a tier-4 row.
 - [ ] A test reads the S, M and L typical totals from "Credits per packet under the defaults", and matches each within 1% to `Get-PwCreditEstimate` on the default rates for the shapes the page states, plus the resume share it states.
 
 ## Tests to run

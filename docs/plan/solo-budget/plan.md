@@ -21,7 +21,7 @@ Done means:
 Constraints every packet lives with:
 
 - **The four safety properties hold:** the tier is a floor (amended: under a cap, the forced raises still reach the top tier), markers count only from trusted authors, CI passes on the reviewed head, and only the owner merges.
-- **Opt-in only.** An install whose config sets none of `review.tierCap`, `budget.maxCreditsPerPacket` and `models.agents` behaves as 0.1.1 does, with two deliberate exceptions the changelog names: every dispatch runs `credit-check.ps1` at Select, before each round and before each fix run (it prints OFF after reading only the config when no ceiling is set), and a reviewer the host won't start stops the round at Needs human. Every one of the 243 offline tests at 0.1.1 passes unchanged, except the credit figures PKT-7 re-pins to the new default rates. An existing config keeps the `creditsPerRun` written in it.
+- **Opt-in only.** An install whose config sets none of `review.tierCap`, `budget.maxCreditsPerPacket` and `models.agents` behaves as 0.1.1 does, with two deliberate exceptions the changelog names: every dispatch runs `credit-check.ps1` at Select, before each round and before each fix run (it prints OFF after reading only the config when no ceiling is set), and a reviewer the host won't start stops the round at Needs human. A config that leaves out `budget.creditsPerRun`, or part of it, also gets PKT-7's new default rates. Every one of the 243 offline tests at 0.1.1 passes unchanged, except the credit figures PKT-7 re-pins to the new default rates. An existing config keeps the `creditsPerRun` written in it.
 - **Offline and cross-platform.** Every new behaviour has offline tests (pwsh 7.2+ and git only), which CI runs on Linux, macOS and Windows.
 - **Settings come from the base.** The cap and the ceiling are read like the existing review limits: from the config at the base, never from the branch under review.
 - **Built without the kit.** The owner decided the phase isn't dispatched. Each packet is one PR, built by a person or an assistant and reviewed by the owner. Its **Review lenses** and **Review tier** lines say what that review should cover; its Dispatcher notes are notes for whoever builds it.
@@ -81,11 +81,12 @@ flowchart LR
   PKT8 --> H3[H-3 release 0.2.0]
   PKT9 --> H3
   PKT9 --> H4[H-4 run the e2e stages]
+  PKT8 --> H4
   H4 --> H3
-  PKT8 --> H2[H-2 calibrate]
+  H3 --> H2[H-2 calibrate]
 ```
 
-**Critical path:** PKT-1 → PKT-2 → PKT-4 → PKT-8 → H-2, weight 9 (from `validate-packets.ps1`, which reports 0 errors and 0 warnings for this phase). PKT-1 → PKT-7 → PKT-4 → PKT-8, PKT-1 → PKT-3 → PKT-6 → PKT-8 and PKT-1 → PKT-5 → PKT-6 → PKT-8 weigh the same, so any of them slipping moves the release. Land PKT-1 first and fast: five packets wait on it.
+**Critical path:** PKT-1 → PKT-2 → PKT-4 → PKT-8 → H-4 → H-3 → H-2, weight 11 (from `validate-packets.ps1`, which reports 0 errors and 0 warnings for this phase). The chains into PKT-8 through PKT-7 → PKT-4, PKT-3 → PKT-6 and PKT-5 → PKT-6 weigh the same, and PKT-1 → PKT-2 → PKT-4 → PKT-9 → H-4 → H-3 one less, so a slip in any of them, PKT-9 and H-4 included, moves the release. Land PKT-1 first and fast: five packets wait on it.
 
 ## Schedule
 
@@ -119,7 +120,7 @@ None. A packet that finds it needs a file another packet owns stops and asks the
 ## Cut line and fallbacks
 
 - **Behind the cut line if the schedule slips:**
-  - PKT-9, the e2e stages: the offline tests still cover the scripts.
+  - PKT-9, the e2e stages: the offline tests still cover the scripts. H-4 goes with it, H-3 drops both dependencies, and the release notes say the e2e stages haven't run.
   - PKT-3's `ModelCheck` field: the installer's warning in PKT-4 and the stop in PKT-6 still cover the Local harness.
 - **If PKT-6 slips:** release plan-only mode and the solo profile without the ceiling. `credit-check.ps1` (PKT-5) can still be run by hand, and the solo profile works without it.
 - **If PKT-3 slips:** the solo template ships without `tierCap`. An M packet's two rounds then run at tier 3: about 1,290 credits against 985 with the cap.

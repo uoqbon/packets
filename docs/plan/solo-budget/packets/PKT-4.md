@@ -19,7 +19,7 @@
 
 ## In scope
 
-- `templates/packet-workflow.solo.json`: an overlay that holds only these keys. The installer merges it onto the default template with `Merge-PwHashtable`, so everything else (board, labels, `lensPaths`, model lists, `creditsPerRun`) comes from the default template and can't drift:
+- `templates/packet-workflow.solo.json`: an overlay that holds only these keys. The installer merges it onto the default template, keeping the template's key order (`Merge-PwHashtable` builds an unordered `@{}`, so the installer merges into an ordered copy), so everything else (board, labels, `lensPaths`, model lists, `creditsPerRun`) comes from the default template and can't drift:
 
   | Key | Value |
   | --- | --- |
@@ -28,7 +28,7 @@
   | `review.shouldFixPassFromRound` | 2 |
   | `review.tierCap` | 2 |
   | `models.agents` | `{ "packet-dispatcher": "standard" }` |
-  | `budget.maxCreditsPerPacket` | `{ "S": 1000, "M": 1500, "L": 2200 }`: about 1.5× a typical solo packet, so only a packet forced to tier 3 with many lenses trips it (owner's decision, question 4) |
+  | `budget.maxCreditsPerPacket` | `{ "S": 950, "M": 1500, "L": 2200 }`: about 1.5× a typical solo packet, so only a packet forced to tier 3 with many lenses trips it (owner's decision, question 4). credit-check counts no resume share, so such an S packet comes to about 985 there, and S is 950 rather than 1,000 |
 
   It holds no model lists and no `creditsPerRun`: those are the default template's, which PKT-7 puts on GPT-6.1 Sol rates. Every class lists the same models, so the dispatcher's class doesn't change its rate.
 - `install.ps1 -Profile default|solo` (default `default`). It chooses the template for a new config only. On an existing config it writes nothing to the config, and lists each of the overlay's keys whose value differs in the config, so the owner can move them over in a PR.
@@ -72,7 +72,7 @@
 ## Acceptance criteria
 
 - [ ] `templates/packet-workflow.solo.json` holds only the overlay's keys. `-Profile solo` on a fresh repository writes the default template merged with it, with `repo` and the default branch filled in, and `Get-PwConfig` on it gives `maxRounds` 2, `lensesPerReviewer` 3, `shouldFixPassFromRound` 2 and `tierCap` 2.
-- [ ] There, the installed dispatcher's `model:` line is the standard list and the deep reviewer's is the strong list. With the default profile and no `models.agents`, every installed agent equals its source, as today.
+- [ ] With a test config whose three classes list different models, each installed agent's `model:` line is its class's list, and `models.agents` moves only the agent it names: the dispatcher gets the standard list, the deep reviewer keeps the strong list. The solo config's keys come out in the default template's order. With the default profile and no `models.agents`, every installed agent equals its source, as today.
 - [ ] `-Profile solo` on an existing config leaves it byte-identical and lists only the overlay's keys that differ (for example `review.maxRounds: 3 → 2`), never `repo`, the board or another key the overlay doesn't hold.
 - [ ] A `models.agents` entry naming `packet-reviewer-max`, or a class `premium`, makes the install exit non-zero before it writes; the target's files and manifest are unchanged.
 - [ ] With different strong and standard lists and the dispatcher on standard, the output warns and names `packet-reviewer-deep` and the Local harness. With identical lists (both templates as shipped) it doesn't warn.

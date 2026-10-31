@@ -17,13 +17,13 @@ The phase itself is `plan.md` and `packets/` beside this file, in the kit's own 
 
 | # | Question | Decision | What changed in the plan |
 | --- | --- | --- | --- |
-| 1 | Which models the cost page assumes | GPT-6.1 Sol in every class | PKT-7 recalculates the page on GPT-6.1 Sol. It also moves the default `budget.creditsPerRun` to those rates: the dispatcher and tier 3 at half today's values. Without that, the page, `progress.ps1 -Credits` and the ceiling would price a packet differently. That re-pins about six existing test assertions on purpose. An existing config keeps the rates written in it. PKT-7 is now P0, and PKT-4 (the solo template copies its rates) depends on it. |
+| 1 | Which models the cost page assumes | GPT-6.1 Sol in every class | PKT-7 recalculates the page on GPT-6.1 Sol. It also moves the default `budget.creditsPerRun` to those rates: the dispatcher and tier 3 at half today's values. Without that, the page, `progress.ps1 -Credits` and the ceiling would price a packet differently. That re-pins about six existing test assertions on purpose. An existing config keeps the rates written in it. PKT-7 is now P0, and PKT-4 (the solo overlay inherits its rates) depends on it. |
 | 2 | `shouldFixPassFromRound` in the solo profile | 2 | none (already the plan) |
 | 8 | How to build the phase | not with the kit | H-1 is gone. Packets are PRs you review; their Review lenses and Review tier lines say what that review should cover. The dates moved to start on 2026-11-02. |
 | 9 | Pro's allowance | GitHub's individual billing page | PKT-8 cites it. The page gives Pro 1,500: 1,000 base credits plus a 500 "flex allotment" that GitHub says can change. Pro+ gets 7,000, and Max 20,000. Allowances reset at 00:00 UTC on the 1st and don't carry over. |
 | 10 | Paid usage for calibration | OK | H-2 says so (about US$50). |
 | 3 | What the cap leaves uncapped | as recommended: machinery, `deepPaths`, `maxPaths`, `.gitattributes`, a diff of only ignored files, the Review tier line; auth and migration stay capped | PKT-3 |
-| 4 | The solo ceiling | as recommended: per size, S 1,000, M 1,500, L 2,200; Copilot CLI's session limit documented as a backstop | PKT-4, PKT-8 |
+| 4 | The solo ceiling | as recommended: per size, S 950, M 1,500, L 2,200; Copilot CLI's session limit documented as a backstop | PKT-4, PKT-8 |
 | 5 | Where the raise lives; what the fix check prices | as recommended: a PR comment that holds for the rest of the packet; the fix plus the cheapest round after it | PKT-5, PKT-6 |
 | 6 | Plan-only mode | as recommended: `check-scope.ps1` installed on its own; the flag decides each run; `-PlanOnly` on a full install refused | PKT-2. A CI job for the scope check is a follow-up: it needs a rule for finding a PR's packet. |
 | 7 | Widening the settle | as recommended: the narrow widening (7B) | PKT-6, PKT-8 |
@@ -181,7 +181,7 @@ It is like a fuel warning that comes on while there's still a station nearby, ra
 | Option | Values | What trips it |
 | --- | --- | --- |
 | A. Off | – | nothing; you rely on the seat's allowance and budget |
-| **B. Per size, about 1.5× typical** (recommended) | S 1,000, M 1,500, L 2,200 | only the last row: forced to tier 3 *and* many lenses |
+| **B. Per size, about 1.5× typical** (recommended) | S 950, M 1,500, L 2,200 | only the last row: forced to tier 3 *and* many lenses (credit-check counts no resume share, so that S packet comes to about 985 there) |
 | C. Per size, about 1.2× typical | S 800, M 1,200, L 1,800 | every packet forced to tier 3: you approve each deep packet's second round |
 | D. One number for every size | e.g. 1,500 | can't be tight for S and loose for L at once: S and M never trip, a typical L sits at the edge |
 | E. A share of the seat | e.g. 950 on Business | most M and L packets: too tight to be a default |
@@ -302,6 +302,6 @@ The ones that touch a safety property come first.
 5. **The Local harness refuses dearer reviewers.** If a prioritized `model:` list falls back to a cheaper entry instead of refusing, a deep round could run on a cheaper model without a word. That can't happen while every class lists the same models; H-4 checks it, with PKT-9's stage S11.
 6. **Two rounds send more to you.** About 15% of packets reach you with a blocking round-2 finding, against about 10% today.
 7. **Three lenses per run splits a reviewer's attention.** The credit factor for three lenses is extrapolated.
-8. **A plan-only hand-off skips the brief, the panel and the claim.** The scope check is installed, but runs only when someone runs it. The coding agent's credits aren't estimated. The Azure Boards integration sets the work item's status itself.
+8. **A plan-only hand-off skips the brief, the panel and the claim.** The scope check is installed, but runs only when someone runs it, and only from a kit pinned from the default branch, never from the PR branch's copy. The coding agent's credits aren't estimated. The Azure Boards integration sets the work item's status itself.
 9. **The installer's removal loop can delete files.** A mode bug would delete the dispatcher half. PKT-2 refuses first, and a test shows nothing is removed.
 10. **New default rates change new installs' estimates.** PKT-7's rates halve the estimates for new installs. Existing configs keep theirs, and the changelog (H-3) says how to move.

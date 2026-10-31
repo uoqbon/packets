@@ -30,7 +30,7 @@ With `review.tierCap` 2 (the solo profile), review-scope stops its measured rais
 - **Output:**
   - `Uncapped` and `Settings.TierCap`.
   - Each capped raise stays in `Reasons` as `capped at 2 by review.tierCap: <reason>`.
-  - The text output's first line adds `UNCAPPED=<n> (review.tierCap <cap>)` when the two differ.
+  - The text output's first line adds `UNCAPPED=<n> (review.tierCap <cap>)` when `Uncapped` differs from `Floor`, which happens only under a cap.
 - `ModelCheck`:
   - It holds the round's agent, that agent's class, and packet-dispatcher's class, from `Get-PwAgentModelClass` over the base config's `models`.
   - Its `Warning` is set when the agent's class ranks above the dispatcher's and the two classes list different models. It is `$null` for an agent the kit doesn't ship.
@@ -74,7 +74,7 @@ With `review.tierCap` 2 (the solo profile), review-scope stops its measured rais
 
 ## Acceptance criteria
 
-- [ ] With `tierCap` unset, `null` or 3, review-scope's `Tier`, `Floor`, `Agent`, `Reasons`, `Lenses`, `Runs`, `Pairs` and existing `Settings` match the base's for every diff in the existing suite. The only new fields are `Uncapped` (equal to `Tier`), `Settings.TierCap` and `ModelCheck`.
+- [ ] With `tierCap` unset, `null` or 3, review-scope's `Tier`, `Floor`, `Agent`, `Reasons`, `Lenses`, `Runs`, `Pairs` and existing `Settings` match the base's for every diff in the existing suite. The only new fields are `Uncapped` (equal to `Floor`), `Settings.TierCap` and `ModelCheck`.
 - [ ] With `tierCap` 2, a 412-line code diff in one subsystem is tier 2 with `Floor` 2 and `Uncapped` 3. The suite's auth-path-and-semaphore diff (PKT-03 in the sample) is tier 2 too, and its reasons say capped.
 - [ ] With `tierCap` 2, each of these is tier 3:
   - a `review.deepPaths` match, or a `review.maxPaths` match;

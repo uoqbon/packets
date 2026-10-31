@@ -58,6 +58,7 @@ The README and the cost page say what the phase built and what it trades. They c
 
 - `README.md`
 - `docs/cost.md`
+- `tests/cases/cost-doc.tests.ps1`
 - `docs/decisions/solo-budget/PKT-8.md`
 
 ## Shared touchpoints
@@ -80,8 +81,8 @@ The README and the cost page say what the phase built and what it trades. They c
 - [ ] Each new key has a Configure row whose default and limits match `Get-PwConfig`, `Get-PwCreditCeiling` and `Get-PwAgentModelClass`.
 - [ ] The safety table has the "review tier is a floor" row, with the full forced list as review-scope implements it, and both amended rows.
 - [ ] The Models bullet states the Local cost-tier rule, what the kit does about it and what the installer warns, and no longer tells the owner to raise the dispatcher's model as the only fix.
-- [ ] The solo section's per-packet figures equal `Get-PwCreditEstimate` within 1% for the shapes it states, on the default `creditsPerRun` the solo overlay inherits. It gives packets a month for 1,500, 1,900 and 3,900 credits.
-- [ ] Every command and key the docs name exists at the head (the light-tier remit checks this).
+- [ ] The solo section's per-packet figures equal `Get-PwCreditEstimate` within 1% for the shapes it states, on the default `creditsPerRun` the solo overlay inherits. It gives packets a month for 1,500, 1,900 and 3,900 credits. PKT-7's `tests/cases/cost-doc.tests.ps1` is extended to read the solo table and check it the same way.
+- [ ] Every command and key the docs name exists at the head; the owner checks this in review, since the phase isn't dispatched.
 
 ## Tests to run
 

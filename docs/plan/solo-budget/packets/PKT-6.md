@@ -21,8 +21,8 @@ The dispatcher and the panel run `credit-check.ps1` before every review round an
 ## In scope
 
 - **`skills/packet-dispatch/SKILL.md`:**
-  - **§1 Select.** `credit-check -Next start` runs before the claim. Exit 1 (OVER): if the owner named this packet, stop and tell them; otherwise take the next START line, as with an open contract question. Exit 2: stop and report. Nothing is claimed, so there is no Needs human.
-  - **§8 Fix.** Before the implementer, `credit-check -Next fix`. Exit 0: go on. Exit 1: Needs human (budget). Exit 2: stop and report, and release the claim. §9.3's CI fix goes through §8 Fix, and §9.2's conflict round and Amend's round go through the panel's check, so each is covered. Say so in the text.
+  - **§1 Select.** `credit-check -Next start` runs before the claim. Exit 3 (OVER): if the owner named this packet, stop and tell them; otherwise take the next START line, as with an open contract question. Any other non-zero exit: stop and report. Nothing is claimed, so there is no Needs human.
+  - **§8 Fix.** Before the implementer, `credit-check -Next fix`. Exit 0: go on. Exit 3: Needs human (budget). Any other non-zero exit: stop and report, and release the claim. §9.3's CI fix goes through §8 Fix after a round that passed, which credit-check prices as a CI fix (PKT-5), and §9.2's conflict round and Amend's round go through the panel's check, so each is covered. Say so in the text.
   - **The last round, not three.** §9.3's "If three rounds are used" and Needs human's "after round 3" become the last round (`review.maxRounds`).
   - **Needs human,** two new kinds, each with an exact first line and its own options:
     - `` `packet:needs-human reason=budget next=<round|fix> round=<N> so-far=<n> step=<n> ceiling=<n> head=<sha>` ``. Options:
@@ -44,6 +44,7 @@ The dispatcher and the panel run `credit-check.ps1` before every review round an
 
       Anything else: release and stop.
     - `reason=model-tier`: retry the round. If the host refuses again, the same Needs human. A settle request isn't an answer here: say so on the item, and keep it Needs human.
+    - In review, when a `settle-check` is newer than the last round: that round was settled, so go to step 9.1. Never apply its findings, though its marker says `outcome=fix`.
   - **Settle (the narrow widening, owner's decision, question 7).** When the rounds are used up, a settle works as today. Before the last round it counts only when all of these hold:
     - the item's last Needs human is `reason=budget next=fix`;
     - the request's `head` is the newest round's head, and the PR's head now;
@@ -53,11 +54,11 @@ The dispatcher and the panel run `credit-check.ps1` before every review round an
   - **Never:** post a comment whose marker is `packet:budget max=…` or `packet:settle head=…`, or raise or change the ceiling. The `packet:settle-check` that Settle step 4 posts stays the dispatcher's. (Today's Never list doesn't name settles: only the Settle section says the owner posts them.)
   - **Preflight step 7.** A host that refuses a pinned model for its cost tier is offering it, not withholding it: that is a model-tier stop, not a reason to ask the owner for another model.
 - **`skills/packet-review/SKILL.md`:**
-  - **§1.** After review-scope, `credit-check -Next round` with this round's `Tier`, `Lenses` and `Runs`. Exit 1: start no pair, set Needs human (budget), and return Needs human. Exit 2: stop the round with no report.
+  - **§1.** After review-scope, `credit-check -Next round` with this round's `Tier`, `Lenses` and `Runs`. Exit 3: check the claim, start no pair, set Needs human (budget), and return Needs human. Any other non-zero exit: stop the round with no report. After a round that was settled (a `settle-check` follows it), call review-scope with `-Confirmed -` and no `-FixedConfirmed`, as after a pass: its findings went to follow-ups.
   - **§2.** A reviewer the host won't start stops the round. No other model, no lower tier's agent, no fewer runs, no report: Needs human (model-tier).
   - **Limits:** a sixth limit, the credit ceiling.
 - `round-report-template.md`: an optional `**Credits** <so far, with this round> of <ceiling> (estimate)` line.
-- `agents/packet-dispatcher.agent.md`: the cost-tier sentence points at the model-tier stop, and the Never list forbids raising the ceiling.
+- `agents/packet-dispatcher.agent.md`: the cost-tier sentence points at the model-tier stop, and the Never list forbids posting `packet:budget max=…` and `packet:settle head=…` and raising the ceiling.
 - `tests/cases/stops.tests.ps1`:
   - It pins each rule's text, as the existing guard tests pin theirs.
   - It checks that both first lines parse with `Get-PwMarker`, and that `board marker <ID> needs-human -Json` reads them back on the local board.
@@ -92,9 +93,9 @@ The dispatcher and the panel run `credit-check.ps1` before every review round an
 
 ## Acceptance criteria
 
-- [ ] packet-review §1 runs `credit-check -Next round` after review-scope and before §2. packet-dispatch §8 Fix runs `-Next fix` before the implementer, and §1 Select runs `-Next start` before the claim. Each says what exit 0, 1 and 2 do, and exit 2 never goes on.
+- [ ] packet-review §1 runs `credit-check -Next round` after review-scope and before §2. packet-dispatch §8 Fix runs `-Next fix` before the implementer, and §1 Select runs `-Next start` before the claim. Each says what exit 0, exit 3 and any other code do, and no other code goes on. A CI fix after a passed round goes through §8 Fix without an error.
 - [ ] Needs human gives both first lines exactly. Each parses with `Get-PwMarker` as kind `needs-human` with its pairs, and `board marker <ID> needs-human -Json` on the local board returns them.
-- [ ] Resume handles `reason=budget` (a raise, a settle, a closed PR, no answer) and `reason=model-tier` (a retry; a settle request refused), and each path ends in another check or a release.
+- [ ] Resume handles `reason=budget` (a raise, a settle, a closed PR, no answer) and `reason=model-tier` (a retry; a settle request refused), and each path ends in another check or a release. An In review packet whose last round was settled goes to step 9.1, and the next round after it passes `-Confirmed -`.
 - [ ] Before the last round, a settle counts only after `reason=budget next=fix`, at the newest round's head, with no change described; it opens the follow-ups before the settle-check. The text pins each condition.
 - [ ] No text in the dispatch or review skill, or in the dispatcher agent, says "three rounds" or "round 3" where `review.maxRounds` applies.
 - [ ] The Never lists of the dispatch skill and the dispatcher agent forbid posting `packet:budget max=…` and `packet:settle head=…` by their exact form, and leave `packet:settle-check` to the dispatcher; `stops.tests.ps1` pins that wording.

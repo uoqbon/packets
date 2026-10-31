@@ -23,7 +23,7 @@ The offline tests can't see three things: how a host treats a reviewer above the
   4. Record the board status before the hand-off, while the agent works and after the merge, and whether its PR closes the issue.
   5. Run `board reconcile`.
 - **S11 Solo.**
-  1. Run `install.ps1 -Profile solo`, then one dispatch end to end.
+  1. On a fresh sandbox with no config yet (`-Profile` chooses the template for a new config only), run `install.ps1 -Profile solo`, then one dispatch end to end.
   2. Record its rounds, its tiers (capped from what) and its credits from the AI usage report.
   3. In the Local harness, set `models.strong` to a model dearer than the dispatcher's.
   4. Run a packet whose diff matches `review.deepPaths`. Expect Needs human with `reason=model-tier`, and record the host's message.
@@ -34,7 +34,7 @@ The offline tests can't see three things: how a host treats a reviewer above the
   1. Set `budget.maxCreditsPerPacket` between the estimate after round 1 and that plus the cheapest round after a fix, so the stop comes before the fix run. Expect `reason=budget next=fix`.
   2. Post `packet:budget max=` from the owner and resume.
   3. Repeat, and answer with a settle that passes round 1's findings as follow-ups; check the follow-up issues and the settle-check.
-  4. Check that a settle is refused after a `reason=budget next=round` stop (a ceiling between the fix check and the round-2 check) and after a `reason=model-tier` stop (S11 step 4).
+  4. Check that a settle is refused after a `reason=budget next=round` stop (a ceiling between the `-Next start` price and round 1's price, so the stop comes before round 1) and after a `reason=model-tier` stop (S11 step 4).
   5. Check that a `packet:budget` from a second, untrusted account is ignored.
 - Each stage states its expected credits up front, from the cost page.
 
