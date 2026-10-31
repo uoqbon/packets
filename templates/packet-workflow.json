@@ -96,12 +96,14 @@
   "models": {
     "strong": ["GPT-6.1 Sol (copilot)", "Claude Sonnet 5.5 (copilot)"],
     "standard": ["GPT-6.1 Sol (copilot)", "Claude Sonnet 5.5 (copilot)"],
-    "light": ["GPT-6.1 Sol (copilot)", "Claude Sonnet 5.5 (copilot)"]
+    "light": ["GPT-6.1 Sol (copilot)", "Claude Sonnet 5.5 (copilot)"],
+    "agents": {}
   },
   "review": {
     "maxRounds": 3,
     "maxParallelLenses": 2,
     "lensesPerReviewer": 1,
+    "tierCap": null,
     "shouldFixPassFromRound": null,
     "agents": {
       "1": "packet-reviewer-light",
@@ -128,6 +130,7 @@
   "sizes": { "S": 1, "M": 2, "L": 3 },
   "budget": {
     "monthlyCredits": 0,
+    "maxCreditsPerPacket": null,
     "creditsPerRun": {
       "dispatcher": 50, "dispatcherPerRound": { "S": 300, "M": 330, "L": 390 }, "dispatcherPerReviewerRun": 35,
       "implementer": { "S": 105, "M": 200, "L": 355 },

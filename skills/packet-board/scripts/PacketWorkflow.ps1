@@ -38,8 +38,18 @@ $script:Defaults = @{
     # @{ API = @{ repo = 'acme/api'; label = 'packet' } } (label: that repository's packet label, default labels.packet).
     remotes       = @{}
     claims        = @{ leaseMinutes = 30 }
+    # The model lists per class (install.ps1 writes them into the agents' model: lines), and agents:
+    # a class per kit agent that overrides $script:AgentModelClass (Get-PwAgentModelClass).
+    models        = @{
+        strong   = @('GPT-6.1 Sol (copilot)', 'Claude Sonnet 5.5 (copilot)')
+        standard = @('GPT-6.1 Sol (copilot)', 'Claude Sonnet 5.5 (copilot)')
+        light    = @('GPT-6.1 Sol (copilot)', 'Claude Sonnet 5.5 (copilot)')
+        agents   = @{}
+    }
     review        = @{
         maxRounds = 3; maxParallelLenses = 2; lensesPerReviewer = 1
+        # tierCap: the highest tier a round runs at, 2 or 3; $null for no cap (Get-PwConfig checks it).
+        tierCap = $null
         # shouldFixPassFromRound defaults to maxRounds (Get-PwConfig): only the last round passes on should-fix findings.
         agents = @{ '1' = 'packet-reviewer-light'; '2' = 'packet-reviewer-standard'; '3' = 'packet-reviewer-deep' }
         maxPaths = ''; deepPaths = ''; lensPaths = @{}; concurrencyPattern = ''
@@ -50,6 +60,9 @@ $script:Defaults = @{
     # Estimates to calibrate against the AI usage report; monthlyCredits 0 means no allowance is set.
     budget        = @{
         monthlyCredits = 0
+        # The most credits one packet may spend: one number, or one per size. $null for no ceiling;
+        # Get-PwCreditCeiling checks it where it is used.
+        maxCreditsPerPacket = $null
         creditsPerRun  = @{
             dispatcher = 50; dispatcherPerRound = @{ S = 300; M = 330; L = 390 }; dispatcherPerReviewerRun = 35
             implementer = @{ S = 105; M = 200; L = 355 }
@@ -59,6 +72,19 @@ $script:Defaults = @{
         }
     }
 }
+
+# The kit's five agents and the model class each runs on, as install.ps1 writes their model: lines.
+# models.agents in the config overrides a class (Get-PwAgentModelClass).
+$script:AgentModelClass = [ordered]@{
+    'packet-dispatcher'        = 'strong'
+    'packet-reviewer-deep'     = 'strong'
+    'packet-implementer'       = 'standard'
+    'packet-reviewer-standard' = 'standard'
+    'packet-reviewer-light'    = 'light'
+}
+# The kit's review lenses: the base names of skills/packet-review/lenses/*.md (a test pins the two
+# together). A plan-only install has no lenses folder, so the validator reads the names from here.
+$script:KitLenses = [string[]]@('ai', 'architecture', 'concurrency', 'correctness', 'data', 'integration', 'ops', 'performance', 'security', 'tests', 'ux')
 
 class PwError : System.Exception {
     PwError([string]$Message) : base($Message) {}
@@ -203,7 +229,14 @@ function Get-PwConfig {
         if ($null -eq $n -or $n -lt 1) { Stop-Pw "config: review.shouldFixPassFromRound must be a round number, 1 or more (got '$($rv.shouldFixPassFromRound)')" }
         $rv.shouldFixPassFromRound = [Math]::Min($n, $rv.maxRounds)
     }
-    # budget is checked where it is used (Get-PwCreditEstimate): a typo there must not stop the board.
+    # The highest tier a round runs at: 2 or 3 (a quoted "2" counts), or null for no cap.
+    if ($rv.Contains('tierCap') -and $null -ne $rv.tierCap) {
+        $n = & $whole $rv.tierCap
+        if ($n -ne 2 -and $n -ne 3) { Stop-Pw "config: review.tierCap must be 2 or 3, or null for no cap (got '$($rv.tierCap)')" }
+        $rv.tierCap = $n
+    }
+    else { $rv.tierCap = $null }
+    # budget is checked where it is used (Get-PwCreditEstimate, Get-PwCreditCeiling): a typo there must not stop the board.
     $cfg
 }
 
@@ -733,6 +766,44 @@ function Get-PwCreditRate {
     if ($v -is [System.Collections.IDictionary]) { $v = $v[$Size] }
     if ($v -isnot [ValueType] -or $v -is [bool]) { Stop-Pw "config: budget.creditsPerRun.$Name must be a number, or a number per size (S, M, L); its $Size value is missing or not a number" }
     [double]$v
+}
+
+function Get-PwCreditCeiling {
+    <# The most credits a packet of this size may spend (budget.maxCreditsPerPacket), as [double], or
+       $null when no ceiling is set. The value is one positive number for every size, or a table by
+       S/M/L. Anything else stops here, never in Get-PwConfig, so a typo can't stop the board. #>
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Config, [Parameter(Mandatory)][ValidateSet('S', 'M', 'L')][string]$Size)
+    $budget = $Config['budget']
+    if ($budget -isnot [System.Collections.IDictionary] -or -not $budget.Contains('maxCreditsPerPacket')) { return $null }
+    $v = $budget['maxCreditsPerPacket']
+    if ($null -eq $v) { return $null }
+    $shown = $v
+    if ($v -is [System.Collections.IDictionary]) { $v = if ($v.Contains($Size)) { $v[$Size] } else { $null }; $shown = $v }
+    $isNumber = $v -is [int] -or $v -is [long] -or $v -is [double] -or $v -is [decimal]
+    if (-not $isNumber -or [double]$v -le 0 -or [double]::IsNaN([double]$v) -or [double]::IsInfinity([double]$v)) {
+        Stop-Pw "config: budget.maxCreditsPerPacket must be a positive number, or a positive number per size { `"S`": n, `"M`": n, `"L`": n }; its $Size value is missing or not a positive number (got '$shown')"
+    }
+    [double]$v
+}
+
+function Get-PwAgentModelClass {
+    <# The model class an agent runs on: models.agents[<agent>] when set, else the kit's
+       ($script:AgentModelClass). $null for an agent the kit doesn't ship (a project's own reviewer).
+       Stops when models.agents names an agent that isn't the kit's, or a class that isn't
+       strong, standard or light. #>
+    param([System.Collections.IDictionary]$Models, [Parameter(Mandatory)][string]$Agent)
+    $over = if ($null -ne $Models -and $Models.Contains('agents')) { $Models['agents'] } else { $null }
+    if ($null -eq $over) { $over = @{} }
+    if ($over -isnot [System.Collections.IDictionary]) { Stop-Pw 'config: models.agents must map kit agents to a class, such as { "packet-dispatcher": "standard" }' }
+    $kitAgents = @($script:AgentModelClass.Keys)
+    foreach ($name in @($over.Keys)) {
+        if ($kitAgents -cnotcontains $name) { Stop-Pw "config: models.agents.$name is not one of the kit's agents ($($kitAgents -join ', '))" }
+        $class = $over[$name]
+        if ($class -isnot [string] -or @('strong', 'standard', 'light') -cnotcontains $class) { Stop-Pw "config: models.agents.$name must be strong, standard or light (got '$class')" }
+    }
+    if ($kitAgents -cnotcontains $Agent) { return $null }
+    if ($over.Contains($Agent)) { return [string]$over[$Agent] }
+    [string]$script:AgentModelClass[$Agent]
 }
 
 function Get-PwCreditEstimate {

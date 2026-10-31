@@ -9,9 +9,16 @@
   (with the local provider), review-scope.ps1, check-scope.ps1 and progress.ps1 against it and checks
   their output and exit codes. Needs only pwsh and git: no network, no GitHub, no Azure DevOps.
 
-  pwsh -File tests/run-tests.ps1 [-Keep]      -Keep leaves the temp repository for inspection
+  Then it runs each tests/cases/*.tests.ps1, in ordinal file-name order and each in a child scope of
+  its own. A case file is one packet's tests: it may use Assert-That, Invoke-Kit, Invoke-KitIn, $kit,
+  $skills, New-CaseRepo and Remove-CaseRepo, keeps its state in plain variables and never assigns a
+  $script: variable (a child scope doesn't isolate those). A case file that throws is one failure.
+
+  pwsh -File tests/run-tests.ps1 [-Keep]      -Keep leaves the temp repositories for inspection
+  pwsh -File tests/run-tests.ps1 -CasesPath <folder>
+                                              runs only the case files in that folder (the runner's own tests)
 #>
-param([switch]$Keep)
+param([switch]$Keep, [string]$CasesPath)
 
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
@@ -52,7 +59,7 @@ function New-Packet([string]$Id, [string]$Title, [string]$Wave, [string]$Deps, [
     @"
 # $Id · $Title
 
-- **Packet:** $Id · **Priority:** $Priority · **Size:** $Size · **Wave:** $Wave · **Target:** 2026-11-0$($Wave.Substring(1))
+- **Packet:** $Id · **Priority:** $Priority · **Size:** $Size · **Wave:** $Wave · **Target:** $(if ($Wave -eq 'W0') { '2026-10-31' } else { "2026-11-0$($Wave.Substring(1))" })
 - **Depends on:** $Deps
 - **Review lenses:** $Lenses
 - **Locks:** $Locks
@@ -88,15 +95,9 @@ $touchBlock
 "@
 }
 
-$repo = Join-Path ([System.IO.Path]::GetTempPath()) ("pw-test-" + [guid]::NewGuid().ToString('n').Substring(0, 8))
-New-Item -ItemType Directory -Path $repo | Out-Null
-Push-Location $repo
-try {
-    & git init -q -b main . | Out-Null
-    & git config user.email test@example.com; & git config user.name Test; & git config commit.gpgsign false
-    $cfg = Get-Content -Raw (Join-Path $kit 'templates/packet-workflow.json') | ConvertFrom-Json -AsHashtable
-    $cfg.repo = 'example/sample'; $cfg.board.provider = 'local'; $cfg.review.deepPaths = '^src/Core/'
-    Write-File '.github/packet-workflow.json' ($cfg | ConvertTo-Json -Depth 10)
+# The sample phase's files, written under $repo: the caller's, as PowerShell looks variables up through
+# the callers (the suite's repository, or New-CaseRepo's).
+function Write-SamplePhase {
     Write-File 'src/Api/Handlers/Get.cs' "class Get {}`n"
     Write-File 'src/App/Program.cs' "// app`n"
     Write-File 'README.md' "sample`n"
@@ -128,6 +129,75 @@ PKT-01 PKT-02 PKT-03 PKT-04 PKT-05 H-1
 
 Click through it.
 "@
+}
+
+function New-CaseRepo {
+    <# A throwaway repository with the sample phase, for a case file: the template's config with the
+       local board and repo example/sample, committed on main, and an origin (a local bare repository)
+       pushed to, with origin/HEAD set, so board and progress.ps1 find origin's default branch. Returns
+       its path; the current directory is left as it was. Remove it with Remove-CaseRepo. #>
+    $repo = Join-Path ([System.IO.Path]::GetTempPath()) ("pw-case-" + [guid]::NewGuid().ToString('n').Substring(0, 8))
+    $bare = "$repo-origin"
+    New-Item -ItemType Directory -Path $repo | Out-Null
+    Push-Location -LiteralPath $repo
+    try {
+        $git = { $out = & git @args 2>&1; if ($LASTEXITCODE -ne 0) { throw "New-CaseRepo: git $($args -join ' ') failed: $out" } }
+        & $git init -q -b main .
+        & $git config user.email test@example.com; & $git config user.name Test; & $git config commit.gpgsign false
+        $caseCfg = Get-Content -Raw (Join-Path $kit 'templates/packet-workflow.json') | ConvertFrom-Json -AsHashtable
+        $caseCfg.repo = 'example/sample'; $caseCfg.board.provider = 'local'
+        Write-File '.github/packet-workflow.json' ($caseCfg | ConvertTo-Json -Depth 10)
+        Write-SamplePhase
+        & $git add -A; & $git commit -qm 'sample phase'
+        & $git init -q --bare $bare; & $git remote add origin $bare; & $git push -q origin main; & $git fetch -q origin; & $git remote set-head origin main
+    }
+    finally { Pop-Location }
+    $repo
+}
+
+function Remove-CaseRepo {
+    <# Removes a New-CaseRepo repository and its origin, unless -Keep (or the run's -Keep) says to leave them. #>
+    param([Parameter(Mandatory)][string]$Path, [switch]$Keep)
+    if ($Keep -or $script:Keep) { Write-Host "  kept  $Path"; return }
+    foreach ($dir in $Path, "$Path-origin") { if (Test-Path -LiteralPath $dir) { Remove-Item -Recurse -Force -LiteralPath $dir } }
+}
+
+function Invoke-CaseFiles([string]$Dir) {
+    <# Runs each *.tests.ps1 in $Dir in ordinal file-name order, each in a child scope of its own, so no
+       case file's plain variables reach the suite or the next file. One that throws is one failure. #>
+    if (-not (Test-Path -LiteralPath $Dir -PathType Container)) { return }
+    $names = [string[]]@(Get-ChildItem -LiteralPath $Dir -File -Filter '*.tests.ps1' | ForEach-Object { $_.Name })
+    if (-not $names.Count) { return }
+    [Array]::Sort($names, [StringComparer]::Ordinal)
+    foreach ($name in $names) {
+        $file = Join-Path $Dir $name
+        $here = (Get-Location).Path
+        Write-Host "cases/$name"
+        try { & { . $file } }
+        catch { Assert-That $false "cases/$name ran to the end" "$($_.Exception.Message)`n$($_.ScriptStackTrace)" }
+        finally { Set-Location -LiteralPath $here }
+    }
+}
+
+if ($CasesPath) {
+    Invoke-CaseFiles $CasesPath
+    Remove-Item -LiteralPath $cultureRun -ErrorAction SilentlyContinue
+    Write-Host ''
+    Write-Host "$($script:passes) passed, $($script:failures) failed"
+    if ($script:failures) { exit 1 }
+    exit 0
+}
+
+$repo = Join-Path ([System.IO.Path]::GetTempPath()) ("pw-test-" + [guid]::NewGuid().ToString('n').Substring(0, 8))
+New-Item -ItemType Directory -Path $repo | Out-Null
+Push-Location $repo
+try {
+    & git init -q -b main . | Out-Null
+    & git config user.email test@example.com; & git config user.name Test; & git config commit.gpgsign false
+    $cfg = Get-Content -Raw (Join-Path $kit 'templates/packet-workflow.json') | ConvertFrom-Json -AsHashtable
+    $cfg.repo = 'example/sample'; $cfg.board.provider = 'local'; $cfg.review.deepPaths = '^src/Core/'
+    Write-File '.github/packet-workflow.json' ($cfg | ConvertTo-Json -Depth 10)
+    Write-SamplePhase
     & git add -A; & git commit -qm 'sample phase' | Out-Null
 
     Write-Host 'validate-packets'
@@ -1676,6 +1746,9 @@ else {
     Assert-That ($tracked.Count -gt 0) "the kit's tracked text files are found ($($tracked.Count))"
     Assert-That (-not $wsErrors) 'no kit file has trailing whitespace or a blank line at the end' (@($wsErrors) -join "`n")
 }
+
+# Each packet's own tests, after the suite and while Invoke-KitIn still works.
+Invoke-CaseFiles (Join-Path $PSScriptRoot 'cases')
 
 Remove-Item -LiteralPath $cultureRun -ErrorAction SilentlyContinue
 Write-Host ''
