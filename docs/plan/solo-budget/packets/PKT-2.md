@@ -31,7 +31,7 @@ An engineer whose seat can't pay for a dispatch still gets planning and the boar
   - The removal loop only ever removes kit files of the mode being installed.
 - `-PlanOnly -WithInstructions` writes `templates/copilot-instructions.plan-only.md` between the same markers. It names only the three skills, and says agents never merge. A later full run with `-WithInstructions` replaces it with the full block.
 - `validate-packets.ps1`: when the kit's lens folder isn't next to it, it takes the kit's lens names from `$script:KitLenses`.
-- `skills/packet-progress/SKILL.md`: in a repository without `.github/skills/packet-dispatch/`, the next moves for startable and stale packets are hand-offs, never `/packet-dispatch`. A stale In progress item there means asking the owner.
+- `skills/packet-progress/SKILL.md`: in a repository without `.github/skills/packet-dispatch/SKILL.md` (a plan-only install, whose `packet-dispatch` folder holds only `check-scope.ps1`), the next moves for startable and stale packets are hand-offs, never `/packet-dispatch`. A stale In progress item there means asking the owner.
 - `skills/packet-board/SKILL.md`, a short "Without a dispatcher" section:
   - `board set <ID> "Status=In progress"` before a hand-off, and `board assign <ID>` when a person takes it;
   - the PR body's closing line is what `board ref <ID>` prints;

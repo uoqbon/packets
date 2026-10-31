@@ -21,7 +21,7 @@ Done means:
 Constraints every packet lives with:
 
 - **The four safety properties hold:** the tier is a floor (amended: under a cap, the forced raises still reach the top tier), markers count only from trusted authors, CI passes on the reviewed head, and only the owner merges.
-- **Opt-in only.** An install whose config sets none of `review.tierCap`, `budget.maxCreditsPerPacket` and `models.agents` behaves as 0.1.1 does. Every one of the 243 offline tests at 0.1.1 passes unchanged, except the credit figures PKT-7 re-pins to the new default rates. An existing config keeps the `creditsPerRun` written in it.
+- **Opt-in only.** An install whose config sets none of `review.tierCap`, `budget.maxCreditsPerPacket` and `models.agents` behaves as 0.1.1 does, with two deliberate exceptions the changelog names: every dispatch runs `credit-check.ps1` at Select, before each round and before each fix run (it prints OFF after reading only the config when no ceiling is set), and a reviewer the host won't start stops the round at Needs human. Every one of the 243 offline tests at 0.1.1 passes unchanged, except the credit figures PKT-7 re-pins to the new default rates. An existing config keeps the `creditsPerRun` written in it.
 - **Offline and cross-platform.** Every new behaviour has offline tests (pwsh 7.2+ and git only), which CI runs on Linux, macOS and Windows.
 - **Settings come from the base.** The cap and the ceiling are read like the existing review limits: from the config at the base, never from the branch under review.
 - **Built without the kit.** The owner decided the phase isn't dispatched. Each packet is one PR, built by a person or an assistant and reviewed by the owner. Its **Review lenses** and **Review tier** lines say what that review should cover; its Dispatcher notes are notes for whoever builds it.
@@ -34,7 +34,7 @@ Constraints every packet lives with:
 | 2026-11-04 | the new keys load with defaults that change nothing; packets add tests as files of their own | PKT-1 |
 | 2026-11-09 | a plan-only install plans, syncs and reports offline; the cap and the credit check work from the scripts; the cost page and the default rates are on GPT-6.1 Sol | PKT-2, PKT-3, PKT-5, PKT-7 |
 | 2026-11-12 | `-Profile solo` installs; a dispatch stops at the ceiling or at a refused reviewer and resumes | PKT-4, PKT-6 |
-| 2026-11-17 | docs, e2e stages and the 0.2.0 release | PKT-8, PKT-9, H-3 |
+| 2026-11-19 | docs, the e2e stages run on a sandbox, and the 0.2.0 release | PKT-8, PKT-9, H-4, H-3 |
 | 2026-12-04 | `budget.creditsPerRun` measured on Copilot-hosted models | H-2 |
 
 ## Packets
@@ -53,7 +53,7 @@ Priority: **P0** the phase fails without it; **P1** planned; **P2** behind the c
 | PKT-8 | Document plan-only mode, the solo profile and the ceiling | P1 | M | W3 | PKT-2, PKT-4, PKT-6, PKT-7 | security, correctness |
 | PKT-9 | Add e2e stages for plan-only, solo and the ceiling | P1 | S | W3 | PKT-2, PKT-4, PKT-6 | correctness, tests |
 
-Human tasks: H-2 Calibrate credits per run on Copilot-hosted models (workstream 4); H-3 Release the phase as 0.2.0.
+Human tasks: H-2 Calibrate credits per run on Copilot-hosted models (workstream 4); H-3 Release the phase as 0.2.0; H-4 Run the new e2e stages on a sandbox.
 
 Each packet file in `packets/` is the source of truth for its scope; the board item is generated from it
 (`board.ps1 sync`) and holds its state. This table is an index.
@@ -80,6 +80,8 @@ flowchart LR
   PKT6 --> PKT9
   PKT8 --> H3[H-3 release 0.2.0]
   PKT9 --> H3
+  PKT9 --> H4[H-4 run the e2e stages]
+  H4 --> H3
   PKT8 --> H2[H-2 calibrate]
 ```
 
@@ -94,11 +96,11 @@ A packet's **wave** is when it can start (its dependencies' waves are earlier); 
 | W0 | 2026-11-02 | PKT-1 | Review and merge it as soon as it is done: five packets wait on it. |
 | W1 | 2026-11-04 | PKT-2, PKT-3, PKT-5, PKT-7 | Four PRs in parallel. Review PKT-3 and PKT-5 most closely: they change what the panel and the budget let through. |
 | W2 | 2026-11-09 | PKT-4, PKT-6 | Two PRs. Review PKT-6 most closely. |
-| W3 | 2026-11-12 | PKT-8, PKT-9 | Then H-3 (release), then H-2 (calibration). |
+| W3 | 2026-11-12 | PKT-8, PKT-9 | Then H-4 (run the e2e stages), H-3 (release) and H-2 (calibration). |
 
 ## Keeping parallel agents out of each other's way
 
-1. **Contracts first.** PKT-1 lands the keys, their defaults and checks, `Get-PwCreditCeiling`, `Get-PwAgentModelClass`, the kit's lens list and the `tests/cases/` folder. Later packets code against those names. Only PKT-7 touches `PacketWorkflow.ps1`, the default template or `tests/run-tests.ps1` again, and only for the credit rates.
+1. **Contracts first.** PKT-1 lands the keys, their defaults and checks, `Get-PwCreditCeiling`, `Get-PwAgentModelClass`, the kit's lens list and the `tests/cases/` folder. Later packets code against those names. Only PKT-7 touches `PacketWorkflow.ps1`, the default template or `tests/run-tests.ps1` again, and only for the credit rates and progress's rule for a finished packet.
 2. **Each packet owns paths.** Its Owns list is the only place its builder edits. Files that two packets need are owned in turn, through dependencies:
    - `PacketWorkflow.ps1`, `templates/packet-workflow.json` and `tests/run-tests.ps1`: PKT-1, then PKT-7;
    - `install.ps1`: PKT-2, then PKT-4;

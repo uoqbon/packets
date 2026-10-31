@@ -23,7 +23,9 @@ Land the contracts every later packet codes against: three new config keys whose
 - `models` in `$script:Defaults`: the template's three class lists and `agents = @{}`. `$script:AgentModelClass`: the five kit agents and their classes, as `install.ps1` maps them today. `Get-PwAgentModelClass -Models <map> -Agent <name>` returns the class from `models.agents`, else the kit's. It returns `$null` for an agent the kit doesn't ship, such as a project's own reviewer in `review.agents`. It stops when `models.agents` names an agent that isn't one of the five, or a class that isn't `strong`, `standard` or `light`.
 - `$script:KitLenses`: the eleven lens names.
 - `templates/packet-workflow.json`: `"tierCap": null` under `review`, `"maxCreditsPerPacket": null` under `budget`, `"agents": {}` under `models`.
-- `tests/run-tests.ps1`: after the existing suite and before the summary, dot-source each `tests/cases/*.tests.ps1` in ordinal file-name order. A case file that throws counts as one failure named after the file. Case files may use `Assert-That`, `Invoke-Kit`, `$kit`, `$skills` and two new helpers. `New-CaseRepo` makes a throwaway repository: an `origin` remote, the template's config with `repo` filled in and the `local` board, and the sample phase. `Remove-CaseRepo` removes it, unless `-Keep`.
+- `tests/run-tests.ps1`: after the existing suite and before `Remove-Item $cultureRun` (so `Invoke-KitIn` still works), run each `tests/cases/*.tests.ps1` in ordinal file-name order, each in a child scope of its own (`& { . $file }`). No case file's variables then reach the suite or the next case file, and `Assert-That`'s `$script:` counters still count. A case file that throws counts as one failure named after the file. Case files may use `Assert-That`, `Invoke-Kit`, `$kit`, `$skills` and two new helpers.
+  - `New-CaseRepo` makes a throwaway repository with the sample phase. Its `origin` is a local bare repository, pushed to, with `git remote set-head origin main`, as `run-tests.ps1:381` does, so `board` and `progress.ps1` find origin's default branch. Its config is the template's with the `local` board, and the helper writes `repo` into it itself. A case file that runs `install.ps1` into a case repository writes `repo` itself too: the installer fills it only from a github.com origin.
+  - `Remove-CaseRepo` removes the repository, unless `-Keep`.
 - `tests/cases/config-keys.tests.ps1` for all of the above.
 
 ## Out of scope
@@ -64,7 +66,8 @@ Land the contracts every later packet codes against: three new config keys whose
 - [ ] `Get-PwCreditCeiling`: unset gives `$null`; 1500 gives 1500 for S, M and L; `{ "S": 900, "M": 1300, "L": 2000 }` gives 1300 for M; `{ "S": 900 }` for M, 0, -5, `"lots"` and `true` each throw with a message naming `budget.maxCreditsPerPacket`. A config with a broken ceiling still loads for `board show` and `progress.ps1`.
 - [ ] `Get-PwAgentModelClass` gives the five agents the classes `install.ps1` writes today; with `{ "packet-dispatcher": "standard" }` only the dispatcher changes; an agent the kit doesn't ship gives `$null`; a `models.agents` key `packet-reviewer-max` or a class `premium` throws.
 - [ ] `$script:KitLenses` equals the base names of `skills/packet-review/lenses/*.md`.
-- [ ] A case file's asserts count in the summary; one that throws adds a failure and the run exits 1; with no case files the run prints what it printed before.
+- [ ] A case file's asserts count in the summary; one that throws adds a failure and the run exits 1; a variable one case file sets is not seen by the next; with no case files the run prints what it printed before.
+- [ ] In a `New-CaseRepo` repository, `board show` and `progress.ps1 -Json` exit 0.
 
 ## Tests to run
 
@@ -76,4 +79,4 @@ Land the contracts every later packet codes against: three new config keys whose
 
 ## Dispatcher notes
 
-Contracts first: keep it small and land it fast, since W1 waits on it. Don't change any credit rate here: PKT-7 does that. `Get-PwConfig`'s comment says budget is checked where it is used; keep that true for the ceiling. The defaults table is copied before `Get-PwConfig` fills it in (a test pins that), so add `models` and the new keys without breaking the "defaults untouched" test. Case files run in the suite's own scope: `New-CaseRepo` must not change the main suite's `$repo` or current directory once it returns.
+Contracts first: keep it small and land it fast, since W1 waits on it. Don't change any credit rate here: PKT-7 does that. `Get-PwConfig`'s comment says budget is checked where it is used; keep that true for the ceiling. The defaults table is copied before `Get-PwConfig` fills it in (a test pins that), so add `models` and the new keys without breaking the "defaults untouched" test. Case files run in child scopes, so they can't overwrite the suite's variables; `New-CaseRepo` must still leave the current directory as it found it.

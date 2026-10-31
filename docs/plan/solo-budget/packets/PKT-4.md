@@ -8,7 +8,7 @@
 
 ## Goal
 
-`install.ps1 -Profile solo` starts a repository on `templates/packet-workflow.solo.json`. `models.agents` puts any kit agent on any model class, so the dispatcher can run on the standard class (cost.md lean change #8). The installer warns when that setup could stop a review round in the Local harness.
+`install.ps1 -Profile solo` starts a repository on the default template with `templates/packet-workflow.solo.json` merged onto it: an overlay of only the solo profile's keys. `models.agents` puts any kit agent on any model class, so the dispatcher can run on the standard class (cost.md lean change #8). The installer warns when that setup could stop a review round in the Local harness.
 
 ## Spec
 
@@ -19,7 +19,7 @@
 
 ## In scope
 
-- `templates/packet-workflow.solo.json`. It is the default template with these changes:
+- `templates/packet-workflow.solo.json`: an overlay that holds only these keys. The installer merges it onto the default template with `Merge-PwHashtable`, so everything else (board, labels, `lensPaths`, model lists, `creditsPerRun`) comes from the default template and can't drift:
 
   | Key | Value |
   | --- | --- |
@@ -29,10 +29,9 @@
   | `review.tierCap` | 2 |
   | `models.agents` | `{ "packet-dispatcher": "standard" }` |
   | `budget.maxCreditsPerPacket` | `{ "S": 1000, "M": 1500, "L": 2200 }`: about 1.5× a typical solo packet, so only a packet forced to tier 3 with many lenses trips it (owner's decision, question 4) |
-  | `budget.creditsPerRun` | the default template's, which PKT-7 puts on GPT-6.1 Sol rates (every class lists the same models, so the dispatcher's class doesn't change its rate) |
 
-  The model lists are the default template's.
-- `install.ps1 -Profile default|solo` (default `default`). It chooses the template for a new config only. On an existing config it writes nothing to the config, and lists each key whose value differs from the profile's template, so the owner can move them over in a PR.
+  It holds no model lists and no `creditsPerRun`: those are the default template's, which PKT-7 puts on GPT-6.1 Sol rates. Every class lists the same models, so the dispatcher's class doesn't change its rate.
+- `install.ps1 -Profile default|solo` (default `default`). It chooses the template for a new config only. On an existing config it writes nothing to the config, and lists each of the overlay's keys whose value differs in the config, so the owner can move them over in a PR.
 - **Per-agent classes.** Each agent's `model:` line comes from `Get-PwAgentModelClass` over the config's `models`: `models.agents` first, else the kit's map. The installer dot-sources the kit's own `PacketWorkflow.ps1` for it. A `models.agents` entry that names an unknown agent or class stops the install before any file is written.
 - **Static model-tier warning.** The installer warns when packet-dispatcher's class ranks below one of its subagents' classes and the two classes list different models. The warning says:
   - in the Local harness, a subagent on a model in a higher cost tier than the session's doesn't run;
@@ -63,18 +62,18 @@
 
 - `Get-PwAgentModelClass`, `$script:AgentModelClass`, `review.tierCap` and `budget.maxCreditsPerPacket` (PKT-1).
 - `install.ps1 -PlanOnly` and the manifest's `mode` (PKT-2).
-- The default template's `budget.creditsPerRun` on GPT-6.1 Sol rates (PKT-7).
+- The default template's `budget.creditsPerRun` on GPT-6.1 Sol rates (PKT-7), which the overlay inherits and its ceiling values assume.
 
 ## Provides
 
 - `install.ps1 -Profile <default|solo>`.
-- `templates/packet-workflow.solo.json`.
+- `templates/packet-workflow.solo.json`, the solo overlay.
 
 ## Acceptance criteria
 
-- [ ] `-Profile solo` on a fresh repository writes the solo template with `repo` and the default branch filled in, and `Get-PwConfig` on it gives `maxRounds` 2, `lensesPerReviewer` 3, `shouldFixPassFromRound` 2 and `tierCap` 2.
+- [ ] `templates/packet-workflow.solo.json` holds only the overlay's keys. `-Profile solo` on a fresh repository writes the default template merged with it, with `repo` and the default branch filled in, and `Get-PwConfig` on it gives `maxRounds` 2, `lensesPerReviewer` 3, `shouldFixPassFromRound` 2 and `tierCap` 2.
 - [ ] There, the installed dispatcher's `model:` line is the standard list and the deep reviewer's is the strong list. With the default profile and no `models.agents`, every installed agent equals its source, as today.
-- [ ] `-Profile solo` on an existing config leaves it byte-identical and lists the keys that differ (for example `review.maxRounds: 3 → 2`).
+- [ ] `-Profile solo` on an existing config leaves it byte-identical and lists only the overlay's keys that differ (for example `review.maxRounds: 3 → 2`), never `repo`, the board or another key the overlay doesn't hold.
 - [ ] A `models.agents` entry naming `packet-reviewer-max`, or a class `premium`, makes the install exit non-zero before it writes; the target's files and manifest are unchanged.
 - [ ] With different strong and standard lists and the dispatcher on standard, the output warns and names `packet-reviewer-deep` and the Local harness. With identical lists (both templates as shipped) it doesn't warn.
 - [ ] `-PlanOnly -Profile solo` installs the plan-only files with the solo config.
@@ -90,4 +89,4 @@
 
 ## Dispatcher notes
 
-`install.ps1` must not call `Get-PwConfig`: a new config can fail its `repo` check before the installer fills it in. Dot-source `PacketWorkflow.ps1` for the class map and helpers only. With the shipped model lists (GPT-6.1 Sol first in every class), putting the dispatcher on standard costs nothing and saves nothing. It pays off once `models.strong` names a dearer model, and the decision record says so. The solo template copies the default template's `creditsPerRun` as PKT-7 leaves them; H-2 replaces both with measurements.
+`install.ps1` must not call `Get-PwConfig`: a new config can fail its `repo` check before the installer fills it in. Dot-source `PacketWorkflow.ps1` for the class map and helpers only. With the shipped model lists (GPT-6.1 Sol first in every class), putting the dispatcher on standard costs nothing and saves nothing. It pays off once `models.strong` names a dearer model, and the decision record says so. The solo overlay carries no `creditsPerRun`: it inherits the default template's, as PKT-7 leaves them, and H-2 replaces only those.

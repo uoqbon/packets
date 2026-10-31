@@ -21,7 +21,7 @@ The dispatcher and the panel run `credit-check.ps1` before every review round an
 ## In scope
 
 - **`skills/packet-dispatch/SKILL.md`:**
-  - **§1 Select.** `credit-check -Next start` runs before the claim. On OVER, don't start the packet, and tell the owner. Nothing is claimed, so there is no Needs human.
+  - **§1 Select.** `credit-check -Next start` runs before the claim. Exit 1 (OVER): if the owner named this packet, stop and tell them; otherwise take the next START line, as with an open contract question. Exit 2: stop and report. Nothing is claimed, so there is no Needs human.
   - **§8 Fix.** Before the implementer, `credit-check -Next fix`. Exit 0: go on. Exit 1: Needs human (budget). Exit 2: stop and report, and release the claim. §9.3's CI fix goes through §8 Fix, and §9.2's conflict round and Amend's round go through the panel's check, so each is covered. Say so in the text.
   - **The last round, not three.** §9.3's "If three rounds are used" and Needs human's "after round 3" become the last round (`review.maxRounds`).
   - **Needs human,** two new kinds, each with an exact first line and its own options:
@@ -50,7 +50,7 @@ The dispatcher and the panel run `credit-check.ps1` before every review round an
     - it describes no change.
 
     It then passes that round's confirmed findings as follow-ups: one issue each, under packet-review §5's rules, contract questions included, opened before the settle-check. It never carries a code change, so nothing a panel hasn't reviewed reaches Ready to merge this way.
-  - **Never:** post a `packet:budget` or `packet:settle` comment, or raise or change the ceiling. (Today's Never list doesn't name settles: only the Settle section says the owner posts them.)
+  - **Never:** post a comment whose marker is `packet:budget max=…` or `packet:settle head=…`, or raise or change the ceiling. The `packet:settle-check` that Settle step 4 posts stays the dispatcher's. (Today's Never list doesn't name settles: only the Settle section says the owner posts them.)
   - **Preflight step 7.** A host that refuses a pinned model for its cost tier is offering it, not withholding it: that is a model-tier stop, not a reason to ask the owner for another model.
 - **`skills/packet-review/SKILL.md`:**
   - **§1.** After review-scope, `credit-check -Next round` with this round's `Tier`, `Lenses` and `Runs`. Exit 1: start no pair, set Needs human (budget), and return Needs human. Exit 2: stop the round with no report.
@@ -97,7 +97,7 @@ The dispatcher and the panel run `credit-check.ps1` before every review round an
 - [ ] Resume handles `reason=budget` (a raise, a settle, a closed PR, no answer) and `reason=model-tier` (a retry; a settle request refused), and each path ends in another check or a release.
 - [ ] Before the last round, a settle counts only after `reason=budget next=fix`, at the newest round's head, with no change described; it opens the follow-ups before the settle-check. The text pins each condition.
 - [ ] No text in the dispatch or review skill, or in the dispatcher agent, says "three rounds" or "round 3" where `review.maxRounds` applies.
-- [ ] The Never lists of the dispatch skill and the dispatcher agent forbid posting `packet:budget` and `packet:settle`.
+- [ ] The Never lists of the dispatch skill and the dispatcher agent forbid posting `packet:budget max=…` and `packet:settle head=…` by their exact form, and leave `packet:settle-check` to the dispatcher; `stops.tests.ps1` pins that wording.
 - [ ] Every existing guard and dispatch-text test passes unchanged.
 
 ## Tests to run
@@ -110,4 +110,4 @@ The dispatcher and the panel run `credit-check.ps1` before every review round an
 
 ## Dispatcher notes
 
-This packet changes instructions only, plus the tests that pin them. Keep `## Only a person starts a dispatch` and `## Only a person starts you` byte-identical: the existing tests and the e2e prompt pin them. The narrow settle adds no way for code a panel never saw to reach Ready to merge: before the last round it can only pass reported findings, at the reviewed head. Say that in the PR's safety-model sentence.
+This packet changes instructions only, plus the tests that pin them. Keep `## Only a person starts a dispatch` and `## Only a person starts you` byte-identical: the existing tests and the e2e prompt pin them. The narrow settle adds no way for code a panel never saw to reach Ready to merge: before the last round it can only pass reported findings, at the reviewed head. Say that in the PR's safety-model sentence. With no ceiling set, each `credit-check` call prints OFF after reading only the config (PKT-5). PKT-7 makes `progress.ps1 -Credits` count a packet as finished when a settle-check follows its last round, so a settle after a budget stop doesn't leave it "in review".

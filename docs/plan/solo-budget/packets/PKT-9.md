@@ -31,16 +31,17 @@ The offline tests can't see three things: how a host treats a reviewer above the
   6. Note whether a prioritized `model:` list falls back to a cheaper entry instead of refusing (risk 5).
   7. From Copilot CLI, set a session limit (`/limits set max-ai-credits <n>`) on a dispatcher session, and record whether the implementer's and reviewers' credits count toward it.
 - **S12 Ceiling.**
-  1. Set `budget.maxCreditsPerPacket` below the packet's two-round estimate. Expect `reason=budget` before round 2 (or before the fix run).
+  1. Set `budget.maxCreditsPerPacket` between the estimate after round 1 and that plus the cheapest round after a fix, so the stop comes before the fix run. Expect `reason=budget next=fix`.
   2. Post `packet:budget max=` from the owner and resume.
-  3. Repeat with a settle that passes with follow-ups.
-  4. Check that a `packet:budget` from a second, untrusted account is ignored.
+  3. Repeat, and answer with a settle that passes round 1's findings as follow-ups; check the follow-up issues and the settle-check.
+  4. Check that a settle is refused after a `reason=budget next=round` stop (a ceiling between the fix check and the round-2 check) and after a `reason=model-tier` stop (S11 step 4).
+  5. Check that a `packet:budget` from a second, untrusted account is ignored.
 - Each stage states its expected credits up front, from the cost page.
 
 ## Out of scope
 
 - The Azure story prompt (`tests/copilot-e2e-azure-story.prompt.md`). An Azure coding-agent hand-off stage is a follow-up.
-- Running the stages: that is the owner's, on a sandbox.
+- Running the stages: H-4.
 
 ## Owns
 

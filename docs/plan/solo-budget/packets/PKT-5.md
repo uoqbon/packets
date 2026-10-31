@@ -28,14 +28,14 @@ Before a review round or a fix run, a script tells the dispatcher whether the pa
   ```
 
   - **What it reads.** The config and the packet file at the merge base of `-Base` and `-Head`, as review-scope does. The ceiling comes from `Get-PwCreditCeiling` for the packet's size.
-  - **Ceiling unset.** It prints `OFF` and exits 0. It reads no PR, no board and no `creditsPerRun`.
+  - **Ceiling unset.** It prints `OFF` and exits 0 after reading only the config at the base: no packet file, PR, board or `creditsPerRun`. An install that sets no ceiling then meets no failure that review-scope's own config read wouldn't already hit.
   - **So far.** `Get-PwCreditEstimate` over the PR's trusted round markers (`Get-PwGhRounds`).
   - **`-Next round`** prices the round review-scope chose: its tier, its lenses and its runs. `-Round` must be one more than the last round marker.
   - **`-Next fix`** adds nothing for the fix itself, since the last round's `outcome=fix` already prices `implementerFix`. It adds the cheapest round that must follow the fix: the last round's confirmed lenses, at its tier, at the later-round factor.
   - **`-Next start`** runs before a claim, with no PR. It prices the base plus a one-lens round at tier 1, so a ceiling no packet of that size can meet stops the packet before anything runs.
   - **A raise.** The newest trusted PR comment `` `packet:budget max=<credits>` `` raises the ceiling for the rest of this packet (owner's decision, question 5). A raise only ever raises. A trusted raise whose `max` isn't a whole number above 0 is an error.
   - **Output.** `WITHIN so-far=<n> next=<n> total=<n> ceiling=<n> (config | raised by <login> <date>)` exits 0. `OVER` with the same fields exits 1. Any error (config, packet, markers, `gh`, estimator) exits 2 with a message, never WITHIN.
-- `github-common.ps1`: `Get-PwGhRounds` also returns `budget` rows (`Kind = 'budget'`, `Max`, `Author`, `CreatedAt`, `CommentId`), from trusted authors only. `Get-PwRoundRows` already leaves them out, so the estimates and progress don't change.
+- `github-common.ps1`: `Get-PwGhRounds` also returns `budget` rows, from trusted authors only. They have the same properties as every other row, with `Head`, `Tier`, `Lenses`, `Runs`, `Confirmed` and `Outcome` set to `$null` as settle rows have them, plus `Max`. Consumers such as `board.ps1:433` read those properties directly under StrictMode 3.0. `Get-PwRoundRows` already leaves them out, so the estimates and progress don't change.
 - `board.ps1 rounds` prints a budget row as `budget <round> max=<n> by <login>`.
 
 ## Out of scope
@@ -69,13 +69,13 @@ Before a review round or a fix run, a script tells the dispatcher whether the pa
 
 ## Acceptance criteria
 
-- [ ] With the ceiling unset, it prints OFF and exits 0, and makes no `gh` call (the test's stub fails if called).
+- [ ] With the ceiling unset, it prints OFF and exits 0, and makes no `gh` call (the test's stub fails if called), even when the packet has no file at the base.
 - [ ] An S packet whose round 1 was tier 2, 3 lenses, 1 run, fix, with a ceiling of 1200: `-Next round` for round 2 (tier 2, 2 lenses, 1 run) prints WITHIN. Its so-far, next and total equal `Get-PwCreditEstimate`'s for the same rows. A ceiling of 900, between so-far and total on the default rates, prints OVER and exits 1. A total equal to the ceiling is WITHIN.
 - [ ] A per-size ceiling uses the packet's size as the base has it.
 - [ ] A trusted `packet:budget max=2000` turns that OVER into WITHIN, and the output names who raised it. The same comment from an untrusted login changes nothing, and so does a `max` below the configured ceiling. A trusted `max=lots` exits 2.
 - [ ] It exits 2, never WITHIN, for each of these: a `creditsPerRun` typo, a broken ceiling, a failed `gh` call, no packet file at the base, a `-Round` that isn't one more than the last marker, and `-Next fix` after a round that passed.
 - [ ] The base decides: a ceiling of 500 at the base and 99999 in the branch's config gives OVER.
-- [ ] `Get-PwCreditEstimate` and `Get-PwCreditSummary` give the same totals with budget rows among the markers as without them, and `board rounds` lists the budget row.
+- [ ] `Get-PwCreditEstimate` and `Get-PwCreditSummary` give the same totals with budget rows among the markers as without them, and `board rounds` lists the budget row, in text and in `-Json`, without error.
 
 ## Tests to run
 

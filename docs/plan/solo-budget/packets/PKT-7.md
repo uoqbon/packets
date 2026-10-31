@@ -31,6 +31,7 @@ This packet recomputes every table for the three-tier panel on GPT-6.1 Sol in ev
 
   `implementer`, `implementerFix`, tiers 1 and 2, and `laterRoundFactor` were already priced at Sonnet rates, so they stay. An existing config keeps the values written in it: the installer never rewrites a config.
 - **The tests that pin today's rates.** Re-pin the credit figures in `tests/run-tests.ps1` (the stage 5 estimate, the grouped run, the summary, the four-tier list and the `progress -Credits` end-to-end lines) to the new rates. The decision record derives each new number by hand.
+- **Finished packets in `progress.ps1 -Credits`.** `Get-PwCreditSummary` counts a packet as finished when a `settle-check` follows its last round, as well as when that round passed or went to the owner. A settle after a budget stop (PKT-6) leaves the last round at `outcome=fix`.
 - **The page.** Recompute, or mark as history, each of these in docs/cost.md:
   1. **In short**: the per-packet figures (1,900 / 3,500 / 6,300), the 3,700 average, and "3", "5" and "7 to 8" packets a month.
   2. **Rates for the models in `models`**: the Kit class column, which says GPT-6.1 Sol is first in every class.
@@ -84,7 +85,8 @@ This packet recomputes every table for the three-tier panel on GPT-6.1 Sol in ev
 
 ## Acceptance criteria
 
-- [ ] `budget.creditsPerRun` in the template and in `$script:Defaults` holds the new values above and nothing else changes in either file.
+- [ ] `budget.creditsPerRun` in the template and in `$script:Defaults` holds the new values above, and nothing else changes in either file but `Get-PwCreditSummary`'s finished rule.
+- [ ] A packet whose last round says `outcome=fix` and whose rows end with a `settle-check` counts as finished in `Get-PwCreditSummary`.
 - [ ] The only existing tests that change are the credit figures named above, and the decision record derives each new figure by hand.
 - [ ] Each of the 17 items above is recomputed for tiers 1 to 3 on GPT-6.1 Sol, or marked as history; the "Written for four review tiers" paragraph is gone, and no table has a tier-4 row.
 - [ ] A test reads the S, M and L typical totals from "Credits per packet under the defaults", and matches each within 1% to `Get-PwCreditEstimate` on the default rates for the shapes the page states, plus the resume share it states.

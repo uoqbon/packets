@@ -36,7 +36,7 @@ The README and the cost page say what the phase built and what it trades. They c
 - **README, Known limitations:**
   - the ceiling is an estimate, and resume sessions and CI-fix runs leave no marker;
   - any trusted identity can post a `packet:budget` raise, the dispatcher's own included, as it can a settle;
-  - a coding-agent hand-off skips the brief, the scope check and the panel.
+  - a coding-agent hand-off skips the brief and the panel, and the scope check runs only when someone runs it.
 - **docs/cost.md, a "Solo profile" section:**
   - its config;
   - typical and expected credits per S, M and L packet;
@@ -44,7 +44,7 @@ The README and the cost page say what the phase built and what it trades. They c
   - packets a month for a Pro, Business and Enterprise seat, with the range;
   - what a packet forced to tier 3 adds;
   - what the profile trades.
-- **Copilot CLI's session limit.** Copilot CLI and the Copilot SDK can cap a session's real spend: `/limits set max-ai-credits <n>`, or `copilot -p … --max-ai-credits <n>` (public preview, soft, at least 30). It stops mid-step, where the kit's ceiling stops between steps on an estimate. Document it as a backstop set above the ceiling, with what PKT-9 finds about subagents.
+- **Copilot CLI's session limit.** Copilot CLI and the Copilot SDK can cap a session's real spend: `/limits set max-ai-credits <n>`, or `copilot -p … --max-ai-credits <n>` (public preview, soft, at least 30). It stops mid-step, where the kit's ceiling stops between steps on an estimate. Document it as a backstop set above the ceiling. Whether it counts the subagents' credits isn't known until H-4 runs PKT-9's S11: say so, and H-4 updates the line.
 - **docs/cost.md, elsewhere:**
   - "The tier is a floor" among the four properties, amended as above;
   - lean change #8 marked as built.
@@ -80,7 +80,7 @@ The README and the cost page say what the phase built and what it trades. They c
 - [ ] Each new key has a Configure row whose default and limits match `Get-PwConfig`, `Get-PwCreditCeiling` and `Get-PwAgentModelClass`.
 - [ ] The safety table has the "review tier is a floor" row, with the full forced list as review-scope implements it, and both amended rows.
 - [ ] The Models bullet states the Local cost-tier rule, what the kit does about it and what the installer warns, and no longer tells the owner to raise the dispatcher's model as the only fix.
-- [ ] The solo section's per-packet figures equal `Get-PwCreditEstimate` within 1% for the shapes it states, on the solo template's `creditsPerRun`. It gives packets a month for 1,500, 1,900 and 3,900 credits.
+- [ ] The solo section's per-packet figures equal `Get-PwCreditEstimate` within 1% for the shapes it states, on the default `creditsPerRun` the solo overlay inherits. It gives packets a month for 1,500, 1,900 and 3,900 credits.
 - [ ] Every command and key the docs name exists at the head (the light-tier remit checks this).
 
 ## Tests to run

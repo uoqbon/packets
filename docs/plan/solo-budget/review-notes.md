@@ -10,7 +10,7 @@ The phase itself is `plan.md` and `packets/` beside this file, in the kit's own 
 
 **Checks run:**
 
-- `validate-packets.ps1 -Phase solo-budget` reports 9 packets, 2 human tasks, **0 errors and 0 warnings**. This repository has no `.github/packet-workflow.json`, since it is the kit's source, not an install. To validate, pass the template with `repo` filled in as `-ConfigPath`.
+- `validate-packets.ps1 -Phase solo-budget` reports 9 packets, 3 human tasks, **0 errors and 0 warnings**. This repository has no `.github/packet-workflow.json`, since it is the kit's source, not an install. To validate, pass the template with `repo` filled in as `-ConfigPath`.
 - The offline suite on `main` (0.1.1) passes: 243 passed, 0 failed.
 
 ## Decisions (2026-10-31)
@@ -186,7 +186,7 @@ It is like a fuel warning that comes on while there's still a station nearby, ra
 | D. One number for every size | e.g. 1,500 | can't be tight for S and loose for L at once: S and M never trip, a typical L sits at the edge |
 | E. A share of the seat | e.g. 950 on Business | most M and L packets: too tight to be a default |
 
-**A host backstop.** Copilot CLI's session limit (`--max-ai-credits`, or `/limits set`) measures real spend, not an estimate. But it stops wherever the session is, possibly mid-implementer run, with the claim held and the work uncommitted. So use it as a backstop above the kit's ceiling (for example ceiling + 50%) when dispatching from Copilot CLI. PKT-8 documents it. Not yet known: whether it counts the subagents' credits (PKT-9 checks this) and whether VS Code's Copilot harness honours it.
+**A host backstop.** Copilot CLI's session limit (`--max-ai-credits`, or `/limits set`) measures real spend, not an estimate. But it stops wherever the session is, possibly mid-implementer run, with the claim held and the work uncommitted. So use it as a backstop above the kit's ceiling (for example ceiling + 50%) when dispatching from Copilot CLI. PKT-8 documents it. Not yet known: whether it counts the subagents' credits (H-4 checks this, with PKT-9's stage S11) and whether VS Code's Copilot harness honours it.
 
 The values are in the estimator's units and uncalibrated. Revisit them after H-2.
 
@@ -299,7 +299,7 @@ The ones that touch a safety property come first.
 2. **The narrow settle (7B) lets you pass reported findings early.** Before the last round, a settle can pass the newest round's findings as follow-ups, at the head that round reviewed. No code a panel hasn't seen gets through this way.
 3. **The dispatcher could forge raises and settles.** Any trusted identity can post `packet:budget` or `packet:settle`, the dispatcher's own included, since it signs in as you. A forged raise spends credits; a forged settle under 7B can only pass findings the panel reported. Mitigations: the Never lists, and a known-limitation line.
 4. **The ceiling is an estimate, uncalibrated.** Resume sessions, CI-fix runs and pre-PR test reruns leave no marker (about 40 a packet). A failed estimate stops the packet (exit 2); it never passes it.
-5. **The Local harness refuses dearer reviewers.** If a prioritized `model:` list falls back to a cheaper entry instead of refusing, a deep round could run on a cheaper model without a word. That can't happen while every class lists the same models; PKT-9 S11 checks it.
+5. **The Local harness refuses dearer reviewers.** If a prioritized `model:` list falls back to a cheaper entry instead of refusing, a deep round could run on a cheaper model without a word. That can't happen while every class lists the same models; H-4 checks it, with PKT-9's stage S11.
 6. **Two rounds send more to you.** About 15% of packets reach you with a blocking round-2 finding, against about 10% today.
 7. **Three lenses per run splits a reviewer's attention.** The credit factor for three lenses is extrapolated.
 8. **A plan-only hand-off skips the brief, the panel and the claim.** The scope check is installed, but runs only when someone runs it. The coding agent's credits aren't estimated. The Azure Boards integration sets the work item's status itself.

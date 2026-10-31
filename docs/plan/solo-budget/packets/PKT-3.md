@@ -23,6 +23,7 @@ With `review.tierCap` 2 (the solo profile), review-scope stops its measured rais
 - `review-scope.ps1`, with `tierCap` from the config at the base as every setting is:
   - **Uncapped.** Measure the tier exactly as today; `Uncapped` is that tier.
   - **The cap.** With a cap, the measured tier becomes `min(cap, measured)`.
+  - **The floor.** `Floor` is the capped measured tier, so `Tier` is never below `Floor`; `Uncapped` alone carries the measured tier before the cap. The reviewer prompt's tier line then reads, for example, `tier 2 standard (floor 2, capped from 3)`.
   - **Forced reasons.** These make it 3 whatever the cap: `machinery`, `attributes`, `max`, `deep`, and only ignored files changed.
   - **The packet's line.** The packet's **Review tier** line still raises past the cap.
   - **Later rounds.** A round is never below `-PreviousTier`. The +1 for `-FixedConfirmed` stops at the cap unless a forced reason holds.
@@ -33,6 +34,7 @@ With `review.tierCap` 2 (the solo profile), review-scope stops its measured rais
 - `ModelCheck`:
   - It holds the round's agent, that agent's class, and packet-dispatcher's class, from `Get-PwAgentModelClass` over the base config's `models`.
   - Its `Warning` is set when the agent's class ranks above the dispatcher's and the two classes list different models. It is `$null` for an agent the kit doesn't ship.
+  - It is advisory: if `Get-PwAgentModelClass` throws (a bad `models.agents` entry at the base), ModelCheck puts the message in `Warning`, and review-scope never exits 2 for it.
 - `skills/packet-review/SKILL.md`:
   - §1's floor paragraph and Limits item 5 describe the cap and its exceptions.
   - The reviewer prompt's tier line shows `capped from <n>`.
@@ -73,7 +75,7 @@ With `review.tierCap` 2 (the solo profile), review-scope stops its measured rais
 ## Acceptance criteria
 
 - [ ] With `tierCap` unset, `null` or 3, review-scope's `Tier`, `Floor`, `Agent`, `Reasons`, `Lenses`, `Runs`, `Pairs` and existing `Settings` match the base's for every diff in the existing suite. The only new fields are `Uncapped` (equal to `Tier`), `Settings.TierCap` and `ModelCheck`.
-- [ ] With `tierCap` 2, a 412-line code diff in one subsystem is tier 2 with `Uncapped` 3. The suite's auth-path-and-semaphore diff (PKT-03 in the sample) is tier 2 too, and its reasons say capped.
+- [ ] With `tierCap` 2, a 412-line code diff in one subsystem is tier 2 with `Floor` 2 and `Uncapped` 3. The suite's auth-path-and-semaphore diff (PKT-03 in the sample) is tier 2 too, and its reasons say capped.
 - [ ] With `tierCap` 2, each of these is tier 3:
   - a `review.deepPaths` match, or a `review.maxPaths` match;
   - a change under `.github/skills`, `.github/agents`, `.github/hooks`, `.github/workflows` or the project lens folder;
@@ -82,7 +84,7 @@ With `review.tierCap` 2 (the solo profile), review-scope stops its measured rais
   - a packet whose **Review tier** line is 3.
 - [ ] With `tierCap` 2, `-PreviousTier 2 -FixedConfirmed` stays 2, and `-PreviousTier 3` with no forced reason left stays 3.
 - [ ] `Settings.TierCap` reports the base's value. A branch that sets `tierCap` 2 over a base without one gets no cap (and tier 3, since the config change is machinery).
-- [ ] `ModelCheck.Warning` names `packet-reviewer-deep`, both classes and the Local harness on a tier-3 round when `models.strong` and `models.standard` differ and `models.agents` puts the dispatcher on standard. It is null with the template's identical lists.
+- [ ] `ModelCheck.Warning` names `packet-reviewer-deep`, both classes and the Local harness on a tier-3 round when `models.strong` and `models.standard` differ and `models.agents` puts the dispatcher on standard. It is null with the template's identical lists. With a `models.agents` entry naming an unknown class, review-scope still exits 0 and `Warning` holds the error.
 - [ ] A `tierCap` the config check refuses (1) makes review-scope exit 2.
 
 ## Tests to run
