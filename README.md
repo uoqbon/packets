@@ -115,7 +115,7 @@ When a dispatcher needs you, the packet goes to **Needs human** with a question 
 
 Planning and the board cost under 1,000 credits a phase ([cost](docs/cost.md)); dispatches and the review panel cost far more. For a seat that can't pay for them, `-PlanOnly` installs packet-plan, packet-board and packet-progress, and `check-scope.ps1` on its own: no agents, no hook, no `/packet-dispatch`.
 
-1. `pwsh -File packets/install.ps1 -Target <repo> -PlanOnly -WithInstructions`
+1. `pwsh -File packets/install.ps1 -Target <repo> -PlanOnly -WithInstructions` (`-PlanOnly` is newer than 0.1.1: use a later release, or `main`)
 2. In `.github/packet-workflow.json`, check `repo` and set `board.provider` and its block; nothing else is needed. Commit it all in a pull request.
 3. `/packet-plan <your plan> <phase>`, then review and merge the plan PR.
 4. `/packet-board setup`, then `/packet-board sync <phase>`.

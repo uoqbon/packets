@@ -69,6 +69,7 @@ try {
     $before = Get-Snapshot $models
     $r = Invoke-Kit $installer @('-Target', $models)
     Assert-That ($r.Code -eq 1 -and $r.Text -match 'models\.strong in \.github/packet-workflow\.json must name at least one model' -and (Get-Snapshot $models) -ceq $before) 'without -PlanOnly the same config still fails as it does today, writing nothing' $r.Text
+    Assert-That ($r.Text -notmatch 'makes the plan-only install full') 'and, stopping on the models map, it doesn''t first claim to make the install full' $r.Text
 
     Write-Host '  -WithInstructions in plan-only mode'
     [System.IO.File]::WriteAllText((Join-Path $target '.github/copilot-instructions.md'), "# Our rules`n`nBe kind.`n", $utf8)
@@ -89,6 +90,8 @@ try {
     Assert-That ($r.Code -eq 0 -and $first -match '^This run makes the plan-only install full: it adds the agents \(\.github/agents\), the packet-dispatch and packet-review skills and the hook \(\.github/hooks\)\.$') 'its first line says it makes the install full and what it adds' $r.Text
     Assert-That ($missing.Count -eq 0 -and $man.mode -ceq 'full' -and $r.Text -match 'Agent models:') 'it adds the agents, the dispatch and review skills and the hook, and records mode full' "missing: $($missing -join ', ')`n$($r.Text)"
     Assert-That ((Get-Block $target).Text.Contains($planTemplate) -and $r.Text -match 'copilot-instructions\.md still holds the plan-only install''s workflow rules: rerun with -WithInstructions') 'without -WithInstructions it leaves the block alone and says to rerun with it' $r.Text
+    $r = Invoke-Kit $installer @('-Target', $target)
+    Assert-That ($r.Code -eq 0 -and $r.Text -notmatch 'makes the plan-only install full' -and $r.Text -match 'still holds the plan-only install''s workflow rules') 'the next full run says so again, until -WithInstructions replaces the block' $r.Text
     $r = Invoke-Kit $installer @('-Target', $target, '-WithInstructions')
     $b = Get-Block $target
     Assert-That ($r.Code -eq 0 -and $b.Count -eq 2 -and $b.Text.Contains($fullTemplate) -and -not $b.Text.Contains($planTemplate) -and $b.Text.StartsWith("# Our rules")) 'a full run with -WithInstructions replaces it with the full block' $b.Text
@@ -122,6 +125,11 @@ try {
     $b = Get-Block $target
     Assert-That ($r.Code -eq 0 -and $man.mode -ceq 'plan-only' -and ($manFiles -join "`n") -ceq ($wantSkills -join "`n") -and $r.Text -notmatch '(?m)^remove\s') 'once they are gone, -PlanOnly goes ahead, records plan-only and lists only its files' $r.Text
     Assert-That ($b.Count -eq 2 -and $b.Text.Contains($planTemplate) -and -not $b.Text.Contains($fullTemplate)) 'and its -WithInstructions puts the plan-only block back, still one block' $b.Text
+    # An empty file gets the block.
+    [System.IO.File]::WriteAllText((Join-Path $target '.github/copilot-instructions.md'), '', $utf8)
+    $r = Invoke-Kit $installer @('-Target', $target, '-PlanOnly', '-WithInstructions')
+    $b = Get-Block $target
+    Assert-That ($r.Code -eq 0 -and $b.Count -eq 2 -and $b.Text.Trim() -ceq $planTemplate) 'an empty copilot-instructions.md gets the plan-only block' $r.Text
     # Two blocks (a hand-made copy) become one.
     [System.IO.File]::WriteAllText((Join-Path $target '.github/copilot-instructions.md'), "$fullTemplate`n`nmine`n`n$fullTemplate`n", $utf8)
     $r = Invoke-Kit $installer @('-Target', $target, '-PlanOnly', '-WithInstructions')

@@ -90,9 +90,6 @@ if ($PlanOnly) {
         exit 1
     }
 }
-elseif ($oldMode -eq 'plan-only') {
-    Write-Output "This run makes the plan-only install full: it adds the agents (.github/agents), the packet-dispatch and packet-review skills and the hook (.github/hooks)$(if ($DryRun) { ' (dry run: nothing is written)' })."
-}
 
 # The target's config, or a new one from the template. It's read before the agents are written,
 # because their model: lines come from its models map.
@@ -121,6 +118,10 @@ foreach ($class in $(if ($PlanOnly) { @() } else { 'strong', 'standard', 'light'
     $list = @(@($list) | Where-Object { $_ -is [string] -and $_.Trim() } | ForEach-Object { $_.Trim() })
     if (-not $list.Count) { throw "models.$class in .github/packet-workflow.json must name at least one model" }
     $models[$class] = $list
+}
+# Said once the models map has passed, so a run that stops on it doesn't first claim to add anything.
+if (-not $PlanOnly -and $oldMode -eq 'plan-only') {
+    Write-Output "This run makes the plan-only install full: it adds the agents (.github/agents), the packet-dispatch and packet-review skills and the hook (.github/hooks)$(if ($DryRun) { ' (dry run: nothing is written)' })."
 }
 $agentModelClass = @{
     'packet-dispatcher.agent.md'        = 'strong'
@@ -205,7 +206,7 @@ if ($configIsNew) {
 if ($WithInstructions) {
     $instrPath = Join-Path $Target '.github/copilot-instructions.md'
     $snippet = (Get-Content -Raw (Join-Path $kit $(if ($PlanOnly) { 'templates/copilot-instructions.plan-only.md' } else { 'templates/copilot-instructions.md' }))).Trim()
-    $text = if (Test-Path -LiteralPath $instrPath) { Get-Content -Raw -LiteralPath $instrPath } else { '' }
+    $text = if (Test-Path -LiteralPath $instrPath) { [string](Get-Content -Raw -LiteralPath $instrPath) } else { '' }
     $pattern = '(?s)<!-- packet-workflow:start -->.*?<!-- packet-workflow:end -->'
     # The first marked block becomes this mode's; any further one is dropped, so the file holds one block.
     $seen = @{ first = $true }
@@ -225,10 +226,13 @@ Write-Output ''
 Write-Output "packet workflow kit $version $(if ($DryRun) { 'would be installed' } else { 'installed' }) in $Target$(if ($PlanOnly) { ' (plan only: planning, the board and progress)' })"
 if ($unchanged) { Write-Output "$unchanged file(s) already up to date." }
 if ($kept.Count) { Write-Output "$($kept.Count) locally changed file(s) kept; compare them with the kit, or rerun with -Force." }
-# A mode change leaves the other mode's rules in copilot-instructions.md until -WithInstructions rewrites them.
+# A mode change leaves the other mode's rules in copilot-instructions.md until -WithInstructions rewrites
+# them. The block's heading says which mode wrote it, so this is said on every run until then.
 $instrFile = Join-Path $Target '.github/copilot-instructions.md'
-if (-not $WithInstructions -and $oldMode -and $oldMode -ne $mode -and (Test-Path -LiteralPath $instrFile) -and (Get-Content -Raw -LiteralPath $instrFile) -match '<!-- packet-workflow:start -->') {
-    Write-Output "copilot-instructions.md still holds the $oldMode install's workflow rules: rerun with -WithInstructions to replace them."
+$instrText = if (-not $WithInstructions -and (Test-Path -LiteralPath $instrFile)) { [string](Get-Content -Raw -LiteralPath $instrFile) } else { '' }
+if ($instrText -match '(?s)<!-- packet-workflow:start -->(?<b>.*?)<!-- packet-workflow:end -->') {
+    $blockMode = if ($Matches.b -match '(?m)^## Packet workflow \(plan and board only\)\s*$') { 'plan-only' } else { 'full' }
+    if ($blockMode -ne $mode) { Write-Output "copilot-instructions.md still holds the $blockMode install's workflow rules: rerun with -WithInstructions to replace them." }
 }
 if ($PlanOnly) {
     Write-Output @'
@@ -236,7 +240,8 @@ Next:
   1. Review .github/packet-workflow.json: repo, and board.provider with its block. Plan, board and progress
      need nothing else; the rest of the file is there for a later full install.
   2. pwsh -File .github/skills/packet-board/scripts/board.ps1 setup -DryRun
-  3. Commit .github/skills and .github/packet-workflow*.json in a pull request.
+  3. Commit .github/skills and .github/packet-workflow*.json (and .github/copilot-instructions.md, with
+     -WithInstructions) in a pull request.
   4. In Copilot Chat: /packet-plan <your plan>; review and merge the plan PR; then /packet-board setup and
      /packet-board sync <phase>.
   5. Hand each synced packet to a person or to the Copilot coding agent: see "Plan and board only" in the
