@@ -219,12 +219,16 @@ try {
     $docsPaths = [System.Collections.Generic.List[string]]::new()
     $opaqueAdded = [System.Collections.Generic.List[string]]::new()
     $opaqueNonDocs = [System.Collections.Generic.List[string]]::new()
+    $hitIgnoredForced = $null
     foreach ($r in $rows) {
         $sides = @($r.Path) + $(if ($r.Old) { @($r.Old) } else { @() })
         $hitMax = $sides | Where-Object { Test-Re $_ $cfg.review.maxPaths } | Select-Object -First 1
         $hitDeep = $sides | Where-Object { Test-Re $_ $cfg.review.deepPaths } | Select-Object -First 1
         if ($hitMax -and -not $flags.Contains('max')) { $flags['max'] = "project critical path: $hitMax" }
         if ($hitDeep -and -not $flags.Contains('deep')) { $flags['deep'] = "project deep path: $hitDeep" }
+        # Machinery or an attributes file the ignore list drops (a dist/ bundle under .github/actions) never
+        # raises the measured tier, as before; it still lifts the cap, so it rides along at tier 3 as it did.
+        if (-not $hitIgnoredForced) { $hitIgnoredForced = $sides | Where-Object { (Test-Re $_ $ignoreRe) -and ((Test-Re $_ $machineryRe) -or (Test-Re $_ '(^|/)\.gitattributes$' -IgnoreCase)) } | Select-Object -First 1 }
         if (-not $hitMax -and -not $hitDeep -and -not ($sides | Where-Object { -not (Test-Re $_ $ignoreRe) })) { $ignored++; continue }
         $files++
         $class = 'docs'
@@ -270,7 +274,7 @@ try {
         }
     }
     # The forced reasons: these reach tier 3 whatever review.tierCap says.
-    $forced = $files -eq 0 -or @('machinery', 'attributes', 'max', 'deep' | Where-Object { $flags.Contains($_) }).Count -gt 0
+    $forced = $files -eq 0 -or [bool]$hitIgnoredForced -or @('machinery', 'attributes', 'max', 'deep' | Where-Object { $flags.Contains($_) }).Count -gt 0
     # The indexes in Reasons of the raises the cap can stop (every raise to 3 that isn't forced).
     $cappable = [System.Collections.Generic.List[int]]::new()
     if ($files -eq 0) {
@@ -317,6 +321,7 @@ try {
         $tier = $limit
         foreach ($i in $cappable) { $reasons[$i] = "capped at $limit by review.tierCap: $($reasons[$i])" }
     }
+    if ($null -ne $cap -and $cap -lt 3 -and $hitIgnoredForced -and $files -gt 0) { $reasons.Add("review.tierCap $cap not applied: review machinery or an attributes file among the ignored files: $hitIgnoredForced") }
     $floor = $tier
     if ($pk -and $pk.ReviewTier -and [Math]::Min(3, [int]$pk.ReviewTier) -gt $tier) { $tier = [Math]::Min(3, [int]$pk.ReviewTier); $reasons.Add("raised to $tier by $($pk.Id)'s Review tier line") }
     if ($PreviousTier -gt 0) {
@@ -394,8 +399,6 @@ try {
         $agent = $legacyMax.Trim()
         $reasons.Add("review.agents.4 ($agent) runs tier 3: tiers 3 and 4 merged, so move it to review.agents.3")
     }
-    # Reviewer runs: review.lensesPerReviewer lenses each, neighbours in lensOrder. Pairs: the runs started
-    # together (review.maxParallelLenses at a time), each run written as its lenses joined with '+'.
     # ModelCheck: advisory only. A bad models.agents entry at the base goes into Warning, never an exit 2.
     $modelCheck = [ordered]@{ Agent = $agent; AgentClass = $null; DispatcherClass = $null; Warning = $null }
     try {
@@ -413,6 +416,8 @@ try {
         }
     }
     catch { $modelCheck.Warning = "the model check couldn't read the base config's models: $($_.Exception.Message)" }
+    # Reviewer runs: review.lensesPerReviewer lenses each, neighbours in lensOrder. Pairs: the runs started
+    # together (review.maxParallelLenses at a time), each run written as its lenses joined with '+'.
     $per = [int]$cfg.review.lensesPerReviewer
     $par = [int]$cfg.review.maxParallelLenses
     $runs = @(for ($i = 0; $i -lt $ordered.Count; $i += $per) { , @($ordered[$i..([Math]::Min($i + $per, $ordered.Count) - 1)]) })

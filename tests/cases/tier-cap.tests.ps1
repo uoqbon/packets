@@ -95,6 +95,14 @@ try {
     $b = Invoke-Kit $capScope @('-Base', 'main', '-Head', $apiSha, '-Packet', 'PKT-03', '-ConfigPath', $cfgNull)
     Assert-That ($a.Code -eq 0 -and $a.Text -ceq $b.Text -and $a.Text -notmatch 'UNCAPPED|tier cap|MODEL CHECK' -and ($a.Text -split "`n")[0] -cmatch '^TIER=3 \(deep\) AGENT=packet-reviewer-deep FLOOR=3$') 'with no cap the text output has no UNCAPPED, tier cap or MODEL CHECK, and unset and null print the same' "$($a.Text)`n---`n$($b.Text)"
 
+    # Golden reasons, as the base's script (before PKT-3) gives them with no cap, so a change to the uncapped
+    # path that moves unset, null and 3 together still fails here.
+    $goldApi = 'code change: 23 lines in 2 files, 20 added control-flow lines|auth/security path: src/Api/Auth/TokenCheck.cs|concurrency in added lines: +class TokenCheck { static readonly SemaphoreSlim Gate = new(1); }'
+    $goldBig = 'code change: 412 lines in 1 files, 0 added control-flow lines|412 lines > 300'
+    $u = Invoke-CapScope @('-Base', 'main', '-Head', $apiSha, '-Packet', 'PKT-03', '-ConfigPath', $cfgUnset)
+    $v = Invoke-CapScope @('-Base', "$bigSha~1", '-Head', $bigSha, '-ConfigPath', $cfgUnset)
+    Assert-That ($u.Code -eq 0 -and $u.Json.Tier -eq 3 -and $u.Json.Floor -eq 3 -and (@($u.Json.Reasons) -join '|') -ceq $goldApi -and $v.Code -eq 0 -and $v.Json.Tier -eq 3 -and (@($v.Json.Reasons) -join '|') -ceq $goldBig) 'with no cap the PKT-03 and 412-line diffs give the base''s exact tier and reasons' "$($u.Text)`n---`n$($v.Text)"
+
     Write-Host '  tierCap 2'
     $r = Invoke-CapScope @('-Base', "$bigSha~1", '-Head', $bigSha, '-ConfigPath', $cfgTwo)
     Assert-That ($r.Code -eq 0 -and $r.Json.Tier -eq 2 -and $r.Json.Floor -eq 2 -and $r.Json.Uncapped -eq 3 -and $r.Json.Agent -eq 'packet-reviewer-standard' -and $r.Json.Settings.TierCap -eq 2 -and $r.Json.Lines -eq 412 -and @($r.Json.Reasons) -ccontains 'capped at 2 by review.tierCap: 412 lines > 300') 'a 412-line code diff in one subsystem is tier 2, Floor 2, Uncapped 3, on the standard reviewer' $r.Text
@@ -103,7 +111,7 @@ try {
     Assert-That ($t.Code -eq 0 -and $lines[0] -ceq 'TIER=2 (standard) AGENT=packet-reviewer-standard FLOOR=2 UNCAPPED=3 (review.tierCap 2)' -and $t.Text -match '(?m)^SETTINGS=.*, tier cap 2$') 'the text output''s first line adds UNCAPPED=3 (review.tierCap 2)' $t.Text
     $r = Invoke-CapScope @('-Base', 'main', '-Head', $apiSha, '-Packet', 'PKT-03', '-ConfigPath', $cfgTwo)
     $why = @($r.Json.Reasons)
-    Assert-That ($r.Code -eq 0 -and $r.Json.Tier -eq 2 -and $r.Json.Floor -eq 2 -and $r.Json.Uncapped -eq 3 -and $r.Json.Agent -eq 'packet-reviewer-standard' -and ($why | Where-Object { $_ -cmatch '^capped at 2 by review\.tierCap: auth/security path: src/Api/Auth/' }) -and (@($r.Json.Lenses) -join ',') -ceq 'security,concurrency,correctness') 'the auth-path-and-semaphore diff (PKT-03) is tier 2, its auth raise says capped, and its lenses stay' $r.Text
+    Assert-That ($r.Code -eq 0 -and $r.Json.Tier -eq 2 -and $r.Json.Floor -eq 2 -and $r.Json.Uncapped -eq 3 -and $r.Json.Agent -eq 'packet-reviewer-standard' -and ($why -join '|') -ceq ((($goldApi -split '\|') | ForEach-Object { if ($_ -match '^(auth|concurrency)') { "capped at 2 by review.tierCap: $_" } else { $_ } }) -join '|') -and (@($r.Json.Lenses) -join ',') -ceq 'security,concurrency,correctness') 'the auth-path-and-semaphore diff (PKT-03) is tier 2, both its auth and concurrency raises say capped, and its lenses stay' $r.Text
     $r = Invoke-CapScope @('-Base', "$asyncSha~1", '-Head', $asyncSha, '-ConfigPath', $cfgTwo)
     Assert-That ($r.Code -eq 0 -and $r.Json.Tier -eq 2 -and $r.Json.Uncapped -eq 3 -and (@($r.Json.Reasons) | Where-Object { $_ -cmatch '^capped at 2 by review\.tierCap: concurrency in added lines' })) 'concurrency in added lines is capped' $r.Text
     $r = Invoke-CapScope @('-Base', "$docsSha~1", '-Head', $docsSha, '-ConfigPath', $cfgTwo)
@@ -136,6 +144,16 @@ try {
     & git add -A; & git commit -qm 'deep and big' | Out-Null
     $r = Invoke-CapScope @('-Base', 'HEAD~1', '-ConfigPath', $cfgTwo)
     Assert-That ($r.Code -eq 0 -and $r.Json.Tier -eq 3 -and $r.Json.Uncapped -eq 3 -and -not (@($r.Json.Reasons) | Where-Object { $_ -match 'tierCap' }) -and (@($r.Json.Reasons) -ccontains '400 lines > 300')) 'with a forced reason, the size raise stands and no reason says capped' $r.Text
+    & git reset -q --hard HEAD~1
+    # Machinery the ignore list drops (an action's dist/ bundle) beside a capped raise: the cap is lifted, as
+    # the base's tier 3 was, and with no cap the output is what it was.
+    Write-CapFile $capRepo 'src/Api/Auth/Login.cs' "class Login {}`n"
+    Write-CapFile $capRepo '.github/actions/deploy/dist/index.js' "run();`n"
+    & git add -A; & git commit -qm 'auth and an action bundle' | Out-Null
+    $r = Invoke-CapScope @('-Base', 'HEAD~1', '-ConfigPath', $cfgTwo)
+    $n = Invoke-CapScope @('-Base', 'HEAD~1', '-ConfigPath', $cfgNull)
+    Assert-That ($r.Code -eq 0 -and $r.Json.Tier -eq 3 -and $r.Json.Floor -eq 3 -and $r.Json.Uncapped -eq 3 -and (@($r.Json.Reasons) | Where-Object { $_ -cmatch '^review\.tierCap 2 not applied: .*\.github/actions/deploy/dist/index\.js' }) -and -not (@($r.Json.Reasons) | Where-Object { $_ -match '^capped' })) 'review machinery among the ignored files lifts the cap' $r.Text
+    Assert-That ($n.Code -eq 0 -and $n.Json.Tier -eq 3 -and -not (@($n.Json.Reasons) | Where-Object { $_ -match 'tierCap' })) 'and with no cap that diff reads as before' $n.Text
     & git reset -q --hard HEAD~1
     # The packet's Review tier line still raises past the cap.
     Write-CapFile $capRepo 'docs/deep/notes.md' "a note`n"
