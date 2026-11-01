@@ -38,7 +38,8 @@
   board.ps1 assign <ID>                     assign the item to the signed-in user
   board.ps1 ref <ID>                        the PR-body line that links and closes the item
   board.ps1 pr <ID> [-Json]                 the packet's newest pull request (open first)
-  board.ps1 rounds <PR> [-Json]             round reports, settle requests and settle checks on a PR, oldest first
+  board.ps1 rounds <PR> [-Json]             round reports, settle requests, settle checks and budget raises on a PR,
+                                            oldest first
                                             (trusted authors only: the signed-in user and trustedAuthors)
   board.ps1 locks <ID>                      open PRs (other than the packet's own) touching its locks; exit 1 if any
   board.ps1 reconcile [-DryRun]             closed items -> Done; report items with no packet file
@@ -427,10 +428,15 @@ try {
         'rounds' {
             $pr = ([string]$Rest[0]).TrimStart('#')
             if ($pr -notmatch '^\d+$') { Stop-Pw 'usage: board.ps1 rounds <PR number>' }
-            # Round reports and the owner's settle checks, from trusted authors only (github-common.ps1).
+            # Round reports, the owner's settles and budget raises, from trusted authors only (github-common.ps1).
             $rows = Get-PwGhRounds -Config $cfg -Pr $pr
             if ($Json) { Write-PwJson $rows }
-            else { foreach ($r in $rows) { '{0} {1} head={2} tier={3} outcome={4} lenses={5}{6} confirmed={7} by {8}{9}' -f $r.Kind, $r.Round, $r.Head, $r.Tier, $r.Outcome, $r.Lenses, $(if ($r.Runs) { " runs=$($r.Runs)" } else { '' }), $r.Confirmed, $r.Author, $(if ($r.Consumed) { ' (used)' } else { '' }) } }
+            else {
+                foreach ($r in $rows) {
+                    if ($r.Kind -eq 'budget') { '{0} {1} max={2} by {3}' -f $r.Kind, $r.Round, $r.Max, $r.Author }
+                    else { '{0} {1} head={2} tier={3} outcome={4} lenses={5}{6} confirmed={7} by {8}{9}' -f $r.Kind, $r.Round, $r.Head, $r.Tier, $r.Outcome, $r.Lenses, $(if ($r.Runs) { " runs=$($r.Runs)" } else { '' }), $r.Confirmed, $r.Author, $(if ($r.Consumed) { ' (used)' } else { '' }) }
+                }
+            }
         }
         'locks' {
             $st = Get-PwBoardState $cfg
