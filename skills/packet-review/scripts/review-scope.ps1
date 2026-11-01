@@ -303,7 +303,9 @@ try {
         if ($pk) { foreach ($l in $pk.Lenses) { [void]$lenses.Add($l) }; if ($pk.Lenses) { $lensWhy.Add("packet lenses: $($pk.Lenses -join ', ')") } }
         $allPaths = @($rows | ForEach-Object { $_.Path; if ($_.Old) { $_.Old } })
         $fromPaths = Get-PathLenses $allPaths (Get-AddedLines "$Base...$Head")
-        $extra = @($fromPaths | Where-Object { -not $lenses.Contains($_) })
+        # lensPaths is a plain hashtable, so its key order changes per process: list these in lensOrder order.
+        $extra = [string[]]@($fromPaths | Where-Object { -not $lenses.Contains($_) }); [array]::Sort($extra, [System.StringComparer]::Ordinal)
+        $extra = @($extra | Sort-Object -Stable { $i = [array]::IndexOf(@($cfg.review.lensOrder), $_); if ($i -lt 0) { [int]::MaxValue } else { $i } })
         foreach ($l in $fromPaths) { [void]$lenses.Add($l) }
         if ($extra) { $lensWhy.Add("added by the diff's paths: $($extra -join ', ')") }
     }
