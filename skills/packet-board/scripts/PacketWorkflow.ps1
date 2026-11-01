@@ -213,7 +213,7 @@ function Get-PwConfig {
     # review block in the config it is the defaults' own, which a second config in this process would inherit.
     $rv = Merge-PwHashtable $cfg.review @{}
     $cfg.review = $rv
-    $whole = { param($v) if ($v -is [int] -or $v -is [long]) { [int]$v } elseif ($v -is [double] -and $v -ge 0 -and $v -le 1000 -and $v -eq [Math]::Floor($v)) { [int]$v } elseif ($v -is [string] -and $v -match '^\s*\d{1,4}\s*$') { [int]$v.Trim() } else { $null } }
+    $whole = { param($v) if (($v -is [int] -or $v -is [long]) -and $v -ge [int]::MinValue -and $v -le [int]::MaxValue) { [int]$v } elseif ($v -is [double] -and $v -ge 0 -and $v -le 1000 -and $v -eq [Math]::Floor($v)) { [int]$v } elseif ($v -is [string] -and $v -match '^\s*\d{1,4}\s*$') { [int]$v.Trim() } else { $null } }
     foreach ($key in 'maxRounds', 'maxParallelLenses', 'lensesPerReviewer') {
         $n = & $whole $rv[$key]
         if ($null -eq $n) { Stop-Pw "config: review.$key must be a whole number (got '$($rv[$key])')" }
@@ -236,6 +236,10 @@ function Get-PwConfig {
         $rv.tierCap = $n
     }
     else { $rv.tierCap = $null }
+    # models.agents as written: the merge above copies it into a table that folds case, which would hide
+    # a key that differs from a kit agent's name only by case. Get-PwAgentModelClass checks it, not this.
+    $rawModels = if ($user -is [System.Collections.IDictionary] -and $user.Contains('models')) { $user['models'] } else { $null }
+    if ($rawModels -is [System.Collections.IDictionary] -and $rawModels.Contains('agents') -and $cfg.models -is [System.Collections.IDictionary]) { $cfg.models['agents'] = $rawModels['agents'] }
     # budget is checked where it is used (Get-PwCreditEstimate, Get-PwCreditCeiling): a typo there must not stop the board.
     $cfg
 }
@@ -786,8 +790,16 @@ function Get-PwCreditCeiling {
     if ($budget -isnot [System.Collections.IDictionary] -or -not $budget.Contains('maxCreditsPerPacket')) { return $null }
     $v = $budget['maxCreditsPerPacket']
     if ($null -eq $v) { return $null }
+    # A size table is read with the size's case folded, as sizes and creditsPerRun are. Assignments,
+    # not if-expressions, so a one-item list stays a list (and is refused).
+    if ($v -is [System.Collections.IDictionary]) {
+        $table = $v
+        $keys = @($table.Keys | Where-Object { "$_" -ieq $Size })
+        if ($keys.Count -gt 1) { Stop-Pw "config: budget.maxCreditsPerPacket names size $Size more than once ($($keys -join ', '))" }
+        $v = $null
+        if ($keys.Count -eq 1) { $v = $table[$keys[0]] }
+    }
     $shown = $v
-    if ($v -is [System.Collections.IDictionary]) { $v = if ($v.Contains($Size)) { $v[$Size] } else { $null }; $shown = $v }
     $isNumber = $v -is [int] -or $v -is [long] -or $v -is [double] -or $v -is [decimal]
     if (-not $isNumber -or [double]$v -le 0 -or [double]::IsNaN([double]$v) -or [double]::IsInfinity([double]$v)) {
         Stop-Pw "config: budget.maxCreditsPerPacket must be a positive number, or a positive number per size { `"S`": n, `"M`": n, `"L`": n }; its $Size value is missing or not a positive number (got '$shown')"
@@ -801,7 +813,9 @@ function Get-PwAgentModelClass {
        Stops when models.agents names an agent that isn't the kit's, or a class that isn't
        strong, standard or light. #>
     param([System.Collections.IDictionary]$Models, [Parameter(Mandatory)][string]$Agent)
-    $over = if ($null -ne $Models -and $Models.Contains('agents')) { $Models['agents'] } else { $null }
+    # Assignments, not an if-expression, so a one-item list stays a list (and is refused).
+    $over = $null
+    if ($null -ne $Models -and $Models.Contains('agents')) { $over = $Models['agents'] }
     if ($null -eq $over) { $over = @{} }
     if ($over -isnot [System.Collections.IDictionary]) { Stop-Pw 'config: models.agents must map kit agents to a class, such as { "packet-dispatcher": "standard" }' }
     $kitAgents = @($script:AgentModelClass.Keys)

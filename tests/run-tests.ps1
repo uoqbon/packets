@@ -11,8 +11,10 @@
 
   Then it runs each tests/cases/*.tests.ps1, in ordinal file-name order and each in a child scope of
   its own. A case file is one packet's tests: it may use Assert-That, Invoke-Kit, Invoke-KitIn, $kit,
-  $skills, New-CaseRepo and Remove-CaseRepo, keeps its state in plain variables and never assigns a
-  $script: variable (a child scope doesn't isolate those). A case file that throws is one failure.
+  $skills, New-CaseRepo, Remove-CaseRepo and Invoke-CaseProbe, keeps its state in plain variables and
+  never assigns a $script: variable (a child scope doesn't isolate those). Nor does it dot-source a kit
+  script: that would assign the kit's own $script: variables here; Invoke-CaseProbe runs kit code in a
+  child pwsh instead. A case file that throws is one failure.
 
   pwsh -File tests/run-tests.ps1 [-Keep]      -Keep leaves the temp repositories for inspection
   pwsh -File tests/run-tests.ps1 -CasesPath <folder>
@@ -162,6 +164,16 @@ function Remove-CaseRepo {
     foreach ($dir in $Path, "$Path-origin") { if (Test-Path -LiteralPath $dir) { Remove-Item -Recurse -Force -LiteralPath $dir } }
 }
 
+function Invoke-CaseProbe {
+    <# Runs PowerShell that dot-sources PacketWorkflow.ps1, in a child pwsh in the current directory, so
+       the kit's $script: variables never reach this run. Returns what Invoke-Kit returns (Code, Text). #>
+    param([Parameter(Mandatory)][string]$Body)
+    $pwLib = Join-Path $skills 'packet-board/scripts/PacketWorkflow.ps1'
+    $probe = Join-Path ([System.IO.Path]::GetTempPath()) "pw-probe-$([guid]::NewGuid().ToString('n')).ps1"
+    [System.IO.File]::WriteAllText($probe, ". '$($pwLib -replace "'", "''")'`n$Body", [System.Text.UTF8Encoding]::new($false))
+    try { Invoke-Kit $probe @() } finally { Remove-Item -LiteralPath $probe -ErrorAction SilentlyContinue }
+}
+
 function Invoke-CaseFiles([string]$Dir) {
     <# Runs each *.tests.ps1 in $Dir in ordinal file-name order, each in a child scope of its own, so no
        case file's plain variables reach the suite or the next file. One that throws is one failure. #>
@@ -180,6 +192,12 @@ function Invoke-CaseFiles([string]$Dir) {
 }
 
 if ($CasesPath) {
+    # A folder named on the command line must exist: a typo would otherwise read as a pass.
+    if (-not (Test-Path -LiteralPath $CasesPath -PathType Container)) {
+        Remove-Item -LiteralPath $cultureRun -ErrorAction SilentlyContinue
+        [Console]::Error.WriteLine("run-tests: -CasesPath: no folder at $CasesPath")
+        exit 2
+    }
     Invoke-CaseFiles $CasesPath
     Remove-Item -LiteralPath $cultureRun -ErrorAction SilentlyContinue
     Write-Host ''
