@@ -744,13 +744,13 @@ function Invoke-PwGhPages { param(`$Path) @(
     $claimId = if ($r.Text -match 'claim=(\S+)') { $Matches[1] } else { '' }
     $hostName = if ($r.Text -match 'host=(\S+)') { $Matches[1] } else { '' }
     Assert-That ($claimId -match '^session-[0-9a-f]{8}-\d{8}T\d{6}Z-\d{5}$' -and (-not $hostName -or $claimId -notmatch [regex]::Escape($hostName))) 'a claim id carries a hash of the machine, not its host name' $r.Text
-    # Base 50 + 105. Rounds: 300 + 4×35 + 4×195 + 40 = 1260; 300 + 3×35 + 0.85×3×195 + 40 = 942; 300 + 35 + 0.85×195 = 501.
-    Assert-That ($r.Text -match 'estimate=2858\|runs=8\|impl=3\|rounds=3') 'credit estimate for stage 5: settle rows ignored, a row without Runs is one run per lens' $r.Text
-    Assert-That ($r.Text -match 'grouped=1071\|runs=2') 'two runs of two lenses count 2.8 runs' $r.Text
-    # PKT-02 (M): 250 base and 330 + 2×35 + 2×280 + 55 = 1015 in September (its round 1), 330 + 35 + 0.85×280 + 55 = 658 in October; only PKT-01 has finished.
-    Assert-That ($r.Text -match 'summary=4781\|avg=2858\|month=2026-10:3516\|left=8984\|more=3\|finished=True,False\|counted=2') 'credit summary: month by round date, average over finished packets, packets with no round left out' $r.Text
+    # Base 25 + 105. Rounds: 150 + 4×18 + 4×98 + 40 = 654; 150 + 3×18 + 0.85×3×98 + 40 = 494; 150 + 18 + 0.85×98 = 251.
+    Assert-That ($r.Text -match 'estimate=1529\|runs=8\|impl=3\|rounds=3') 'credit estimate for stage 5: settle rows ignored, a row without Runs is one run per lens' $r.Text
+    Assert-That ($r.Text -match 'grouped=590\|runs=2') 'two runs of two lenses count 2.8 runs' $r.Text
+    # PKT-02 (M): 225 base and 165 + 2×18 + 2×140 + 55 = 536 in September (its round 1), 165 + 18 + 0.85×140 + 55 = 357 in October; only PKT-01 has finished.
+    Assert-That ($r.Text -match 'summary=2647\|avg=1529\|month=2026-10:1886\|left=10614\|more=6\|finished=True,False\|counted=2') 'credit summary: month by round date, average over finished packets, packets with no round left out' $r.Text
     Assert-That ($r.Text -match 'budget-check=config: budget\.creditsPerRun\.reviewerByTier\.M must list three numbers') 'a malformed credits table stops the estimate with a clear message' $r.Text
-    Assert-That ($r.Text -match 'four-tier=1923(\r?\n|$)') 'a four-number reviewerByTier from before the merge prices tier 3 at its fourth number' $r.Text
+    Assert-That ($r.Text -match 'four-tier=1517(\r?\n|$)') 'a four-number reviewerByTier from before the merge prices tier 3 at its fourth number' $r.Text
     Assert-That ($r.Text -match 'quoted-check=config: budget\.creditsPerRun\.reviewerByTier\.M must list three numbers') 'a four-entry list with a quoted number stops the estimate, not misread as three tiers' $r.Text
     Assert-That ($r.Text -match 'empty=0/0\|november=2026-11:0\|left=12500') 'a phase with no round reports, and one whose rounds are all last month, are estimated without failing' $r.Text
     Assert-That ($r.Text -match 'defaults-untouched=True\|first=3') 'Get-PwConfig fills in shouldFixPassFromRound on a copy, not on the shared defaults' $r.Text
@@ -830,17 +830,17 @@ if ($a[0] -eq 'api' -and $path -match '/issues/(\d+)/comments') { ConvertTo-Json
         $r = Invoke-Kit $progress @('-WorkingTree', '-Credits', '-Today', '2026-10-20', '-Json')
         $c = ($r.Text | ConvertFrom-Json).Credits
         $line = (@($c.Packets) | ForEach-Object { "$($_.Id):$($_.Pr):$($_.Credits):$($_.Finished)" }) -join ','
-        Assert-That ($r.Code -eq 0 -and $line -eq 'PKT-01:11:2183:True,PKT-02:12:768:False' -and $c.Total -eq 2951 -and $c.PerFinishedPacket -eq 2183 -and $c.Month -eq '2026-10' -and $c.ThisMonth -eq 1371) 'progress -Credits: newest PR per packet, untrusted rounds dropped, credits per packet, phase and month' $r.Text
+        Assert-That ($r.Code -eq 0 -and $line -eq 'PKT-01:11:1221:True,PKT-02:12:561:False' -and $c.Total -eq 1782 -and $c.PerFinishedPacket -eq 1221 -and $c.Month -eq '2026-10' -and $c.ThisMonth -eq 863) 'progress -Credits: newest PR per packet, untrusted rounds dropped, credits per packet, phase and month' $r.Text
         $r = Invoke-Kit $progress @('-WorkingTree', '-Credits', '-Today', '2026-09-30', '-Json')
         $c = ($r.Text | ConvertFrom-Json).Credits
-        Assert-That ($r.Code -eq 0 -and $c.Month -eq '2026-09' -and $c.ThisMonth -eq 1580) 'a round reported at 23:30 UTC on 30 September counts in September, with its packet''s base' $r.Text
+        Assert-That ($r.Code -eq 0 -and $c.Month -eq '2026-09' -and $c.ThisMonth -eq 919) 'a round reported at 23:30 UTC on 30 September counts in September, with its packet''s base' $r.Text
         # -Today is a Gregorian date under any culture: read as a Buddhist-era year, October 2026 would be
         # October 1483, and no round would fall in it.
         $r = Invoke-KitIn 'th-TH' $progress @('-WorkingTree', '-Credits', '-Today', '2026-10-20', '-Json')
         $pj = try { $r.Text | ConvertFrom-Json } catch { $null }
-        Assert-That ($r.Code -eq 0 -and $pj -and $pj.Today -eq '2026-10-20' -and $pj.Credits.Month -eq '2026-10' -and $pj.Credits.ThisMonth -eq 1371) 'progress reads -Today and writes its dates the same under a Thai culture' $r.Text
+        Assert-That ($r.Code -eq 0 -and $pj -and $pj.Today -eq '2026-10-20' -and $pj.Credits.Month -eq '2026-10' -and $pj.Credits.ThisMonth -eq 863) 'progress reads -Today and writes its dates the same under a Thai culture' $r.Text
         $r = Invoke-Kit $progress @('-WorkingTree', '-Credits')
-        Assert-That ($r.Code -eq 0 -and $r.Text -match 'PKT-02\s+M\s+PR #12\s+1 round\(s\), 1 reviewer run\(s\), 2 implementer run\(s\)\s+768\s+\(in review\)' -and $r.Text -match "phase 2,951 · 2,183 per finished packet · $([DateTime]::UtcNow.ToString('yyyy-MM')):") 'progress -Credits text: the estimate per packet and the UTC month by default' $r.Text
+        Assert-That ($r.Code -eq 0 -and $r.Text -match 'PKT-02\s+M\s+PR #12\s+1 round\(s\), 1 reviewer run\(s\), 2 implementer run\(s\)\s+561\s+\(in review\)' -and $r.Text -match "phase 1,782 · 1,221 per finished packet · $([DateTime]::UtcNow.ToString('yyyy-MM')):") 'progress -Credits text: the estimate per packet and the UTC month by default' $r.Text
 
         Write-Host 'remotes: dependencies on other repositories'
         $callLog = Join-Path $fakeBin 'calls.log'
