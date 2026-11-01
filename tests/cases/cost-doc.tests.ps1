@@ -25,7 +25,8 @@ Write-Host '  the default rates'
 # Keys sorted at every level, so the three sources compare as text.
 $sortedJson = 'function Sort-Deep($v) { if ($v -is [System.Collections.IDictionary]) { $o = [ordered]@{}; foreach ($k in @($v.Keys | Sort-Object)) { $o[$k] = Sort-Deep $v[$k] }; $o } elseif ($v -is [System.Collections.IList] -and $v -isnot [string]) { , @($v | ForEach-Object { Sort-Deep $_ }) } else { $v } }'
 $templatePath = (Join-Path $kit 'templates/packet-workflow.json').Replace("'", "''")
-$jsonBlock = if ($costText -match '(?s)```json\s*(\{.*?\})\s*```') { $Matches[1] } else { '{}' }
+# The JSON under "Recommended budget profile", not the first block on the page.
+$jsonBlock = if ($costText -match '(?s)## Recommended budget profile.*?```json\s*(\{.*?\})\s*```') { $Matches[1] } else { '{}' }
 $jsonPath = Join-Path ([System.IO.Path]::GetTempPath()) "pw-costdoc-$([guid]::NewGuid().ToString('n').Substring(0, 8)).json"
 [System.IO.File]::WriteAllText($jsonPath, $jsonBlock, [System.Text.UTF8Encoding]::new($false))
 try {
@@ -78,6 +79,7 @@ Assert-That ($typical['S'] -and [Math]::Abs($typical['S'] - 1180) -le 15 -and [M
 
 Write-Host '  the phase'
 $phase = & $tableAfter 'A phase of N packets'
+Assert-That ($phase.Count -eq 3) 'cost.md has the three rows of the phase table (5, 10 and 20 packets)' ($phase | ForEach-Object { $_ -join ' | ' } | Out-String)
 $mixes = @{ '5' = @(2, 2, 1); '10' = @(3, 5, 2); '20' = @(6, 10, 4) }
 $plan = @{ '5' = 200; '10' = 275; '20' = 450 }
 foreach ($row in $phase) {
@@ -90,8 +92,14 @@ foreach ($row in $phase) {
 }
 $ten = @($phase | Where-Object { $_[0] -match '^10 packets' }) | Select-Object -First 1
 $tenTotal = if ($ten) { & $num $ten[3] } else { 0 }
-Assert-That ($tenTotal -gt 0 -and $costText -match "about $([string]::Format([Globalization.CultureInfo]::InvariantCulture, '{0:N0}', $tenTotal / 10)) credits \(US\`$$([Math]::Round($tenTotal / 1000))\)" -and $costText -match "about $([Math]::Round(12500 / ($tenTotal / 10), 1)) packets") 'per packet all in is the 10-packet phase over ten, and the packets a month follow from it' "10-packet phase $tenTotal"
+Assert-That ($tenTotal -gt 0 -and $costText -match "about $([string]::Format([Globalization.CultureInfo]::InvariantCulture, '{0:N0}', $tenTotal / 10)) credits \(US\`$$([Math]::Round($tenTotal / 1000, [MidpointRounding]::AwayFromZero))\)" -and $costText -match "about $([Math]::Round(12500 / ($tenTotal / 10), 1)) packets") 'per packet all in is the 10-packet phase over ten, and the packets a month follow from it' "10-packet phase $tenTotal"
 Assert-That ($tenTotal -ge 21000 -and $tenTotal -le 22000 -and $costText -match '`packet-plan` about 200 \(5 packets\), 275 \(10\)') 'about 2,160 a packet all in, with packet-plan at about 275 for 10 packets' "10-packet phase $tenTotal"
+
+$inShort = if ($costText -match '(?s)\*\*In short\.\*\*(.*?)\n## ') { $Matches[1] } else { '' }
+$fmt = { param($v) [string]::Format([Globalization.CultureInfo]::InvariantCulture, '{0:N0}', $v) }
+$headline = $typical.Count -eq 3 -and $inShort -match "about $(& $fmt $typical['S']) credits \(S\), $(& $fmt $typical['M']) \(M\) or $(& $fmt $typical['L']) \(L\)" -and
+    $inShort -match "about $(& $fmt ($tenTotal / 10)) credits a packet" -and $inShort -match "\($([Math]::Round(12500 / ($tenTotal / 10), 1))\)" -and $inShort -match "every $([Math]::Round($tenTotal / 12500, 1)) months"
+Assert-That $headline 'the "In short" figures are the table''s typical packets, the phase''s per-packet figure, the packets a month and the months per 10-packet phase' $inShort
 
 Write-Host '  three tiers only'
 $tableLines = @($costPage | Where-Object { $_.StartsWith('|') })
@@ -108,15 +116,21 @@ $ask = @{ Kind = 'settle-request'; Round = 2; Outcome = 'settle'; CreatedAt = '2
 $check = @{ Kind = 'settle-check'; Round = 2; Outcome = 'settled'; CreatedAt = '2026-11-01T04:00:00Z' }
 $r3 = @{ Kind = 'round'; Round = 3; Tier = '3'; Lenses = 'tests'; Outcome = 'fix'; CreatedAt = '2026-11-01T05:00:00Z' }
 $pass = @{ Kind = 'round'; Round = 2; Tier = '3'; Lenses = 'tests'; Outcome = 'pass'; CreatedAt = '2026-11-01T02:00:00Z' }
+$owner = @{ Kind = 'round'; Round = 3; Tier = '3'; Lenses = 'tests'; Outcome = 'needs-human'; CreatedAt = '2026-11-01T05:00:00Z' }
+$bare = [pscustomobject]@{ Round = 3; Tier = '3'; Lenses = 'tests'; Outcome = 'fix'; CreatedAt = '2026-11-01T05:00:00Z' }
+$ask2 = @{ Kind = 'settle-request'; Round = 2; Outcome = 'settle'; CreatedAt = '2026-11-01T06:00:00Z' }
 $sum = Get-PwCreditSummary -Config $ec -Today ([DateTime]'2026-11-01') -Packets @(
     [pscustomobject]@{ Id = 'SETTLED'; Size = 'S'; Pr = 1; Rounds = @($r1, $r2, $ask, $check) },
     [pscustomobject]@{ Id = 'ASKED'; Size = 'S'; Pr = 2; Rounds = @($r1, $r2, $ask) },
     [pscustomobject]@{ Id = 'REOPENED'; Size = 'S'; Pr = 3; Rounds = @($r1, $r2, $check, $r3) },
     [pscustomobject]@{ Id = 'FIXING'; Size = 'S'; Pr = 4; Rounds = @($r1, $r2) },
-    [pscustomobject]@{ Id = 'PASSED'; Size = 'S'; Pr = 5; Rounds = @($r1, $pass) })
+    [pscustomobject]@{ Id = 'PASSED'; Size = 'S'; Pr = 5; Rounds = @($r1, $pass) },
+    [pscustomobject]@{ Id = 'OWNER'; Size = 'S'; Pr = 6; Rounds = @($r1, $r2, $owner) },
+    [pscustomobject]@{ Id = 'BARE'; Size = 'S'; Pr = 7; Rounds = @($r1, $r2, $check, $bare) },
+    [pscustomobject]@{ Id = 'ASKEDAGAIN'; Size = 'S'; Pr = 8; Rounds = @($r1, $r2, $ask, $check, $ask2) })
 'finished=' + (($sum.Packets | ForEach-Object { "$($_.Id):$($_.Finished)" }) -join ',')
-'avg=' + $sum.PerFinishedPacket + '|settled=' + ($sum.Packets | Where-Object Id -eq 'SETTLED').Credits + '|passed=' + ($sum.Packets | Where-Object Id -eq 'PASSED').Credits
+'avg=' + $sum.PerFinishedPacket + '|settled=' + ($sum.Packets | Where-Object Id -eq 'SETTLED').Credits + '|passed=' + ($sum.Packets | Where-Object Id -eq 'PASSED').Credits + '|owner=' + ($sum.Packets | Where-Object Id -eq 'OWNER').Credits + '|again=' + ($sum.Packets | Where-Object Id -eq 'ASKEDAGAIN').Credits
 '@
-Assert-That ($p.Code -eq 0 -and $p.Text -match 'finished=SETTLED:True,ASKED:False,REOPENED:False,FIXING:False,PASSED:True') 'a settle check after the last round finishes a packet whose last round says fix; a settle request alone, or a round after the check, does not' $p.Text
-$avgOk = $p.Text -match 'avg=(\d+)\|settled=(\d+)\|passed=(\d+)' -and [int]$Matches[1] -eq [Math]::Round(([int]$Matches[2] + [int]$Matches[3]) / 2)
+Assert-That ($p.Code -eq 0 -and $p.Text -match 'finished=SETTLED:True,ASKED:False,REOPENED:False,FIXING:False,PASSED:True,OWNER:True,BARE:False,ASKEDAGAIN:True') 'a settle check after the last round finishes a packet whose last round says fix, even with a later settle request; a settle request alone, or a round after the check (with or without Kind), does not; pass and needs-human still finish' $p.Text
+$avgOk = $p.Text -match 'avg=(\d+)\|settled=(\d+)\|passed=(\d+)\|owner=(\d+)\|again=(\d+)' -and [int]$Matches[1] -eq [Math]::Round(([int]$Matches[2] + [int]$Matches[3] + [int]$Matches[4] + [int]$Matches[5]) / 4)
 Assert-That $avgOk 'the average per finished packet counts the settled packet' $p.Text

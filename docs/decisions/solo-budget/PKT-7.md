@@ -69,9 +69,11 @@ Choices [PKT-7](../../plan/solo-budget/packets/PKT-7.md) left open, and why each
     - The phase table must follow from the typical rows and the overhead rule. Per packet all in, and packets a month, must follow from the 10-packet total.
     - The `creditsPerRun` in the defaults, the template and the page's budget-profile JSON must be the packet's values.
     - No table may have a tier-4 row or a round path through tier 4. The "Written for four review tiers" paragraph must be gone, and the page must state its model assumption.
-    - The finished rule has its own test: settled, a settle request only, reopened after a settle, still fixing, and passed.
+    - The phase table must have its three rows, and the budget-profile JSON is read from under its own heading, so a JSON block PKT-8 adds earlier on the page can't be compared by mistake.
+    - The "In short" bullets must give the table's typical totals, the per-packet figure, the packets a month and the months per 10-packet phase.
+    - The finished rule has its own test, with eight packets: settled; a settle request only; reopened after a settle (with a round that has a `Kind`, and with one that has none); a second settle request after the check; still fixing; passed; and gone to the owner.
 
-    Against 0.1.1's page, 18 of the case file's 31 checks fail. The PKT-1 grep (no `$script:` assignment, no dot-sourced kit script) covers this file too.
+    Against 0.1.1's page, 19 of the case file's 33 checks fail. The tests review's mutations (a changed rate in each of the three sources, the old finished rule, a settle request counted as a settle, a dropped Kind-less branch, a tier-4 path, a drifted typical total, wrong "In short" figures, a removed phase row) each fail at least one check. Not covered: `progress.ps1 -Credits` end to end with a settle check, because the progress fixture in `tests/run-tests.ps1` has none, and adding one would change an existing test beyond its credit figures. The acceptance criterion names `Get-PwCreditSummary`, which progress.ps1 calls with every trusted marker row. The PKT-1 grep (no `$script:` assignment, no dot-sourced kit script) covers this file too.
 
 ## Changelog wording for H-3
 
