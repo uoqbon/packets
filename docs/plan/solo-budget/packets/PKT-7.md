@@ -77,7 +77,7 @@ This packet recomputes every table for the three-tier panel on GPT-6.1 Sol in ev
 ## Consumes
 
 - `Get-PwCreditEstimate` and `$script:Defaults.budget.creditsPerRun`, as PKT-1 leaves them.
-- The `tests/cases/` folder from PKT-1: the new test only dot-sources `PacketWorkflow.ps1`, so it needs no case repository.
+- The `tests/cases/` folder from PKT-1: the new test runs `PacketWorkflow.ps1` through `Invoke-CaseProbe` (a case file never dot-sources a kit script), so it needs no case repository.
 
 ## Provides
 
