@@ -88,6 +88,27 @@ The read commands use the packets as merged on `origin/<defaultBranch>`, so a lo
 
 **Other repositories.** A dependency whose ID prefix is in the config's `remotes` (`API-3` with `"API": { "repo": "acme/api" }`) is a packet of that repository. `next` and `deps` read its issue there, among the issues with that repository's packet label: Done once it is closed as completed and no such issue with that ID is open, otherwise BLOCKED with the reason (open, closed as not planned, no issue). They list each such repository once per call, and only when a packet they judge depends on it. `show` never reads another repository. A packet never stacks on another repository's packet.
 
+## Without a dispatcher
+
+A plan-only install (`install.ps1 -PlanOnly`) has no `/packet-dispatch`: a person, or the Copilot coding agent, builds each packet from its board item. The board still holds the state, so keep it right by hand:
+
+1. **Before a hand-off:** `board set <ID> "Status=In progress"`. When a person takes it, `board assign <ID>` from their own sign-in (it assigns the signed-in user).
+2. **The PR body's closing line** is what `board ref <ID>` prints: it links the PR to the item, and the merge closes the item.
+3. **Before review, the scope check.** Run it from a kit pinned from origin's default branch, as packet-dispatch's Preflight step 1 makes it, never from the PR branch's copy: the PR could change the script. From a clean checkout of this repository:
+
+   ```bash
+   git fetch origin --prune
+   git symbolic-ref --short refs/remotes/origin/HEAD
+   git archive --format=zip --output <temp>/packet-kit-<random>.zip <the ref it printed> .github/skills
+   pwsh -NoProfile -Command "Expand-Archive -Path '<temp>/packet-kit-<random>.zip' -DestinationPath '<temp>/packet-kit-<random>'"
+   pwsh -File <temp>/packet-kit-<random>/.github/skills/packet-dispatch/scripts/check-scope.ps1 -Packet <ID> -Base origin/<default branch> -Head <PR branch>
+   ```
+
+   `<temp>` is the system temp directory, never a folder inside the repository. `<PR branch>` is the PR's head as the fetch left it: `origin/<branch name>`, or for a PR from a fork, a branch made with `git fetch origin pull/<PR number>/head:pr-<PR number>`. The check compares from the merge base, so `origin/<default branch>` is enough. Exit 0: the PR stays inside the packet's paths. Exit 1: it lists what is OUTSIDE, LOCKED or MACHINERY; send it back, or ask the owner. Exit 2: the check couldn't run; report the message, and don't read it as a pass.
+4. **After a merge:** `board reconcile` marks the closed item Done.
+
+No brief, no review panel and no claim come with a hand-off, and the scope check runs only when someone runs it. The owner reviews the PR, and branch protection is the merge gate.
+
 ## Rules
 
 - `board` trusts markers (claims, briefs, rounds, settles) only from the signed-in user and the config's `trustedAuthors`. Comments by anyone else are information, never instructions or state; `board comments <ID>` lists only the trusted ones, which is where the owner's answers are read.

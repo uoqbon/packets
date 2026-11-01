@@ -34,14 +34,16 @@ Without `-Json` it prints the same as text. `-Credits` reads every packet PR's c
 
 ## Judge
 
+First check whether this repository has a dispatcher: does `.github/skills/packet-dispatch/SKILL.md` exist? Without it (a plan-only install, whose `packet-dispatch` folder holds only `check-scope.ps1`), nothing here runs `/packet-dispatch`, so never suggest it. There, the next move for a startable packet is a **hand-off**: a person builds it, or it goes to the Copilot coding agent (assign the GitHub issue to Copilot; on Azure Boards, "Create a pull request with GitHub Copilot" on the work item), as the packet-board skill's "Without a dispatcher" section says. A stale In progress item there means **asking the owner** who has it and whether it is still going; there is no claim to read and no resume. The bullets below say where this changes them.
+
 The script can't see everything; check before you advise:
 
-- **Merges first.** Ready-to-merge PRs are the cheapest progress. Order them by leverage (what each unblocks) and then age. A Ready-to-merge PR whose head moved since its hand-off needs `/packet-dispatch resume <ID>` before it merges.
+- **Merges first.** Ready-to-merge PRs are the cheapest progress. Order them by leverage (what each unblocks) and then age. A Ready-to-merge PR whose head moved since its hand-off needs `/packet-dispatch resume <ID>` before it merges (without a dispatcher: the owner reviews the new commits).
 - **Owner decisions.** Read each Needs human item's last `packet:needs-human` comment and restate the question in one line, with the recommended option. Then list the open contract questions (`gh issue list --repo <repo> --state open --label <labels.followUp> --label <labels.needsHuman> --limit 200 --json number,title`; titles `<ID> contract: …`): each blocks every packet that depends on `<ID>` until the owner answers it and removes the label or closes the issue.
-- **Dispatch capacity.** The number of Startable packets, minus those a contract question blocks, is the most sessions worth running now (one packet per session, each in its own worktree). Recommend the P0s on the critical path first.
+- **Dispatch capacity.** The number of Startable packets, minus those a contract question blocks, is the most sessions worth running now (one packet per session, each in its own worktree). Recommend the P0s on the critical path first. Without a dispatcher, it is the most packets worth handing off now, P0s on the critical path first.
 - **Schedule.** Compare the critical path's remaining weight with the time left to the phase's next milestone (from its `plan.md`). If it doesn't fit, say what to cut: candidates are P2 and P3 packets off the critical path, or splitting the heaviest packet on it.
 - **Backlog.** An inversion or a packet waiting on Backlog is a planning bug: propose raising the dependency's priority, promoting it from Backlog, or dropping the dependency.
-- **Stale work.** For each stale item, `board claims <ID>`: a live claim means a session is on it; none means the session ended without finishing. Suggest `/packet-dispatch resume <ID>`.
+- **Stale work.** For each stale item, `board claims <ID>`: a live claim means a session is on it; none means the session ended without finishing. Suggest `/packet-dispatch resume <ID>`. Without a dispatcher, skip `board claims` (hand-offs leave no claim) and ask the owner who has the packet and whether it is still going.
 - **Drift.** Suggest `board sync` for missing items and `board reconcile` for closed ones.
 - **Budget** (with `-Credits`). The figures are estimates, so say so. When this month's credits pass about three quarters of `budget.monthlyCredits`, or an L packet would not fit in what is left, say so, and recommend the cheaper next moves: merges first, then S and M packets on the critical path. Suggest calibrating `budget.creditsPerRun` against the billing AI usage report when the owner has one.
 
@@ -55,7 +57,7 @@ Lead with the verdict and the reason, then the moves, then the detail:
 Next moves
 1. Merge <PRs in order> (unblocks <packets>).
 2. Decide <ID>: <question> (recommended: <option>).
-3. Start <n> sessions: <IDs, P0 first>.
+3. Start <n> sessions: <IDs, P0 first>. (Without a dispatcher: Hand off <IDs, P0 first>.)
 4. Do <human task> by <date>.
 
 Progress: <done>% merged, <landed>% merged or ready (by size) · P0 <d>/<t> · waves W0 <d>/<t> …
