@@ -348,7 +348,7 @@ function Get-PwGhPrForPacket {
 }
 
 function Get-PwGhRounds {
-    <# A PR's round reports, settle requests and settle checks, oldest first, from trusted authors only:
+    <# A PR's round reports, settle requests, settle checks and budget raises, oldest first, from trusted authors only:
        the GitHub sign-in and the config's trustedAuthors (PRs are on GitHub, so the GitHub sign-in decides
        even when the board is elsewhere). A settle request is Consumed once a settle check follows it. #>
     param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$Pr)
@@ -368,6 +368,10 @@ function Get-PwGhRounds {
             }
             elseif ($mk -and $mk.Kind -eq 'settle-check') {
                 [pscustomobject]@{ Kind = 'settle-check'; Round = $last; Head = $mk.Pairs['head']; Tier = $null; Lenses = $null; Runs = $null; Confirmed = $null; Outcome = 'settled'; Author = $_.user.login; CommentId = $_.id; CreatedAt = $_.created_at; Url = $_.html_url; Body = $null }
+            }
+            elseif ($mk -and $mk.Kind -eq 'budget') {
+                # A raise of the packet's credit ceiling (credit-check.ps1). Max is as written; the reader checks it.
+                [pscustomobject]@{ Kind = 'budget'; Round = $last; Head = $null; Tier = $null; Lenses = $null; Runs = $null; Confirmed = $null; Outcome = 'budget'; Max = $mk.Pairs['max']; Author = $_.user.login; CommentId = $_.id; CreatedAt = $_.created_at; Url = $_.html_url; Body = $null }
             }
         })
     foreach ($r in $rows) {
