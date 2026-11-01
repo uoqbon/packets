@@ -134,7 +134,8 @@ try {
         foreach ($p in $scope) {
             $s = & $statusOf $p
             if (-not $p.Target -or $s -in 'Done', 'Ready to merge' -or (Test-PwItemDone $byId[$p.Id])) { continue }
-            $t = [DateTime]::ParseExact($p.Target, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+            $t = ConvertTo-PwDate $p.Target
+            if ($null -eq $t) { Stop-Pw "$($p.Id) ($($p.Path)): Target must be a date as yyyy-MM-dd (got '$($p.Target)'); validate-packets.ps1 lists every packet with a bad Target" }
             $days = ($t - $asOf).Days
             if ($days -lt 0) { $late.Add([pscustomobject]@{ Id = $p.Id; Priority = $p.Priority; Status = $s; Target = $p.Target; DaysLate = - $days }) }
             elseif ($days -le 2 -and $s -in 'Backlog', 'Ready', 'Not on board') { $dueSoon.Add([pscustomobject]@{ Id = $p.Id; Priority = $p.Priority; Status = $s; Target = $p.Target; DaysLeft = $days }) }

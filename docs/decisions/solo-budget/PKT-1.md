@@ -22,6 +22,10 @@ Choices [PKT-1](../../plan/solo-budget/packets/PKT-1.md) left open, and why each
 13. **The `$script:` grep scans every `*.ps1` in `tests/cases/`.** It looks for an assignment (`=`, `+=` and the like, `++`, `--`) and for `Set-Variable … -Scope Script`. Reading a `$script:` variable is allowed.
 14. **The case file probes PacketWorkflow.ps1 in child `pwsh` processes,** never by dot-sourcing it into the run. Dot-sourcing would assign the kit's `$script:` variables in the runner's scope.
 
+## Added at the owner's request (outside Owns)
+
+15. **A Target that isn't a real date is rejected, not crashed on.** This answers open question 1 in the PR. The new `ConvertTo-PwDate` in PacketWorkflow.ps1 parses yyyy-MM-dd strictly. progress.ps1 now stops with `<ID> (<path>): Target must be a date as yyyy-MM-dd (got '…')` and exits 2 through its `PwError` handler. Before, it threw a raw `ParseExact` exception with a stack trace. `Test-PwPacket`, which validate-packets and board sync both use, now refuses days that don't exist, such as `2026-11-00` and `2026-02-30`. It gives the same message it already gave for a wrong shape. progress stops rather than skipping the packet, because a late list that quietly leaves a packet out would read as a pass. The tests are in `tests/cases/target-dates.tests.ps1`. These files aren't in PKT-1's Owns: the owner asked for this change in the PR's review.
+
 ## Not changed
 
 - review-scope doesn't use `tierCap` yet (PKT-3). No credit rate changed (PKT-7). The installer is untouched (PKT-4). No existing test moved into `tests/cases/`.

@@ -499,6 +499,15 @@ function Get-PwPhaseInfo {
     [pscustomobject]@{ Slug = $Phase; Title = $title; Epic = $epic; Root = $root; Roots = @($roots); Path = $rel; Exists = [bool]$text }
 }
 
+function ConvertTo-PwDate {
+    <# A yyyy-MM-dd date as [DateTime], or $null when the text isn't one (a wrong shape, or a day that
+       doesn't exist, such as 2026-11-00 or 2026-02-30). #>
+    param([string]$Text)
+    $d = [DateTime]::MinValue
+    if ($Text -and [DateTime]::TryParseExact($Text.Trim(), 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$d)) { return $d }
+    $null
+}
+
 function Test-PwPacket {
     <# The problems in one packet file, each a string; empty when it is well formed. #>
     param([Parameter(Mandatory)]$Packet, [Parameter(Mandatory)]$Config)
@@ -514,7 +523,7 @@ function Test-PwPacket {
     }
     if (-not $p.Title) { $problems.Add('no title') }
     if ($p.Priority -notmatch '^P[0-3]$') { $problems.Add("Priority must be P0-P3 (got '$($p.Priority)')") }
-    if ($p.Target -and $p.Target -notmatch '^\d{4}-\d{2}-\d{2}$') { $problems.Add("Target must be a date as yyyy-MM-dd (got '$($p.Target)')") }
+    if ($p.Target -and ($p.Target -notmatch '^\d{4}-\d{2}-\d{2}$' -or $null -eq (ConvertTo-PwDate $p.Target))) { $problems.Add("Target must be a date as yyyy-MM-dd (got '$($p.Target)')") }
     if ($p.InitialStatus -notin @('Backlog', 'Ready')) { $problems.Add("Initial status must be Backlog or Ready (got '$($p.InitialStatus)')") }
     # 4 is from before tiers 3 and 4 merged: still well formed (validate-packets warns; review-scope reads it as 3).
     if ($p.ReviewTier -and $p.ReviewTier -notmatch '^[1-4]$') { $problems.Add("Review tier must be 1-3, 3 being the top tier (got '$($p.ReviewTier)')") }
