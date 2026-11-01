@@ -64,7 +64,7 @@ git clone --branch v0.1.1 https://github.com/uoqbon/packets.git
 pwsh -File packets/install.ps1 -Target <path to the repository> -WithInstructions
 ```
 
-It copies the agents to `<repo>/.github/agents/`, the skills to `<repo>/.github/skills/` (where Copilot discovers them) and the hook to `<repo>/.github/hooks/`, creates `.github/packet-workflow.json` from the template with the repository and default branch filled in, and with `-WithInstructions` adds the workflow's rules to `.github/copilot-instructions.md` between markers. `-DryRun` shows what it would do.
+It copies the agents to `<repo>/.github/agents/`, the skills to `<repo>/.github/skills/` (where Copilot discovers them) and the hook to `<repo>/.github/hooks/`, creates `.github/packet-workflow.json` from the template with the repository and default branch filled in, and with `-WithInstructions` adds the workflow's rules to `.github/copilot-instructions.md` between markers. `-DryRun` shows what it would do. `-PlanOnly` installs only planning, the board and progress, for a seat that can't pay for dispatches: see [Plan and board only](#plan-and-board-only).
 
 To upgrade, check out a newer release (`git -C packets fetch --tags`, then `git -C packets checkout <tag>`), read what it changes in [CHANGELOG.md](CHANGELOG.md), and run the same command. To follow `main` between releases instead, clone without `--branch` and upgrade with `git -C packets pull`. The installer records hashes in `.github/packet-workflow.kit.json`, replaces only files you haven't changed since the last install, and lists the ones it kept (`-Force` replaces them). Put project-specific review lenses in `.github/packet-lenses/<name>.md`; the kit never touches that folder, and a lens there overrides the kit's lens of the same name.
 
@@ -110,6 +110,21 @@ Commit what it installs in a pull request; Copilot reads the files from the chec
 5. **Track.** `/packet-progress` anytime (ask about cost, and it adds `-Credits`: an estimate of each packet's AI credits against `budget.monthlyCredits`): health, the merge order that unblocks the most, what can start, what waits on you, the critical path, late and stale work.
 
 When a dispatcher needs you, the packet goes to **Needs human** with a question and options on the item; answer there and type `/packet-dispatch resume PKT-03` in a dispatcher session. If your answer changes what the packet file says (a criterion, the goal, its paths), the dispatcher doesn't ask you to edit it: it opens a small `Amend PKT-03: …` pull request for the packet file, and your merge approves the change; resume again after merging. When a round passes with a should-fix question about a contract other packets build on (the last round, or from `review.shouldFixPassFromRound` on), it opens a follow-up titled `PKT-03 contract: …` with the `needs-human` label, and no dispatcher starts a packet that depends on PKT-03 until you answer it and remove the label (or close the issue); `/packet-progress` lists these. After the last review round, you can **settle** a remaining problem yourself: push or describe the fix, comment `` `packet:settle head=<the PR head you looked at>` `` on the PR, and resume. The dispatcher checks scope, tests and CI, without another panel round; a commit pushed after your settle isn't covered by it.
+
+## Plan and board only
+
+Planning and the board cost under 1,000 credits a phase ([cost](docs/cost.md)); dispatches and the review panel cost far more. For a seat that can't pay for them, `-PlanOnly` installs packet-plan, packet-board and packet-progress, and `check-scope.ps1` on its own: no agents, no hook, no `/packet-dispatch`.
+
+1. `pwsh -File packets/install.ps1 -Target <repo> -PlanOnly -WithInstructions` (`-PlanOnly` is newer than 0.1.1: use a later release, or `main`)
+2. In `.github/packet-workflow.json`, check `repo` and set `board.provider` and its block; nothing else is needed. Commit it all in a pull request.
+3. `/packet-plan <your plan> <phase>`, then review and merge the plan PR.
+4. `/packet-board setup`, then `/packet-board sync <phase>`.
+5. Hand off each startable packet (`board next`), with `board set <ID> "Status=In progress"` first, in one of three ways:
+   1. **By hand:** a person builds it, using the commands in the board skill's [Without a dispatcher](skills/packet-board/SKILL.md#without-a-dispatcher) section: `board assign`, `board ref` for the PR body, the scope check before review, `board reconcile` after the merge.
+   2. **GitHub Issues or a GitHub Project:** assign the issue to Copilot. The coding agent works from the issue body, which is the packet file.
+   3. **Azure Boards:** on the work item, "Create a pull request with GitHub Copilot". It needs the GitHub App connection, not a PAT, and work item types in the Requirements or Task category.
+
+A hand-off doesn't do what a dispatch does: no brief, no review panel and no claim, and the scope check runs only when someone runs it, from a kit pinned from the default branch. The owner reviews the PR, and branch protection is the merge gate. The coding agent's runs draw on the same AI credits, and the kit doesn't estimate them. Run the installer without `-PlanOnly` later to add the rest. A `-PlanOnly` run on a full install is refused, since it would remove the agents: to downgrade, delete the files it lists in a pull request first.
 
 ## Copilot specifics
 
