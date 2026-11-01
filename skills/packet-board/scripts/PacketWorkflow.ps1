@@ -38,8 +38,18 @@ $script:Defaults = @{
     # @{ API = @{ repo = 'acme/api'; label = 'packet' } } (label: that repository's packet label, default labels.packet).
     remotes       = @{}
     claims        = @{ leaseMinutes = 30 }
+    # The model lists per class (install.ps1 writes them into the agents' model: lines), and agents:
+    # a class per kit agent that overrides $script:AgentModelClass (Get-PwAgentModelClass).
+    models        = @{
+        strong   = @('GPT-6.1 Sol (copilot)', 'Claude Sonnet 5.5 (copilot)')
+        standard = @('GPT-6.1 Sol (copilot)', 'Claude Sonnet 5.5 (copilot)')
+        light    = @('GPT-6.1 Sol (copilot)', 'Claude Sonnet 5.5 (copilot)')
+        agents   = @{}
+    }
     review        = @{
         maxRounds = 3; maxParallelLenses = 2; lensesPerReviewer = 1
+        # tierCap: the highest tier a round runs at, 2 or 3; $null for no cap (Get-PwConfig checks it).
+        tierCap = $null
         # shouldFixPassFromRound defaults to maxRounds (Get-PwConfig): only the last round passes on should-fix findings.
         agents = @{ '1' = 'packet-reviewer-light'; '2' = 'packet-reviewer-standard'; '3' = 'packet-reviewer-deep' }
         maxPaths = ''; deepPaths = ''; lensPaths = @{}; concurrencyPattern = ''
@@ -50,6 +60,9 @@ $script:Defaults = @{
     # Estimates to calibrate against the AI usage report; monthlyCredits 0 means no allowance is set.
     budget        = @{
         monthlyCredits = 0
+        # The most credits one packet may spend: one number, or one per size. $null for no ceiling;
+        # Get-PwCreditCeiling checks it where it is used.
+        maxCreditsPerPacket = $null
         creditsPerRun  = @{
             dispatcher = 50; dispatcherPerRound = @{ S = 300; M = 330; L = 390 }; dispatcherPerReviewerRun = 35
             implementer = @{ S = 105; M = 200; L = 355 }
@@ -59,6 +72,19 @@ $script:Defaults = @{
         }
     }
 }
+
+# The kit's five agents and the model class each runs on, as install.ps1 writes their model: lines.
+# models.agents in the config overrides a class (Get-PwAgentModelClass).
+$script:AgentModelClass = [ordered]@{
+    'packet-dispatcher'        = 'strong'
+    'packet-reviewer-deep'     = 'strong'
+    'packet-implementer'       = 'standard'
+    'packet-reviewer-standard' = 'standard'
+    'packet-reviewer-light'    = 'light'
+}
+# The kit's review lenses: the base names of skills/packet-review/lenses/*.md (a test pins the two
+# together). A plan-only install has no lenses folder, so the validator reads the names from here.
+$script:KitLenses = [string[]]@('ai', 'architecture', 'concurrency', 'correctness', 'data', 'integration', 'ops', 'performance', 'security', 'tests', 'ux')
 
 class PwError : System.Exception {
     PwError([string]$Message) : base($Message) {}
@@ -187,7 +213,7 @@ function Get-PwConfig {
     # review block in the config it is the defaults' own, which a second config in this process would inherit.
     $rv = Merge-PwHashtable $cfg.review @{}
     $cfg.review = $rv
-    $whole = { param($v) if ($v -is [int] -or $v -is [long]) { [int]$v } elseif ($v -is [double] -and $v -ge 0 -and $v -le 1000 -and $v -eq [Math]::Floor($v)) { [int]$v } elseif ($v -is [string] -and $v -match '^\s*\d{1,4}\s*$') { [int]$v.Trim() } else { $null } }
+    $whole = { param($v) if (($v -is [int] -or $v -is [long]) -and $v -ge [int]::MinValue -and $v -le [int]::MaxValue) { [int]$v } elseif ($v -is [double] -and $v -ge 0 -and $v -le 1000 -and $v -eq [Math]::Floor($v)) { [int]$v } elseif ($v -is [string] -and $v -match '^\s*\d{1,4}\s*$') { [int]$v.Trim() } else { $null } }
     foreach ($key in 'maxRounds', 'maxParallelLenses', 'lensesPerReviewer') {
         $n = & $whole $rv[$key]
         if ($null -eq $n) { Stop-Pw "config: review.$key must be a whole number (got '$($rv[$key])')" }
@@ -203,7 +229,18 @@ function Get-PwConfig {
         if ($null -eq $n -or $n -lt 1) { Stop-Pw "config: review.shouldFixPassFromRound must be a round number, 1 or more (got '$($rv.shouldFixPassFromRound)')" }
         $rv.shouldFixPassFromRound = [Math]::Min($n, $rv.maxRounds)
     }
-    # budget is checked where it is used (Get-PwCreditEstimate): a typo there must not stop the board.
+    # The highest tier a round runs at: 2 or 3 (a quoted "2" counts), or null for no cap.
+    if ($rv.Contains('tierCap') -and $null -ne $rv.tierCap) {
+        $n = & $whole $rv.tierCap
+        if ($n -ne 2 -and $n -ne 3) { Stop-Pw "config: review.tierCap must be 2 or 3, or null for no cap (got '$($rv.tierCap)')" }
+        $rv.tierCap = $n
+    }
+    else { $rv.tierCap = $null }
+    # models.agents as written: the merge above copies it into a table that folds case, which would hide
+    # a key that differs from a kit agent's name only by case. Get-PwAgentModelClass checks it, not this.
+    $rawModels = if ($user -is [System.Collections.IDictionary] -and $user.Contains('models')) { $user['models'] } else { $null }
+    if ($rawModels -is [System.Collections.IDictionary] -and $rawModels.Contains('agents') -and $cfg.models -is [System.Collections.IDictionary]) { $cfg.models['agents'] = $rawModels['agents'] }
+    # budget is checked where it is used (Get-PwCreditEstimate, Get-PwCreditCeiling): a typo there must not stop the board.
     $cfg
 }
 
@@ -466,6 +503,15 @@ function Get-PwPhaseInfo {
     [pscustomobject]@{ Slug = $Phase; Title = $title; Epic = $epic; Root = $root; Roots = @($roots); Path = $rel; Exists = [bool]$text }
 }
 
+function ConvertTo-PwDate {
+    <# A yyyy-MM-dd date as [DateTime], or $null when the text isn't one (a wrong shape, or a day that
+       doesn't exist, such as 2026-11-00 or 2026-02-30). #>
+    param([string]$Text)
+    $d = [DateTime]::MinValue
+    if ($Text -and [DateTime]::TryParseExact($Text.Trim(), 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$d)) { return $d }
+    $null
+}
+
 function Test-PwPacket {
     <# The problems in one packet file, each a string; empty when it is well formed. #>
     param([Parameter(Mandatory)]$Packet, [Parameter(Mandatory)]$Config)
@@ -481,7 +527,7 @@ function Test-PwPacket {
     }
     if (-not $p.Title) { $problems.Add('no title') }
     if ($p.Priority -notmatch '^P[0-3]$') { $problems.Add("Priority must be P0-P3 (got '$($p.Priority)')") }
-    if ($p.Target -and $p.Target -notmatch '^\d{4}-\d{2}-\d{2}$') { $problems.Add("Target must be a date as yyyy-MM-dd (got '$($p.Target)')") }
+    if ($p.Target -and ($p.Target -notmatch '^\d{4}-\d{2}-\d{2}$' -or $null -eq (ConvertTo-PwDate $p.Target))) { $problems.Add("Target must be a date as yyyy-MM-dd (got '$($p.Target)')") }
     if ($p.InitialStatus -notin @('Backlog', 'Ready')) { $problems.Add("Initial status must be Backlog or Ready (got '$($p.InitialStatus)')") }
     # 4 is from before tiers 3 and 4 merged: still well formed (validate-packets warns; review-scope reads it as 3).
     if ($p.ReviewTier -and $p.ReviewTier -notmatch '^[1-4]$') { $problems.Add("Review tier must be 1-3, 3 being the top tier (got '$($p.ReviewTier)')") }
@@ -733,6 +779,54 @@ function Get-PwCreditRate {
     if ($v -is [System.Collections.IDictionary]) { $v = $v[$Size] }
     if ($v -isnot [ValueType] -or $v -is [bool]) { Stop-Pw "config: budget.creditsPerRun.$Name must be a number, or a number per size (S, M, L); its $Size value is missing or not a number" }
     [double]$v
+}
+
+function Get-PwCreditCeiling {
+    <# The most credits a packet of this size may spend (budget.maxCreditsPerPacket), as [double], or
+       $null when no ceiling is set. The value is one positive number for every size, or a table by
+       S/M/L. Anything else stops here, never in Get-PwConfig, so a typo can't stop the board. #>
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Config, [Parameter(Mandatory)][ValidateSet('S', 'M', 'L')][string]$Size)
+    $budget = $Config['budget']
+    if ($budget -isnot [System.Collections.IDictionary] -or -not $budget.Contains('maxCreditsPerPacket')) { return $null }
+    $v = $budget['maxCreditsPerPacket']
+    if ($null -eq $v) { return $null }
+    # A size table is read with the size's case folded, as sizes and creditsPerRun are. Assignments,
+    # not if-expressions, so a one-item list stays a list (and is refused).
+    if ($v -is [System.Collections.IDictionary]) {
+        $table = $v
+        $keys = @($table.Keys | Where-Object { "$_" -ieq $Size })
+        if ($keys.Count -gt 1) { Stop-Pw "config: budget.maxCreditsPerPacket names size $Size more than once ($($keys -join ', '))" }
+        $v = $null
+        if ($keys.Count -eq 1) { $v = $table[$keys[0]] }
+    }
+    $shown = $v
+    $isNumber = $v -is [int] -or $v -is [long] -or $v -is [double] -or $v -is [decimal]
+    if (-not $isNumber -or [double]$v -le 0 -or [double]::IsNaN([double]$v) -or [double]::IsInfinity([double]$v)) {
+        Stop-Pw "config: budget.maxCreditsPerPacket must be a positive number, or a positive number per size { `"S`": n, `"M`": n, `"L`": n }; its $Size value is missing or not a positive number (got '$shown')"
+    }
+    [double]$v
+}
+
+function Get-PwAgentModelClass {
+    <# The model class an agent runs on: models.agents[<agent>] when set, else the kit's
+       ($script:AgentModelClass). $null for an agent the kit doesn't ship (a project's own reviewer).
+       Stops when models.agents names an agent that isn't the kit's, or a class that isn't
+       strong, standard or light. #>
+    param([System.Collections.IDictionary]$Models, [Parameter(Mandatory)][string]$Agent)
+    # Assignments, not an if-expression, so a one-item list stays a list (and is refused).
+    $over = $null
+    if ($null -ne $Models -and $Models.Contains('agents')) { $over = $Models['agents'] }
+    if ($null -eq $over) { $over = @{} }
+    if ($over -isnot [System.Collections.IDictionary]) { Stop-Pw 'config: models.agents must map kit agents to a class, such as { "packet-dispatcher": "standard" }' }
+    $kitAgents = @($script:AgentModelClass.Keys)
+    foreach ($name in @($over.Keys)) {
+        if ($kitAgents -cnotcontains $name) { Stop-Pw "config: models.agents.$name is not one of the kit's agents ($($kitAgents -join ', '))" }
+        $class = $over[$name]
+        if ($class -isnot [string] -or @('strong', 'standard', 'light') -cnotcontains $class) { Stop-Pw "config: models.agents.$name must be strong, standard or light (got '$class')" }
+    }
+    if ($kitAgents -cnotcontains $Agent) { return $null }
+    if ($over.Contains($Agent)) { return [string]$over[$Agent] }
+    [string]$script:AgentModelClass[$Agent]
 }
 
 function Get-PwCreditEstimate {
