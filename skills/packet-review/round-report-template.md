@@ -1,7 +1,7 @@
 `packet:round <N> head=<head sha> tier=<tier> lenses=<a,b,c> runs=<reviewer runs> confirmed=<lenses or -> outcome=<pass|fix|needs-human>`
 ### Review panel · round <N> of <maxRounds> · <outcome>
 
-**Head** `<short sha>` · **Base** `<base ref>` · **Tier** <tier> <name> (`<agent>`, <model the reviewers ran on>): <review-scope reasons; any raise and why>
+**Head** `<short sha>` · **Base** `<base ref>` · **Tier** <tier> <name> (`<agent>`, <model the reviewers ran on>)< (capped from <uncapped> by review.tierCap), when Uncapped differs from Floor>: <review-scope reasons; any raise and why>
 
 | Pair | Run | Lens | Reported | Confirmed | Rejected |
 | --- | --- | --- | --- | --- | --- |
