@@ -423,6 +423,9 @@ Click through it.
     Write-File 'src/Api/Auth/TokenCheck.cs' "class TokenCheck { static readonly SemaphoreSlim Gate = new(1); }`n"
     & git add -A; & git commit -qm 'api' | Out-Null
     $apiSha = (& git rev-parse HEAD).Trim()
+    # lensPaths' key order changes per process, so the reason must not follow it: check several processes.
+    $why = @(1..5 | ForEach-Object { ((Invoke-Kit $reviewScope @('-Base', 'main', '-Json')).Text | ConvertFrom-Json).LensReasons -join ' | ' })
+    Assert-That (@($why | Where-Object { $_ -ceq "added by the diff's paths: security, concurrency, correctness" }).Count -eq 5) 'the lenses added by the diff''s paths are listed in lensOrder order, the same in every run' ($why -join "`n")
     $r = Invoke-Kit $reviewScope @('-Base', 'main', '-Packet', 'PKT-03', '-Json')
     $s = $r.Text | ConvertFrom-Json
     Assert-That ($r.Code -eq 0 -and $s.Tier -eq 3) 'auth path and a semaphore raise the tier to 3' $r.Text
