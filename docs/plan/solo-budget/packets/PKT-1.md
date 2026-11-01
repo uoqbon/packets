@@ -42,6 +42,8 @@ Land the contracts every later packet codes against: three new config keys whose
 - `tests/run-tests.ps1`
 - `tests/cases/config-keys.tests.ps1`
 - `docs/decisions/solo-budget/PKT-1.md`
+- `skills/packet-progress/scripts/progress.ps1`
+- `tests/cases/target-dates.tests.ps1`
 
 ## Shared touchpoints
 
@@ -57,7 +59,7 @@ Land the contracts every later packet codes against: three new config keys whose
 - `Get-PwCreditCeiling -Config <cfg> -Size <S|M|L>`: `[double]` or `$null`; throws `PwError` on a bad value.
 - `Get-PwAgentModelClass -Models <IDictionary> -Agent <string>`: `'strong'`, `'standard'`, `'light'` or `$null`; throws `PwError` on a bad `models.agents` entry.
 - `$script:AgentModelClass` (agent name → class) and `$script:KitLenses` (string array).
-- `New-CaseRepo` and `Remove-CaseRepo` in `tests/run-tests.ps1`; case files are `tests/cases/<name>.tests.ps1`.
+- `New-CaseRepo`, `Remove-CaseRepo` and `Invoke-CaseProbe -Body <code>` (runs code after dot-sourcing `PacketWorkflow.ps1`, in a child `pwsh`) in `tests/run-tests.ps1`; case files are `tests/cases/<name>.tests.ps1`, and never dot-source a kit script.
 
 ## Acceptance criteria
 
