@@ -31,4 +31,4 @@ Choices [PKT-1](../../plan/solo-budget/packets/PKT-1.md) left open, and why each
 ## Not changed
 
 - review-scope doesn't use `tierCap` yet (PKT-3). No credit rate changed (PKT-7). The installer is untouched (PKT-4). No existing test moved into `tests/cases/`.
-- review-scope's JSON for the suite's 21 sample diffs is byte-identical to the base's, once commit SHAs are set aside. The one exception is the order of names inside one `LensReasons` string (the diff that adds security, correctness and concurrency). That order already changes between two runs of the base: Merge-PwHashtable builds plain hashtables, and .NET randomises string hashes per process. Making it stable is a separate change.
+- review-scope's JSON for the suite's sample diffs is byte-identical to `main`'s, once commit SHAs are set aside: all 26 outputs, after #30 merged into this branch. Before #30, one `LensReasons` string listed its lens names in a different order from run to run, on the base too, because Merge-PwHashtable builds plain hashtables and .NET randomises string hashes per process. #30 lists them in `review.lensOrder` order.
