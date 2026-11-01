@@ -17,7 +17,9 @@
     who is trusted                   the GitHub sign-in and trustedAuthors in the config as merged on
                                      origin's default branch (Get-PwSharedConfig), as board rounds reads
                                      settles
-    markers and raises               the PR's comments on GitHub, from those authors only; never the board
+    markers and raises               the PR's comments on GitHub, from those authors only; never the board.
+                                     The PR is the packet's open one on a pkt/<id>- branch (-Pr is
+                                     checked against that), and the base must have a config of its own
   It never posts anything.
 
   The step it prices:
@@ -85,7 +87,8 @@ try {
         if ($missing) { Stop-Pw "-Next round needs -Round, -Tier, -Lenses and -Runs (missing $($missing -join ', '))" }
         if ($Round -lt 1) { Stop-Pw "-Round must be 1 or more (got $Round)" }
         if ($Tier -lt 1 -or $Tier -gt 3) { Stop-Pw "-Tier must be 1, 2 or 3 (got $Tier)" }
-        $lensList = @("$Lenses" -split '[,\s]+' | Where-Object { $_ -and $_ -ne '-' })
+        # As review-scope counts them: lower case, each once; a run name such as security+data is two.
+        $lensList = @("$Lenses".ToLowerInvariant() -split '[,+\s]+' | Where-Object { $_ -and $_ -ne '-' } | Select-Object -Unique)
         if (-not $lensList.Count) { Stop-Pw '-Lenses must name at least one lens' }
         if ($Runs -lt 1 -or $Runs -gt $lensList.Count) { Stop-Pw "-Runs must be from 1 to the number of lenses ($($lensList.Count)) (got $Runs)" }
     }
@@ -103,6 +106,10 @@ try {
         if ($LASTEXITCODE -ne 0) { Stop-Pw "'$ref' is not a commit here (fetch it first)" }
     }
     $baseSha = (Invoke-PwGit -C $root merge-base $Base $Head | Select-Object -First 1).Trim()
+    # Get-PwConfig falls back to the working tree (the branch's checkout) when the base has no config: here
+    # that would let a branch set its own ceiling, so a base without one is an error.
+    & git -C $root cat-file -e "${baseSha}:.github/packet-workflow.json" 2>$null
+    if ($LASTEXITCODE -ne 0) { Stop-Pw "no .github/packet-workflow.json at the base $($baseSha.Substring(0, 7)), so no ceiling can be read there" }
     $cfg = Get-PwConfig -Ref $baseSha
     # Get-PwCreditCeiling's rule for unset, read here so an install without a ceiling never reaches the
     # packet file, the PR or the rates.
@@ -127,12 +134,20 @@ try {
     if ($Next -ne 'start') {
         # Who is trusted comes from origin's default branch, never the base or the branch.
         $shared = Get-PwSharedConfig
+        # The packet's own open PR: found by its pkt/<id>- branch, or, with -Pr, checked against it. Another
+        # packet's PR, or an abandoned one, would price other markers and raises.
+        $prefix = "pkt/$($Packet.ToLowerInvariant())-"
         $prNumber = $Pr
         if (-not $prNumber) {
             $found = Get-PwGhPrForPacket -Config $shared -PacketId $Packet -State open
-            if (-not $found) { $found = Get-PwGhPrForPacket -Config $shared -PacketId $Packet -State all }
-            if (-not $found) { Stop-Pw "no pull request for ${Packet}: pass -Pr, or use -Next start before the PR exists" }
+            if (-not $found) { Stop-Pw "no open pull request for ${Packet}: pass -Pr, or use -Next start before the PR exists" }
             $prNumber = [string]$found.number
+        }
+        else {
+            $pull = Invoke-PwGhJson api "repos/$($shared.repo)/pulls/$prNumber"
+            $ref = if ($pull -and $pull['head']) { [string]$pull['head']['ref'] } else { '' }
+            if (-not $ref.StartsWith($prefix)) { Stop-Pw "PR #$prNumber is on branch '$ref', not ${Packet}'s ($prefix…)" }
+            if ([string]$pull['state'] -ne 'open') { Stop-Pw "PR #$prNumber is $($pull['state']), not open" }
         }
         # Get-PwGhRounds returns its list as one object: wrapping it in @() would nest it.
         $rows = Get-PwGhRounds -Config $shared -Pr $prNumber
@@ -155,7 +170,7 @@ try {
             $lastTier = Get-CcTier $last
             if ($outcome -eq 'fix') {
                 # The fix run is booked on that marker already: price the round that must follow it.
-                $confirmed = @("$(Get-PwField $last 'Confirmed')" -split '[,\s]+' | Where-Object { $_ -and $_ -ne '-' })
+                $confirmed = @("$(Get-PwField $last 'Confirmed')".ToLowerInvariant() -split '[,+\s]+' | Where-Object { $_ -and $_ -ne '-' } | Select-Object -Unique)
                 $n = [Math]::Max(1, $confirmed.Count)
                 $tierNext = [Math]::Min($lastTier + 1, $cap)
                 [pscustomobject]@{ Kind = 'round'; Round = $lastRound + 1; Tier = [string]$tierNext; Lenses = $(if ($confirmed) { $confirmed -join ',' } else { 'correctness' }); Runs = [string][Math]::Ceiling($n / $per); Outcome = 'pass'; CreatedAt = $null }
@@ -185,6 +200,9 @@ try {
     }
     $result = if ($total -le $limit) { 'WITHIN' } else { 'OVER' }
     if ($Json) {
+        # Whole numbers as JSON integers, as the text line prints them.
+        $num = { param([double]$v) if ($v -eq [Math]::Floor($v)) { [long]$v } else { $v } }
+        $soFar = & $num $soFar; $stepCredits = & $num $stepCredits; $total = & $num $total; $limit = & $num $limit; $ceiling = & $num $ceiling
         [pscustomobject]@{
             Result = $result; Packet = $Packet; Size = $size; Next = $Next; Pr = $(if ($prNumber) { [int]$prNumber } else { $null }); Base = $baseSha
             SoFar = $soFar; Step = $stepCredits; Total = $total; Ceiling = $limit; ConfigCeiling = $ceiling

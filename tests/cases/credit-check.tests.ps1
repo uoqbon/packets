@@ -26,8 +26,19 @@ function global:gh {
     $global:LASTEXITCODE = 1
     if ($d['fail']) { return }
     if ($a[0] -eq 'api' -and $a -contains 'user') { $global:LASTEXITCODE = 0; return [string]$d['login'] }
-    if ($a[0] -eq 'pr' -and $a[1] -eq 'list') { $global:LASTEXITCODE = 0; return (ConvertTo-Json -InputObject @($d['prs']) -Depth 6) }
-    $path = @($a | Where-Object { "$_" -match '/issues/\d+/comments' })[0]
+    if ($a[0] -eq 'pr' -and $a[1] -eq 'list') {
+        $state = $a[[array]::IndexOf($a, '--state') + 1]
+        $global:LASTEXITCODE = 0
+        return (ConvertTo-Json -InputObject @($d['prs'] | Where-Object { $state -eq 'all' -or $_['state'] -eq $state.ToUpperInvariant() }) -Depth 6)
+    }
+    $pull = $a | Where-Object { "$_" -match '^repos/[^/]+/[^/]+/pulls/(\d+)$' } | Select-Object -First 1
+    if ($a[0] -eq 'api' -and $pull -match '/pulls/(\d+)$') {
+        $p = $d['prs'] | Where-Object { "$($_['number'])" -eq $Matches[1] } | Select-Object -First 1
+        if (-not $p) { [Console]::Error.WriteLine('HTTP 404: Not Found'); return }
+        $global:LASTEXITCODE = 0
+        return (ConvertTo-Json -InputObject @{ number = $p['number']; state = $p['state'].ToLowerInvariant(); head = @{ ref = $p['headRefName'] } } -Depth 4)
+    }
+    $path = $a | Where-Object { "$_" -match '/issues/\d+/comments' } | Select-Object -First 1
     if ($a[0] -eq 'api' -and $path -match '/issues/(\d+)/comments') {
         $global:LASTEXITCODE = 0
         $rows = if ($d['comments'] -and $d['comments'].Contains($Matches[1])) { @($d['comments'][$Matches[1]]) } else { @() }
@@ -64,12 +75,14 @@ $rates011 = @{
     implementer = @{ S = 105; M = 200; L = 355 }; implementerFix = @{ S = 40; M = 55; L = 75 }
     reviewerByTier = @{ S = @(20, 50, 195); M = @(30, 70, 280); L = @(40, 95, 380) }; laterRoundFactor = 0.85
 }
-$round1Fix = 'round 1 head=aaa tier=2 lenses=security,correctness,tests runs=1 confirmed=correctness outcome=fix'
+$round1Fix = 'round 1 head=aaa tier=2 lenses=security,correctness,tests runs=1 confirmed=security,correctness outcome=fix'
 $round1Pass = 'round 1 head=aaa tier=2 lenses=security,correctness,tests runs=1 confirmed=- outcome=pass'
 $r1 = New-Comment 1 'owner' $round1Fix '2026-10-01T10:00:00Z'
 $gh = @{
     login    = 'owner'
-    prs      = @(@{ number = 21; headRefName = 'pkt/pkt-03-api-endpoints'; baseRefName = 'main'; url = 'https://example.test/pull/21'; state = 'OPEN'; isDraft = $false; headRefOid = 'aaa' })
+    # PRs 20 to 29 are PKT-03's, open; 30 is PKT-04's; 31 is an abandoned PKT-03 attempt, closed.
+    prs      = @(@(20..29 | ForEach-Object { @{ number = $_; headRefName = 'pkt/pkt-03-api-endpoints'; state = 'OPEN' } }) +
+        @(@{ number = 30; headRefName = 'pkt/pkt-04-web-pages'; state = 'OPEN' }, @{ number = 31; headRefName = 'pkt/pkt-03-first-try'; state = 'CLOSED' }))
     comments = @{
         '20' = @()
         '21' = @($r1)
@@ -80,9 +93,16 @@ $gh = @{
         '26' = @($r1, (New-Comment 2 'teammate' 'budget max=lots' '2026-10-02T08:00:00Z'))
         '27' = @(New-Comment 1 'owner' $round1Pass '2026-10-01T10:00:00Z')
         '28' = @($r1, (New-Comment 2 'Teammate' 'budget max=lots' '2026-10-02T08:00:00Z'), (New-Comment 3 'teammate' 'budget max=2000' '2026-10-03T08:00:00Z'))
+        '30' = @($r1)
+        '31' = @($r1, (New-Comment 2 'teammate' 'budget max=2000' '2026-10-02T08:00:00Z'))
+        # A trusted comment that quotes a raise below its first line (test output, say) raises nothing.
+        '32' = @($r1, @{ id = 2; user = @{ login = 'owner' }; body = "Test output:`n``packet:budget max=2000`` from a test"; created_at = '2026-10-02T08:00:00Z'; html_url = 'https://example.test/c/2' })
         '29' = @($r1, (New-Comment 2 'teammate' 'budget max=2000' '2026-10-02T08:00:00Z'), (New-Comment 3 'owner' 'round 2 head=bbb tier=3 lenses=correctness runs=1 confirmed=- outcome=pass' '2026-10-03T08:00:00Z'))
     }
 }
+$gh.prs += @(@{ number = 32; headRefName = 'pkt/pkt-03-api-endpoints'; state = 'OPEN' })
+# For the lookup without -Pr: PKT-03's only open PR is 21; the newer 31 is closed and 30 is PKT-04's.
+$ghLookup = @{ login = 'owner'; comments = $gh.comments; prs = @(@($gh.prs | Where-Object { $_.number -in 21, 30, 31 })) }
 $ghFail = @{ fail = $true }
 $round2 = @('-Next', 'round', '-Round', '2', '-Tier', '2', '-Lenses', 'security,correctness', '-Runs', '1')
 
@@ -154,11 +174,13 @@ try {
         Assert-That ($r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=$soFar step=$($total - $soFar) total=$total ceiling=1200 \(config\)$") '-Next round within a ceiling of 1200: WITHIN, with so-far, step and total as Get-PwCreditEstimate gives them' $r.Text
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c900') + $round2) $gh
         Assert-That ($r.Code -eq 3 -and $r.Text -match "(?m)^OVER so-far=620 step=394 total=1014 ceiling=900 \(config\)$") 'a ceiling of 900, between so-far and total, prints OVER and exits 3' $r.Text
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c900') + @('-Next', 'round', '-Round', '2', '-Tier', '2', '-Lenses', 'security+Correctness,security', '-Runs', '1')) $gh
+        Assert-That ($r.Code -eq 3 -and $r.Text -match '(?m)^OVER so-far=620 step=394 total=1014 ') '-Lenses counts as review-scope does: a run name security+correctness is two lenses, a repeat in another case is one' $r.Text
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c1014') + $round2) $gh
         Assert-That ($r.Code -eq 0 -and $r.Text -match '(?m)^WITHIN .*total=1014 ceiling=1014 ') 'a total equal to the ceiling is WITHIN' $r.Text
-        $r = Invoke-Check (@('-Packet', 'pkt-03') + (& $at 'c900') + $round2 + @('-Json')) $gh
+        $r = Invoke-Check (@('-Packet', 'pkt-03') + (& $at 'c900') + $round2 + @('-Json')) $ghLookup
         $j = try { $r.Text | ConvertFrom-Json } catch { $null }
-        Assert-That ($r.Code -eq 3 -and $j -and $j.Result -eq 'OVER' -and $j.Pr -eq 21 -and $j.SoFar -eq 620 -and $j.Step -eq 394 -and $j.Total -eq 1014 -and $j.Ceiling -eq 900 -and $j.Source -eq 'config' -and $r.Calls -match '^pr list') 'without -Pr it finds the packet''s PR; -Json carries the same numbers and still exits 3' "$($r.Text)`ncalls: $($r.Calls -join ' | ')"
+        Assert-That ($r.Code -eq 3 -and $j -and $j.Result -eq 'OVER' -and $j.Pr -eq 21 -and $j.SoFar -eq 620 -and $j.Step -eq 394 -and $j.Total -eq 1014 -and $j.Ceiling -eq 900 -and $j.Source -eq 'config' -and $r.Calls -match '^pr list' -and $r.Text -match '"Total": 1014,' -and $r.Text -notmatch '1014\.0') 'without -Pr it finds the packet''s open PR (not a newer closed one, nor another packet''s); -Json carries the same numbers as integers and still exits 3' "$($r.Text)`ncalls: $($r.Calls -join ' | ')"
         Assert-That (-not ($r.Calls | Where-Object { $_ -match '-X|POST|PATCH|DELETE|comment' -and $_ -notmatch '/comments\?per_page' })) 'it never posts or changes anything on GitHub' ($r.Calls -join "`n")
 
         Write-Host '  per-size ceiling'
@@ -190,10 +212,18 @@ try {
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '29') + (& $at 'c900') + @('-Next', 'round', '-Round', '3', '-Tier', '3', '-Lenses', 'correctness', '-Runs', '1')) $gh
         Assert-That ($r.Code -eq 0 -and $r.Text -match 'ceiling=2000 \(raised by teammate 2026-10-02\)') 'a raise holds for the rest of the packet, past later rounds' $r.Text
 
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '32') + (& $at 'c900') + $round2) $gh
+        Assert-That ($r.Code -eq 3 -and $r.Text -match 'ceiling=900 \(config\)') 'a trusted comment that quotes a raise below its first line raises nothing' $r.Text
+
         Write-Host '  errors exit 2, never WITHIN'
         & $newBase 'typo' 1200 -Edit { param($c) $c.budget.creditsPerRun.dispatcher = 'fifty' }
         & $newBase 'broken' '1500'
         & $newBase 'negative' -5
+        # A base from before the kit was installed: the working tree's config must not stand in for it.
+        & $git switch -q -c 'no-config' main
+        & $git rm -q .github/packet-workflow.json
+        & $git commit -qm 'no config'
+        & $git switch -q main
         $cases = [ordered]@{
             'a creditsPerRun typo'                          = @{ Args = @('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'typo') + $round2; Gh = $gh; Want = 'budget\.creditsPerRun\.dispatcher' }
             'a quoted ceiling'                              = @{ Args = @('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'broken') + $round2; Gh = $gh; Want = 'budget\.maxCreditsPerPacket must be a positive number' }
@@ -205,7 +235,10 @@ try {
             '-Next round without -Runs'                     = @{ Args = @('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c1200') + @('-Next', 'round', '-Round', '2', '-Tier', '2', '-Lenses', 'tests'); Gh = $gh; Want = 'missing -Runs' }
             'more runs than lenses'                         = @{ Args = @('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c1200') + @('-Next', 'round', '-Round', '2', '-Tier', '2', '-Lenses', 'tests', '-Runs', '2'); Gh = $gh; Want = '-Runs must be from 1 to the number of lenses' }
             '-Next fix with no round yet'                   = @{ Args = @('-Packet', 'PKT-03', '-Pr', '20', '-Next', 'fix') + (& $at 'c1200'); Gh = $gh; Want = 'has no round marker' }
-            'no PR for the packet'                          = @{ Args = @('-Packet', 'PKT-04', '-Next', 'fix') + (& $at 'c1200'); Gh = $gh; Want = 'no pull request for PKT-04' }
+            'no PR for the packet'                          = @{ Args = @('-Packet', 'PKT-05', '-Next', 'fix') + (& $at 'c1200'); Gh = $ghLookup; Want = 'no open pull request for PKT-05' }
+            "another packet's PR"                           = @{ Args = @('-Packet', 'PKT-03', '-Pr', '30') + (& $at 'c1200') + $round2; Gh = $gh; Want = "PR #30 is on branch 'pkt/pkt-04-web-pages', not PKT-03's" }
+            'a closed PR'                                   = @{ Args = @('-Packet', 'PKT-03', '-Pr', '31') + (& $at 'c1200') + $round2; Gh = $gh; Want = 'PR #31 is closed, not open' }
+            'a base with no config'                         = @{ Args = @('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'no-config') + $round2; Gh = $gh; Want = 'no \.github/packet-workflow\.json at the base' }
             '-Pr with -Next start'                          = @{ Args = @('-Packet', 'PKT-03', '-Pr', '21', '-Next', 'start') + (& $at 'c1200'); Gh = $gh; Want = '-Next start runs before the packet has a PR' }
         }
         foreach ($name in $cases.Keys) {
@@ -227,18 +260,21 @@ try {
         $passed = & $estimate 'c1200' 'S' "[$row1Pass]"
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '27', '-Next', 'fix') + (& $at 'c1200')) $gh
         Assert-That ($r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=$passed step=$($ciFix - $passed) total=$ciFix ") '-Next fix after a passed round prices the CI fix run and a one-lens round at that round''s tier' "want so-far=$passed total=$ciFix`n$($r.Text)"
-        # After a fix round at tier 2, with no cap: the confirmed lens at tier 3, in round 2.
-        $tier3 = & $estimate 'c1200' 'S' "[$row1, { `"Kind`": `"round`", `"Round`": 2, `"Tier`": `"3`", `"Lenses`": `"correctness`", `"Runs`": `"1`", `"Outcome`": `"pass`" }]"
-        $tier2 = & $estimate 'c1200' 'S' "[$row1, { `"Kind`": `"round`", `"Round`": 2, `"Tier`": `"2`", `"Lenses`": `"correctness`", `"Runs`": `"1`", `"Outcome`": `"pass`" }]"
-        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21', '-Next', 'fix') + (& $at 'c1200')) $gh
-        Assert-That ($tier3 -gt $tier2 -and $r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=620 step=$($tier3 - 620) total=$tier3 ") '-Next fix after a fix round at tier 2 with no cap prices the next round at tier 3, with the confirmed lenses' "want total $tier3 (tier 2 would be $tier2)`n$($r.Text)"
+        # After a fix round at tier 2, with no cap: its two confirmed lenses at tier 3, in round 2, one run each.
+        $nextRow = { param($t, $runs) "[$row1, { `"Kind`": `"round`", `"Round`": 2, `"Tier`": `"$t`", `"Lenses`": `"security,correctness`", `"Runs`": `"$runs`", `"Outcome`": `"pass`" }]" }
+        $tier3 = & $estimate 'c1200' 'S' (& $nextRow 3 2)
+        $tier2 = & $estimate 'c1200' 'S' (& $nextRow 2 2)
+        $oneLens = & $estimate 'c1200' 'S' "[$row1, { `"Kind`": `"round`", `"Round`": 2, `"Tier`": `"3`", `"Lenses`": `"correctness`", `"Runs`": `"1`", `"Outcome`": `"pass`" }]"
+        & $newBase 'c5000' 5000
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21', '-Next', 'fix') + (& $at 'c5000')) $gh
+        Assert-That ($tier3 -gt $tier2 -and $tier3 -ne $oneLens -and $r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=620 step=$($tier3 - 620) total=$tier3 ") '-Next fix after a fix round at tier 2 with no cap prices the next round at tier 3, with the confirmed lenses' "want total $tier3 (tier 2 would be $tier2, one lens $oneLens)`n$($r.Text)"
         & $newBase 'cap2' 1200 -Edit { param($c) $c.review.tierCap = 2 }
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21', '-Next', 'fix') + (& $at 'cap2')) $gh
         Assert-That ($r.Code -eq 0 -and $r.Text -match "total=$tier2 ") 'with review.tierCap 2 at the base it stays at tier 2' "want total $tier2`n$($r.Text)"
         & $newBase 'per2' 1200 -Edit { param($c) $c.review.lensesPerReviewer = 2 }
-        $grouped = & $estimate 'per2' 'S' "[$row1Pass, { `"Kind`": `"round`", `"Round`": 2, `"Tier`": `"2`", `"Lenses`": `"correctness`", `"Runs`": `"1`", `"Outcome`": `"fix`" }]"
-        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '27', '-Next', 'fix') + (& $at 'per2')) $gh
-        Assert-That ($r.Code -eq 0 -and $r.Text -match "total=$grouped ") '-Next fix reads the base''s config for the round it prices' $r.Text
+        $grouped = & $estimate 'per2' 'S' (& $nextRow 3 1)
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21', '-Next', 'fix') + (& $at 'per2')) $gh
+        Assert-That ($grouped -lt $tier3 -and $r.Code -eq 0 -and $r.Text -match "total=$grouped ") '-Next fix groups the confirmed lenses by the base''s review.lensesPerReviewer (two lenses, one run)' "want total $grouped (one per run: $tier3)`n$($r.Text)"
         $start = & $estimate 'c1200' 'S' '[{ "Kind": "round", "Round": 1, "Tier": "1", "Lenses": "correctness", "Runs": "1", "Outcome": "pass" }]'
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Next', 'start') + (& $at 'c1200')) $ghFail
         Assert-That ($r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=0 step=$start total=$start ceiling=1200 \(config\)$" -and $r.Calls.Count -eq 0) '-Next start prices the base and a one-lens round at tier 1, with no PR and no gh call' $r.Text
@@ -262,10 +298,13 @@ try {
         Assert-That ($r.Code -eq 0 -and $r.Text -match '(?m)^round 1 head=aaa tier=2 outcome=fix ' -and $r.Text -match '(?m)^budget 1 max=2000 by teammate$') 'board rounds prints the budget row as budget <round> max=<n> by <login>' $r.Text
         $r = Invoke-WithGh $caseBoard @('rounds', '23') $gh
         Assert-That ($r.Code -eq 0 -and $r.Text -notmatch 'budget') 'an untrusted budget comment is no row' $r.Text
+        $r = Invoke-WithGh $caseBoard @('rounds', '32') $gh
+        Assert-That ($r.Code -eq 0 -and $r.Text -notmatch 'budget') 'nor is a trusted comment that quotes one below its first line' $r.Text
         $r = Invoke-WithGh $caseBoard @('rounds', '28', '-Json') $gh
         $rows = try { @($r.Text | ConvertFrom-Json) } catch { @() }
         $budgetRows = @($rows | Where-Object Kind -eq 'budget')
-        $shape = @($budgetRows | Where-Object { $_.Outcome -eq 'budget' -and $null -eq $_.Tier -and $null -eq $_.Lenses -and $null -eq $_.Runs -and $null -eq $_.Confirmed -and $null -eq $_.Head -and $_.Round -eq 1 -and $_.Consumed -eq $false })
+        $settleProps = 'Kind,Round,Head,Tier,Lenses,Runs,Confirmed,Outcome,Author,CommentId,CreatedAt,Url,Body,Consumed'.Split(',')
+        $shape = @($budgetRows | Where-Object { $names = @($_.PSObject.Properties.Name); -not @($settleProps + 'Max' | Where-Object { $names -notcontains $_ }) } | Where-Object { $_.Outcome -eq 'budget' -and $null -eq $_.Tier -and $null -eq $_.Lenses -and $null -eq $_.Runs -and $null -eq $_.Confirmed -and $null -eq $_.Head -and $_.Round -eq 1 -and $_.Consumed -eq $false })
         Assert-That ($r.Code -eq 0 -and $rows.Count -eq 3 -and $budgetRows.Count -eq 2 -and $shape.Count -eq 2 -and (($budgetRows | ForEach-Object Max) -join ',') -eq 'lots,2000') 'board rounds -Json lists budget rows with settle rows'' properties, Outcome budget and Max as written' $r.Text
         $rowsFile = Join-Path $tmp 'rows-28.json'
         [System.IO.File]::WriteAllText($rowsFile, $r.Text, $utf8)
