@@ -206,7 +206,7 @@ if ($configIsNew) {
 if ($WithInstructions) {
     $instrPath = Join-Path $Target '.github/copilot-instructions.md'
     $snippet = (Get-Content -Raw (Join-Path $kit $(if ($PlanOnly) { 'templates/copilot-instructions.plan-only.md' } else { 'templates/copilot-instructions.md' }))).Trim()
-    $text = if (Test-Path -LiteralPath $instrPath) { [string](Get-Content -Raw -LiteralPath $instrPath) } else { '' }
+    $text = if (Test-Path -LiteralPath $instrPath) { [System.IO.File]::ReadAllText($instrPath) } else { '' }
     $pattern = '(?s)<!-- packet-workflow:start -->.*?<!-- packet-workflow:end -->'
     # The first marked block becomes this mode's; any further one is dropped, so the file holds one block.
     $seen = @{ first = $true }
@@ -229,7 +229,7 @@ if ($kept.Count) { Write-Output "$($kept.Count) locally changed file(s) kept; co
 # A mode change leaves the other mode's rules in copilot-instructions.md until -WithInstructions rewrites
 # them. The block's heading says which mode wrote it, so this is said on every run until then.
 $instrFile = Join-Path $Target '.github/copilot-instructions.md'
-$instrText = if (-not $WithInstructions -and (Test-Path -LiteralPath $instrFile)) { [string](Get-Content -Raw -LiteralPath $instrFile) } else { '' }
+$instrText = if (-not $WithInstructions -and (Test-Path -LiteralPath $instrFile)) { [System.IO.File]::ReadAllText($instrFile) } else { '' }
 if ($instrText -match '(?s)<!-- packet-workflow:start -->(?<b>.*?)<!-- packet-workflow:end -->') {
     $blockMode = if ($Matches.b -match '(?m)^## Packet workflow \(plan and board only\)\s*$') { 'plan-only' } else { 'full' }
     if ($blockMode -ne $mode) { Write-Output "copilot-instructions.md still holds the $blockMode install's workflow rules: rerun with -WithInstructions to replace them." }

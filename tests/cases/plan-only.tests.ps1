@@ -7,26 +7,31 @@ $installer = Join-Path $kit 'install.ps1'
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 $planOnlyRe = '^\.github/skills/(packet-plan|packet-board|packet-progress)/|^\.github/skills/packet-dispatch/scripts/check-scope\.ps1$'
 # Every file under a folder, as relative paths with forward slashes, sorted.
-function Get-Tree([string]$Root) {
+# -Hidden takes dotfiles too, as an installed tree is checked for anything extra; the kit's own files are
+# listed as install.ps1 lists them, without (so a stray .DS_Store in a checkout doesn't count).
+function Get-Tree([string]$Root, [switch]$Hidden) {
     if (-not (Test-Path -LiteralPath $Root)) { return @() }
-    @(Get-ChildItem -LiteralPath $Root -Recurse -File -Force | ForEach-Object { [System.IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/') } | Sort-Object { $_ } -Culture ([cultureinfo]::InvariantCulture))
+    @(Get-ChildItem -LiteralPath $Root -Recurse -File -Force:$Hidden | ForEach-Object { [System.IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/') } | Sort-Object { $_ } -Culture ([cultureinfo]::InvariantCulture))
 }
 # Every file under .github with its hash, as one string to compare.
 function Get-Snapshot([string]$Repo) {
     $gh = Join-Path $Repo '.github'
-    (Get-Tree $gh | ForEach-Object { "$_ $((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $gh $_)).Hash)" }) -join "`n"
+    (Get-Tree $gh -Hidden | ForEach-Object { "$_ $((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $gh $_)).Hash)" }) -join "`n"
 }
 function Get-Manifest([string]$Repo) { Get-Content -Raw (Join-Path $Repo '.github/packet-workflow.kit.json') | ConvertFrom-Json -AsHashtable }
 function Get-Block([string]$Repo) {
-    $t = Get-Content -Raw (Join-Path $Repo '.github/copilot-instructions.md')
-    [pscustomobject]@{ Count = ([regex]::Matches($t, '<!-- packet-workflow:start -->')).Count + ([regex]::Matches($t, '<!-- packet-workflow:end -->')).Count; Text = $t }
+    $t = [System.IO.File]::ReadAllText((Join-Path $Repo '.github/copilot-instructions.md'))
+    # 2 means one start marker and one end marker, each exactly once.
+    $starts = ([regex]::Matches($t, '<!-- packet-workflow:start -->')).Count; $ends = ([regex]::Matches($t, '<!-- packet-workflow:end -->')).Count
+    [pscustomobject]@{ Count = $(if ($starts -eq 1 -and $ends -eq 1) { 2 } else { -1 * ($starts * 10 + $ends) }); Text = $t }
 }
 function New-BareTarget {
     $t = Join-Path ([System.IO.Path]::GetTempPath()) ("pw-planonly-" + [guid]::NewGuid().ToString('n').Substring(0, 8))
     New-Item -ItemType Directory -Path $t | Out-Null
-    & git -C $t init -q -b trunk
-    & git -C $t remote add origin https://github.com/acme/widgets.git
-    & git -C $t symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+    foreach ($gitArgs in @(@('init', '-q', '-b', 'trunk'), @('remote', 'add', 'origin', 'https://github.com/acme/widgets.git'), @('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/trunk'))) {
+        $out = & git -C $t @gitArgs 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "New-BareTarget: git $($gitArgs -join ' ') failed: $out" }
+    }
     $t
 }
 # The files a plan-only install should hold, from the kit's own skills folder.
@@ -34,17 +39,19 @@ $wantSkills = @(Get-Tree (Join-Path $kit 'skills') | ForEach-Object { ".github/s
 $fullTemplate = (Get-Content -Raw (Join-Path $kit 'templates/copilot-instructions.md')).Trim()
 $planTemplate = (Get-Content -Raw (Join-Path $kit 'templates/copilot-instructions.plan-only.md')).Trim()
 
-$target = New-BareTarget
-$models = New-BareTarget
+$target = $null
+$models = $null
 $caseRepo = $null
 $pinned = Join-Path ([System.IO.Path]::GetTempPath()) ("pw-pinned-" + [guid]::NewGuid().ToString('n').Substring(0, 8))
 try {
+    $target = New-BareTarget
+    $models = New-BareTarget
     Write-Host '  -PlanOnly into a fresh repository'
     Set-Content -LiteralPath (Join-Path $target 'notes.txt') -Value 'x'
     $r = Invoke-Kit $installer @('-Target', $target, '-PlanOnly', '-DryRun', '-WithInstructions')
     Assert-That ($r.Code -eq 0 -and -not (Test-Path (Join-Path $target '.github')) -and $r.Text -match 'would be installed' -and $r.Text -match 'add\s+\.github/skills/packet-board/scripts/board\.ps1') '-PlanOnly -DryRun lists the files and writes nothing' $r.Text
     $r = Invoke-Kit $installer @('-Target', $target, '-PlanOnly')
-    $tree = Get-Tree (Join-Path $target '.github') | ForEach-Object { ".github/$_" }
+    $tree = Get-Tree (Join-Path $target '.github') -Hidden | ForEach-Object { ".github/$_" }
     $want = @($wantSkills + '.github/packet-workflow.json' + '.github/packet-workflow.kit.json' | Sort-Object { $_ } -Culture ([cultureinfo]::InvariantCulture))
     Assert-That ($r.Code -eq 0 -and ($tree -join "`n") -ceq ($want -join "`n")) 'it writes exactly the three skills, check-scope.ps1, the config and the manifest' ("output:`n$($r.Text)`ngot:`n$($tree -join "`n")`nwant:`n$($want -join "`n")")
     $dispatchFiles = @($tree | Where-Object { $_ -like '.github/skills/packet-dispatch/*' })
@@ -79,7 +86,7 @@ try {
     Assert-That ($planTemplate -match '/packet-plan' -and $planTemplate -match '/packet-board' -and $planTemplate -match '/packet-progress' -and $planTemplate -notmatch '/packet-dispatch|/packet-review|packet-dispatcher|packet-implementer|packet-reviewer' -and $planTemplate -match '\*\*Agents never merge\*\*') 'the plan-only block names only the three skills, and says agents never merge' $planTemplate
     $r = Invoke-Kit $installer @('-Target', $target, '-PlanOnly', '-WithInstructions')
     $b = Get-Block $target
-    Assert-That ($r.Code -eq 0 -and $b.Count -eq 2 -and $b.Text.Contains($planTemplate) -and $r.Text -notmatch 'copilot-instructions' -and $r.Text -match "$($wantSkills.Count) file\(s\) already up to date") 'a second plan-only run changes nothing' $r.Text
+    Assert-That ($r.Code -eq 0 -and $b.Count -eq 2 -and $b.Text.Contains($planTemplate) -and $r.Text -notmatch '(?m)^(add|update)\s+\.github/copilot-instructions' -and $r.Text -match "$($wantSkills.Count) file\(s\) already up to date") 'a second plan-only run changes nothing' $r.Text
 
     Write-Host '  a full run on a plan-only install'
     $r = Invoke-Kit $installer @('-Target', $target)
@@ -216,5 +223,8 @@ try {
 }
 finally {
     if ($caseRepo) { Remove-CaseRepo $caseRepo }
-    foreach ($dir in $target, $models, $pinned, "$pinned.zip") { if ((Test-Path -LiteralPath $dir) -and -not $Keep) { Remove-Item -Recurse -Force -LiteralPath $dir } }
+    foreach ($dir in $target, $models, $pinned, "$pinned.zip") {
+        if (-not $dir -or -not (Test-Path -LiteralPath $dir)) { continue }
+        if ($Keep) { Write-Host "  kept  $dir" } else { Remove-Item -Recurse -Force -LiteralPath $dir }
+    }
 }
