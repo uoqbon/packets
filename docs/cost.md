@@ -215,7 +215,7 @@ The safety column covers the four properties that must hold:
 | Lever | Saves | Why not |
 | --- | --- | --- |
 | `maxRounds` 2 | 23% (5,000) | The should-fix rule gets 83% of this saving. With 2 rounds, a blocking finding in round 2 goes to the owner instead of the panel; that is 9 of 53 packets in the original project. |
-| At most 3 lenses in round 1 and 2 after (or 2 and 1) | 16% (33%) | A lens that doesn't run finds nothing, and 76% of the original project's lens runs confirmed a finding. Grouping lenses saves almost as much and keeps them all. |
+| At most 3 lenses in round 1 and 2 after (or 2 and 1) | 16% (33%) | A lens that doesn't run finds nothing, and 76% of the original project's lens runs confirmed a finding. Grouping lenses saves as much and keeps them all. |
 | Implementer on Claude Haiku 5.5 | 12% (2,600) | The implementer is 14% of the cost. More findings mean more rounds, which likely eat the saving, and contexts above 100K cost five times as much. |
 | Light class on Haiku 5.5 or GPT-5.6 Luna | about 0 | Tier 1 needs a docs-only or tiny diff, so it is rare. Fine to do, but it saves nothing. |
 | `packet-plan` on the standard class | nothing while every class lists the same models | Ownership lines and contracts are the hardest judgement in the kit, and everything later trusts them. |
@@ -315,7 +315,7 @@ Moving CI files to the setup PR comes on top for any packet that would have owne
 
 ## Running it within the pool
 
-- **Decide the kit's share.** The 12,500 credits pay for everyone's chat, CLI and agent use too. At about 1,400 credits a packet under the budget profile, giving the kit 8,000 a month means about five packets.
+- **Decide the kit's share.** The 12,500 credits pay for everyone's chat, CLI and agent use too. At about 1,400 credits a packet under the budget profile, giving the kit 8,000 a month means about five or six packets.
 - **Prefer a cost-center budget with paid usage allowed** over a hard user budget. A user who runs out of budget loses Copilot in the middle of a run, with no fallback model. The packet's claim then lasts out its 30-minute lease, and `resume` repeats the interrupted round. Paid usage is billed at the same rate: a 10-packet phase under the budget profile is about US$140, against the US$125 included.
 - **Start the costly packets early in the month.** An L packet under the budget profile is about 2,200 credits, a sixth of the pool.
 - **Your own API key** keeps the kit out of the pool entirely. The end-to-end run worked this way. Check with your admin whether enterprise BYOK is allowed.
