@@ -18,7 +18,7 @@ The README and the cost page say what the phase built and what it trades. They c
 
 ## In scope
 
-- **README, Configure:** rows for `review.tierCap`, `models.agents` and `budget.maxCreditsPerPacket`. The `review.maxRounds` row says the solo profile uses 2.
+- **README, Configure:** rows for `review.tierCap`, `models.agents` and `budget.maxCreditsPerPacket`. The `review.maxRounds` row says the solo profile uses 2. The `budget.monthlyCredits`, `budget.creditsPerRun` row no longer says the defaults price "tier 3 at what tier 4 cost before the two merged": since PKT-7 they are GPT-6.1 Sol's rates from cost.md, which price tier 3 at half the old tier 4 rate.
 - **README, the ideas list:** "at most `review.maxRounds` (3) rounds".
 - **README, Safety model:**
   - **A new row, "The review tier is a floor".** review-scope measures it from the diff, with the config and packet file at the base. The panel may raise it and never lower it, and a later round is never below the one before. With `review.tierCap`, the measured raises stop at the cap. These still raise to tier 3:
@@ -78,7 +78,7 @@ The README and the cost page say what the phase built and what it trades. They c
 
 ## Acceptance criteria
 
-- [ ] Each new key has a Configure row whose default and limits match `Get-PwConfig`, `Get-PwCreditCeiling` and `Get-PwAgentModelClass`.
+- [ ] Each new key has a Configure row whose default and limits match `Get-PwConfig`, `Get-PwCreditCeiling` and `Get-PwAgentModelClass`, and the `budget.creditsPerRun` row describes the defaults PKT-7 set.
 - [ ] The safety table has the "review tier is a floor" row, with the full forced list as review-scope implements it, and both amended rows.
 - [ ] The Models bullet states the Local cost-tier rule, what the kit does about it and what the installer warns, and no longer tells the owner to raise the dispatcher's model as the only fix.
 - [ ] The solo section's per-packet figures equal `Get-PwCreditEstimate` within 1% for the shapes it states, on the default `creditsPerRun` the solo overlay inherits. It gives packets a month for 1,500, 1,900 and 3,900 credits. PKT-7's `tests/cases/cost-doc.tests.ps1` is extended to read the solo table and check it the same way.
