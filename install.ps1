@@ -20,7 +20,17 @@
   Each agent's model: line comes from the config's models map (strong: the dispatcher and the deep
   reviewer; standard: the implementer and the standard reviewer; light: the light reviewer). To use other
   model names (your own API key, an organization's model list), edit models in .github/packet-workflow.json
-  and run the installer again.
+  and run the installer again. models.agents moves a kit agent to another class, such as
+  { "packet-dispatcher": "standard" }; an entry that names an unknown agent or class stops the install
+  (exit 2) before any file is written. When the dispatcher's class ranks below one of its subagents' and
+  the two classes list different models, the installer warns: in VS Code's Local harness that subagent
+  doesn't run from the dispatcher's session.
+
+  -Profile solo starts a new config from the template with templates/packet-workflow.solo.json merged onto
+  it (two review rounds, three lenses per reviewer, tier cap 2, a credit ceiling per size, the dispatcher on
+  the standard class). It only chooses the template for a new config: an existing config is never written,
+  and the installer lists the solo settings that differ from it, to move over in a pull request.
+  -Profile default (the default) is the template alone.
 
   -WithInstructions also adds (or refreshes) the workflow's rules in .github/copilot-instructions.md,
   between <!-- packet-workflow:start --> and <!-- packet-workflow:end -->.
@@ -34,10 +44,11 @@
   (exit 1, nothing written) with the files a downgrade would remove. -PlanOnly -WithInstructions writes
   templates/copilot-instructions.plan-only.md between the same markers.
 
-  pwsh -File install.ps1 -Target <repo root> [-PlanOnly] [-DryRun] [-Force] [-WithInstructions]
+  pwsh -File install.ps1 -Target <repo root> [-Profile default|solo] [-PlanOnly] [-DryRun] [-Force] [-WithInstructions]
 #>
 param(
     [Parameter(Mandatory)][string]$Target,
+    [ValidateSet('default', 'solo')][string]$Profile = 'default',
     [switch]$PlanOnly,
     [switch]$DryRun,
     [switch]$Force,
@@ -49,6 +60,10 @@ $ErrorActionPreference = 'Stop'
 $kit = $PSScriptRoot
 $version = (Get-Content -Raw (Join-Path $kit 'VERSION')).Trim()
 $utf8 = [System.Text.UTF8Encoding]::new($false)
+$Profile = $Profile.ToLowerInvariant()
+# The kit's own library, for the agents' classes ($script:AgentModelClass, Get-PwAgentModelClass) and
+# nothing else: Get-PwConfig would refuse a new config before its repo is filled in.
+. (Join-Path $kit 'skills/packet-board/scripts/PacketWorkflow.ps1')
 
 function Get-Sha([string]$Path) { (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant() }
 function Get-TextSha([string]$Text) { [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($utf8.GetBytes($Text))).ToLowerInvariant() }
@@ -96,8 +111,34 @@ if ($PlanOnly) {
 $configPath = Join-Path $Target '.github/packet-workflow.json'
 $configIsNew = -not (Test-Path -LiteralPath $configPath)
 $template = Get-Content -Raw (Join-Path $kit 'templates/packet-workflow.json') | ConvertFrom-Json -AsHashtable
+# The profile's overlay: only the keys it changes. Everything else comes from the template.
+$overlay = if ($Profile -eq 'solo') { Get-Content -Raw (Join-Path $kit 'templates/packet-workflow.solo.json') | ConvertFrom-Json -AsHashtable } else { $null }
+# Merges $Over into $Base in place, so $Base keeps its key order (Merge-PwHashtable builds an unordered
+# table): a table merges key by key, anything else replaces; a key $Base lacks goes at the end.
+function Merge-Overlay([System.Collections.IDictionary]$Base, [System.Collections.IDictionary]$Over) {
+    foreach ($k in @($Over.Keys)) {
+        if ($Base.Contains($k) -and $Base[$k] -is [System.Collections.IDictionary] -and $Over[$k] -is [System.Collections.IDictionary]) { Merge-Overlay $Base[$k] $Over[$k] }
+        else { $Base[$k] = $Over[$k] }
+    }
+}
+# The overlay's settings whose value differs in $Cfg, as "path: config -> overlay" lines.
+function Get-OverlayDiff([System.Collections.IDictionary]$Over, $Cfg, [string]$Prefix) {
+    foreach ($k in @($Over.Keys)) {
+        $path = "$Prefix$k"
+        $has = $Cfg -is [System.Collections.IDictionary] -and $Cfg.Contains($k)
+        if ($has -and $Cfg[$k] -is [System.Collections.IDictionary] -and $Over[$k] -is [System.Collections.IDictionary]) { Get-OverlayDiff $Over[$k] $Cfg[$k] "$path."; continue }
+        $want = ConvertTo-Json -InputObject $Over[$k] -Compress -Depth 10
+        $now = if ($has) { ConvertTo-Json -InputObject $Cfg[$k] -Compress -Depth 10 } else { '(not set)' }
+        # Numbers by value, so a config's 2.0 matches the overlay's 2, as Get-PwConfig reads them.
+        $num = { param($v) $v -is [int] -or $v -is [long] -or $v -is [double] -or $v -is [decimal] }
+        if ($has -and (& $num $Cfg[$k]) -and (& $num $Over[$k]) -and [double]$Cfg[$k] -eq [double]$Over[$k]) { continue }
+        if ($now -cne $want) { "${path}: $now -> $want" }
+    }
+}
 if ($configIsNew) {
+    # A fresh copy of the template, so the overlay can't change $template, which fills unset model lists.
     $cfg = Get-Content -Raw (Join-Path $kit 'templates/packet-workflow.json') | ConvertFrom-Json -AsHashtable
+    if ($overlay) { Merge-Overlay $cfg $overlay }
     $url = & git -C $Target remote get-url origin 2>$null
     if ($LASTEXITCODE -eq 0 -and $url -match 'github\.com[:/](?<o>[^/]+)/(?<r>[^/]+?)(\.git)?$') { $cfg.repo = "$($Matches.o)/$($Matches.r)" }
     $head = & git -C $Target symbolic-ref --short refs/remotes/origin/HEAD 2>$null
@@ -119,11 +160,23 @@ foreach ($class in $(if ($PlanOnly) { @() } else { 'strong', 'standard', 'light'
     if (-not $list.Count) { throw "models.$class in .github/packet-workflow.json must name at least one model" }
     $models[$class] = $list
 }
+# Each kit agent's class: models.agents first, else the kit's ($script:AgentModelClass). A bad entry stops
+# the install here, before any file is written. A plan-only install writes no agent, so it reads none.
+$agentClass = [ordered]@{}
+if (-not $PlanOnly) {
+    try { foreach ($agent in $script:AgentModelClass.Keys) { $agentClass[$agent] = Get-PwAgentModelClass -Models $(if ($hasModels) { $cfg.models } else { $null }) -Agent $agent } }
+    catch [PwError] {
+        [Console]::Error.WriteLine("install.ps1: $($_.Exception.Message), in .github/packet-workflow.json. Nothing was written.")
+        exit 2
+    }
+}
 # Said once the models map has passed, so a run that stops on it doesn't first claim to add anything.
 if (-not $PlanOnly -and $oldMode -eq 'plan-only') {
     Write-Output "This run makes the plan-only install full: it adds the agents (.github/agents), the packet-dispatch and packet-review skills and the hook (.github/hooks)$(if ($DryRun) { ' (dry run: nothing is written)' })."
 }
-$agentModelClass = @{
+# The kit's class per agent file, as $script:AgentModelClass has it (a test keeps the two the same). The
+# classes written come from $agentClass above; this table only covers a plan-only run, which writes no agent.
+$agentFileClass = @{
     'packet-dispatcher.agent.md'        = 'strong'
     'packet-reviewer-deep.agent.md'     = 'strong'
     'packet-implementer.agent.md'       = 'standard'
@@ -133,7 +186,10 @@ $agentModelClass = @{
 
 $plan = [System.Collections.Generic.List[object]]::new()
 foreach ($f in Get-ChildItem -LiteralPath (Join-Path $kit 'agents') -File -Filter '*.agent.md') {
-    $plan.Add(@{ Source = $f.FullName; Dest = ".github/agents/$($f.Name)"; ModelClass = $agentModelClass[$f.Name] })
+    # The class models.agents gives it, else the kit's; an agent file outside both is copied as it is.
+    $name = $f.Name -replace '\.agent\.md$', ''
+    $class = if ($agentClass.Contains($name)) { $agentClass[$name] } else { $agentFileClass[$f.Name] }
+    $plan.Add(@{ Source = $f.FullName; Dest = ".github/agents/$($f.Name)"; ModelClass = $class })
 }
 foreach ($f in Get-ChildItem -LiteralPath (Join-Path $kit 'skills') -File -Recurse) {
     $rel = [System.IO.Path]::GetRelativePath((Join-Path $kit 'skills'), $f.FullName).Replace('\', '/')
@@ -199,7 +255,7 @@ foreach ($gone in ($old.Keys | Where-Object { -not $installed.Contains($_) -and 
 }
 
 if ($configIsNew) {
-    Write-Step 'add' ".github/packet-workflow.json (repo $($cfg.repo), default branch $($cfg.defaultBranch); review the board settings)"
+    Write-Step 'add' ".github/packet-workflow.json (repo $($cfg.repo), default branch $($cfg.defaultBranch)$(if ($overlay) { "; the $Profile profile" }); review the board settings)"
     if (-not $DryRun) { [System.IO.File]::WriteAllText($configPath, ($cfg | ConvertTo-Json -Depth 10) + "`n", $utf8) }
 }
 
@@ -234,6 +290,15 @@ if ($instrText -match '(?s)<!-- packet-workflow:start -->(?<b>.*?)<!-- packet-wo
     $blockMode = if ($Matches.b -match '(?m)^## Packet workflow \(plan and board only\)\s*$') { 'plan-only' } else { 'full' }
     if ($blockMode -ne $mode) { Write-Output "copilot-instructions.md still holds the $blockMode install's workflow rules: rerun with -WithInstructions to replace them." }
 }
+# On an existing config a profile only reports: the owner moves what they want over in a pull request.
+if ($overlay -and -not $configIsNew) {
+    $diff = @(Get-OverlayDiff $overlay $cfg '')
+    if ($diff.Count) {
+        Write-Output ".github/packet-workflow.json already exists, so -Profile $Profile left it as it is. These $Profile settings differ from it; to use them, change them in a pull request:"
+        foreach ($d in $diff) { Write-Output "  $d" }
+    }
+    else { Write-Output ".github/packet-workflow.json already exists and already has the $Profile profile's settings." }
+}
 if ($PlanOnly) {
     Write-Output @'
 Next:
@@ -250,7 +315,22 @@ This install has no agents, no hook and no /packet-dispatch: run the installer w
 '@
 }
 else {
+    # The agents models.agents moves off the kit's class. A kept agent keeps its own model: line (said
+    # above), so it is left out here and from the warning: its class says nothing about its model.
+    $moved = @($agentClass.Keys | Where-Object { $keptAgents -notcontains $_ -and $agentClass[$_] -cne $script:AgentModelClass[$_] } | ForEach-Object { "$_ on $($agentClass[$_]) (the kit's: $($script:AgentModelClass[$_]))" })
     Write-Output "Agent models: strong $($models.strong -join ' > '); standard $($models.standard -join ' > '); light $($models.light -join ' > ')$(if (-not $configIsNew -and -not $hasModels) { ' (the kit''s defaults: add a models map to .github/packet-workflow.json to change them)' })$(if ($keptAgents.Count) { "; except the kept $($keptAgents -join ', '), which keep$(if ($keptAgents.Count -eq 1) { 's its own model: line (-Force rewrites it)' } else { ' their own model: lines (-Force rewrites them)' })" })."
+    if ($moved.Count) { Write-Output "Agent classes from models.agents: $($moved -join '; ')." }
+    # VS Code's Local harness checks a subagent's model against the session's cost tier and doesn't run one
+    # above it. Classes rank light < standard < strong; equal model lists can't differ in tier.
+    $rank = @{ light = 1; standard = 2; strong = 3 }
+    $top = 'packet-dispatcher'
+    $above = @($agentClass.Keys | Where-Object { $_ -cne $top -and $keptAgents -notcontains $top -and $keptAgents -notcontains $_ -and $rank[$agentClass[$_]] -gt $rank[$agentClass[$top]] -and ($models[$agentClass[$_]] -join "`n") -cne ($models[$agentClass[$top]] -join "`n") })
+    if ($above.Count) {
+        $names = ($above | ForEach-Object { "$_ ($($agentClass[$_]): $($models[$agentClass[$_]] -join ' > '))" }) -join ', '
+        Write-Warning ("$top runs on the $($agentClass[$top]) class ($($models[$agentClass[$top]] -join ' > ')), below $names. " +
+            "In VS Code's Local harness, a subagent on a model in a higher cost tier than the session's doesn't run, so a review round that needs it stops at Needs human. " +
+            "To avoid it, run those dispatches in a session on the higher model, or give $(if ($above.Count -eq 1) { 'that agent' } else { 'those agents' }) the dispatcher's class in models.agents.")
+    }
     Write-Output @'
 Next:
   1. Review .github/packet-workflow.json (board provider, prefixes, commands, guardrails, locks).

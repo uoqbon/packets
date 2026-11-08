@@ -1,0 +1,14 @@
+{
+  "models": {
+    "agents": { "packet-dispatcher": "standard" }
+  },
+  "review": {
+    "maxRounds": 2,
+    "lensesPerReviewer": 3,
+    "shouldFixPassFromRound": 2,
+    "tierCap": 2
+  },
+  "budget": {
+    "maxCreditsPerPacket": { "S": 950, "M": 1500, "L": 2200 }
+  }
+}
