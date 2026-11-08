@@ -370,7 +370,7 @@ Credits per packet under the solo profile:
 
 **A packet forced to tier 3** adds about 145 (S), 305 (M) or 530 (L) to a typical one. That is what the cap saves on an M or L packet, which would otherwise run at tier 3 throughout: about 24% of an M and 27% of an L. An S packet starts at tier 2 anyway, so on S the cap saves only round 2's step up to tier 3, about 55.
 
-**The ceiling.** The profile's ceilings, S 950, M 1,500 and L 2,200, are about 1.5× a typical packet. A packet that isn't forced stays under them through its two rounds, and through a CI fix after them. A packet forced to tier 3 stays under them through its two rounds, but a CI fix after them takes it over (S about 1,090, M 1,630, L 2,430), and so do one or two lenses more than the typical shape. It then waits at Needs human for the owner's answer. `credit-check.ps1` counts no resume share, so its figures are about 20 below the table's.
+**The ceiling.** The profile's ceilings, S 950, M 1,500 and L 2,200, are about 1.5× a typical packet. A packet that isn't forced stays under them through its two rounds, and through a CI fix after them. A packet forced to tier 3 stays under them through its two rounds, but a CI fix after them takes it over (S about 1,090, M 1,630, L 2,430), and so do one or two lenses more than the typical shape. It then waits at Needs human for the owner's answer. `credit-check.ps1` counts no resume share, so its figures are about 20 below the table's. These ceilings stay as they are until the rates are measured ([Calibrate](#calibrate)). Revisit them then, with how often a forced packet needs a CI fix in mind.
 
 A 10-packet phase (3 S, 5 M, 2 L), with `packet-plan`, board and progress at about 350 as above:
 
@@ -389,7 +389,13 @@ Packets a month on one seat, at 975 a packet all in under the solo profile and 2
 | Pro+ | 7,000 | 3.2 | **7.2** | 4.1–12.0 |
 | Max | 20,000 | 9.3 | **20.5** | 11.7–34.2 |
 
-Pro's 1,500 is 1,000 base credits plus a 500 "flex allotment" that GitHub says can change. Individual allowances reset at 00:00 UTC on the 1st and don't carry over. Business and Enterprise are the per-seat figures from [What a credit is](#what-a-credit-is). Sources: [Usage-based billing for individuals](https://docs.github.com/copilot/concepts/billing-and-usage/individuals/billing) and *Usage-based billing for organizations and enterprises* above.
+Pro's 1,500 is 1,000 base credits plus a 500 "flex allotment", and base credits are spent first. GitHub calls the flex allotment "a variable part of your included usage", while base credits "never change". So a plan's total can change with no change in its price, and more of it is flex on the larger plans: Pro+ is 3,900 base and 3,100 flex, and Max is 10,000 base and 10,000 flex. Individual allowances and the team pool both reset at 00:00:00 UTC on the first day of each calendar month, whatever the billing date, and unused credits are forfeited. Business and Enterprise are the per-seat figures from [What a credit is](#what-a-credit-is). The individual figures are for plans on usage-based billing: a Pro or Pro+ subscriber who stayed on an existing annual plan is still on premium requests.
+
+Sources, read 2026-11-09:
+
+- [Usage-based billing for individuals](https://docs.github.com/en/copilot/concepts/billing-and-usage/individuals/billing)
+- [Usage-based billing for organizations and enterprises](https://docs.github.com/en/copilot/concepts/billing-and-usage/organizations-and-enterprises/billing)
+- [Model multipliers for annual plans on request-based billing (legacy)](https://docs.github.com/en/copilot/reference/copilot-billing/request-based-billing-legacy/model-multipliers-for-annual-plans)
 
 **Plan and board only.** A 10-packet phase costs about 350 credits to plan, sync and track: about 4 phases a month on Pro, 5 on Business and 11 on Enterprise, before any hand-off. A hand-off to the Copilot coding agent draws on the same credits, and the kit doesn't estimate it.
 
@@ -404,7 +410,25 @@ Pro's 1,500 is 1,000 base credits plus a 500 "flex allotment" that GitHub says c
 
 All four safety properties hold, with the tier floor as amended above: under the cap the forced raises still reach tier 3.
 
-**Copilot CLI's session limit.** Copilot CLI and the Copilot SDK can cap a session's real spend: `/limits set max-ai-credits <n>` in a session, or `copilot -p … --max-ai-credits <n>` (public preview; a soft limit, at least 30). It measures real spend, where the kit's ceiling is an estimate, but it stops mid-step, possibly mid-implementer run with the claim held and the work uncommitted, where the kit's ceiling stops between steps. Use it as a backstop above the ceiling, for example the ceiling plus 50%, when you dispatch from Copilot CLI. Whether it counts the subagents' credits isn't known yet: the e2e stage that checks it hasn't run, and this line will say once it has.
+**Copilot CLI's session limit.** Copilot CLI (1.0.66 and later) and the Copilot SDK (1.0.5 and later) can cap a session's real spend: `/limits set max-ai-credits <n>` in a session, `copilot -p … --max-ai-credits <n>` for a scripted run, or `sessionLimits.maxAiCredits` in the SDK. It is in public preview, and the CLI requires at least 30.
+
+- **It measures real spend,** where the kit's ceiling is an estimate.
+- **It is a soft limit.** A response already in progress finishes, and the next model call is blocked, so spend can pass the limit slightly.
+- **It stops between model calls, not between the kit's steps.** So it can stop partway through an implementer run, with the claim held and the work uncommitted. The kit's ceiling stops between steps.
+- **What happens next depends on the mode.** In a session, Copilot asks you to raise the limit and continues from where it stopped. A `copilot -p` run ends.
+- **GitHub's pages differ on how long it lasts.** The how-to and the changelog say a whole session, and the how-to says a `copilot -p` limit holds until Copilot finishes responding. The command reference says it applies to each response and "resets per user message". So don't count on one interactive limit across several messages.
+- **Subagents.** GitHub's changelog says Copilot tracks usage "across the entire session, including model calls, subagents, and background work like compaction". The kit's e2e run hasn't measured that for its own custom agents yet, and this line will say once it has.
+- **Where it applies.** GitHub documents it for Copilot CLI and the SDK. No page says VS Code's Copilot harness honours it, so don't rely on it there.
+
+Use it as a backstop above the ceiling, for example the ceiling plus 50%, when you dispatch from Copilot CLI. It doesn't replace budgets or spending limits, which govern the month.
+
+Sources, read 2026-11-09:
+
+- [Set AI credit session limits in Copilot CLI and SDK](https://github.blog/changelog/2026-07-01-set-ai-credit-session-limits-in-copilot-cli-and-sdk/) (changelog, 2026-07-01)
+- [Setting an AI credit session limit in GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli/set-session-limit)
+- [GitHub Copilot CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)
+- [Session limits](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/session-limits) (Copilot SDK)
+- [Optimizing your AI usage](https://docs.github.com/en/copilot/tutorials/optimize-ai-usage)
 
 ## Running it within the pool
 
