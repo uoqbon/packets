@@ -91,7 +91,8 @@ Assert-Order $rounds @('- **Fix**:', '-Next fix`', '2. Run a new implementer', '
 Assert-Phrases $rounds @(
     'Every implementer run after the PR opens goes through **Fix**, so its credit check runs first.'
     'That includes step 9.3''s CI fix after a round that passed, which credit-check prices as a CI fix'
-    'and a fix the owner asks for in answer to a **Needs human**.'
+    'and a fix the owner asks for in answer to a **Needs human**, priced the same way.'
+    'After a settled round (**Settle**, before the last round) the script prices a CI fix as the round after a fix instead: a dearer estimate, never an error.'
     'Every other round goes through the panel, whose own check (`-Next round`, packet-review §1) runs before its first pair'
     'step 9.2''s round for a conflict resolution, **Amend**''s round') '§8 says the CI fix, the conflict round and Amend''s round are each covered'
 Assert-Phrases $handOff @('fix it like a review finding (step 8, **Fix**: the credit check, the implementer, push, a round for the fix)') '§9.3''s CI fix goes through §8 Fix'
@@ -272,11 +273,11 @@ Assert-Phrases $budgetStop @(
     '`so-far`, `step` and `ceiling` are the numbers the check printed. `head` is the PR''s head now'
     '1. **Raise:** comment `` `packet:budget max=<credits>` `` on the PR, as the comment''s first words'
     'then `/packet-dispatch resume <ID>`'
-    '2. **Pass with follow-ups:** a settle at this head (**Settle**). Offer it only when `next=fix` and `head` is the head of the newest round in `board rounds <pr>`, so the head is the one the newest round reviewed.'
+    '2. **Pass with follow-ups:** a settle at this head (**Settle**). Offer it only when `next=fix`, `head` is the head of the newest round in `board rounds <pr>`, that round''s outcome is `fix`, and no `settle-check` follows it, so the head is the one the newest round reviewed and its findings are still open. That rules out a CI fix and a fix after the last round.'
     '`` `packet:settle head=<head>` `` as the comment''s only line'
     'Name every blocking finding it would pass'
     '3. **Stop:** close the PR and move the item to Backlog.'
-    'With `next=round` there is no option 2: the round was to review a head no panel has seen.') 'a budget stop offers raise, pass with follow-ups (only at next=fix, naming blocking findings) and stop'
+    'With `next=round` there is no option 2: the round was to review a head no panel has seen. Nor is there one for any other `next=fix` stop: a CI fix or an owner''s fix has no open findings to pass.') 'a budget stop offers raise, pass with follow-ups (only at next=fix, naming blocking findings) and stop'
 Assert-Phrases $modelStop @(
     'quote the host''s message as it gave it'
     '1. Resume from a dispatcher session on a model at least as dear as the agent''s'
@@ -289,19 +290,25 @@ Assert-Phrases $review2 @(
     'start no other model, no lower tier''s agent, no general-purpose agent and no fewer runs in its place, and post no report'
     'the model-tier stop''s first line (the packet-dispatch skill''s **Needs human**, **A model-tier stop**), quoting the host''s message'
     'Return Needs human.') 'packet-review §2: a refused reviewer stops the round, never a lighter one, and returns Needs human'
+Assert-Phrases $review @('and returns Pass, Fix, Needs human, or Stopped when a check fails.', 'stop the round with no report, and return Stopped.', 'say what failed, and return Stopped. Never start a pair on a check that failed.') 'the panel returns Stopped, never a pass, when a check fails'
+Assert-Phrases $review2 @('A host that lists a pinned model but refuses to start it for the session''s cost tier is offering it, not withholding it: that is the stop below, not a reason to use the owner''s model or ask for one.') 'packet-review §2: a refused pinned model isn''t one the host withholds'
+Assert-Phrases $reviewLimits @('The panel never posts a `packet:budget max=…` or `packet:settle head=…` comment, or raises the ceiling: those are the owner''s.') 'the panel never posts a raise or a settle'
 Assert-Phrases $preflight @('A host that refuses a pinned model for its cost tier is offering it, not withholding it', 'That is a model-tier stop (**Needs human**, `reason=model-tier`), when the round reaches it, not a reason to ask the owner for another model.') 'Preflight step 7: a refused pinned model is a model-tier stop, not a question for the owner'
 Assert-Phrases $agentSubagents @('A host that refuses a pinned model for that reason is offering it, not withholding it, so don''t ask the owner for another model.', 'the round stops at a model-tier stop (the skill''s **Needs human**, `reason=model-tier`): never run it on another model, a lower tier''s agent or fewer runs.') 'the dispatcher agent''s cost-tier sentence points at the model-tier stop'
 
 Write-Host '  resume after a stop'
 Assert-Phrases $resume @('If the marker has `reason=budget` or `reason=model-tier` (its `Pairs`), go to **After a stop** below.') 'Resume sends both stops to After a stop'
+Assert-Phrases $afterStop @('If a raise and a settle that counts are both newer than the stop, the newer of the two decides.') 'a settle that doesn''t count never overrides a raise'
 Assert-Phrases $afterStop @('Only an answer newer than the stop counts: a row in `board rounds <pr> -Json` (trusted authors only) whose `CreatedAt` is later than the marker''s.') 'only a trusted answer newer than the stop counts'
 # Each way on, and where it ends: another check, or a release.
 $paths = [ordered]@{
-    'budget, the PR closed'          = @('- **`reason=budget`**, three ways on:', '**The PR is closed** (the owner chose to stop): release, and stop.')
-    'budget, a raise'                = @('**A raise:** a trusted `packet:budget` on the PR (a `budget` row) newer than the stop.', 'carry on at `next=`, where the check runs again: `fix` → step 8, **Fix**, from its credit check; `round` → step 8, the panel, whose own check runs before its first pair.')
-    'budget, a settle'               = @('**A settle:** a `settle-request` row newer than the stop, not `Consumed`, at the newest round''s head and describing no change', '**Settle**, to pass that round''s findings with follow-ups.')
+    'a settle-check already posted'  = @('First, if a trusted `settle-check` newer than the stop follows the newest round, a settle already passed', '`board set <ID> "Status=In review"`, and go to step 9.1.')
+    'budget, the PR closed'          = @('- **`reason=budget`**, three ways on:', '**The PR is closed or merged** (the owner chose to stop): release, and stop.')
+    'budget, a raise'                = @('**A raise:** a trusted `packet:budget` on the PR (a `budget` row) newer than the stop.', 'carry on at `next=`, where the check runs again: `round` → step 8, the panel, whose own check runs before its first pair; `fix` → step 8, **Fix**, from its credit check, with what the fix was for.')
+    'budget, a raise before a CI fix' = @('That is the newest round''s findings only when its outcome is `fix` and no `settle-check` follows it.', 'After a round that passed or was settled, the fix was step 9.3''s CI fix: go to step 9.1, where 9.3 reads CI again and sends a fix back through **Fix**.')
+    'budget, a settle'               = @('**A settle:** a `settle-request` row newer than the stop, not `Consumed`. With the rounds used up, it works as **Settle** after the last round.', 'Before the last round it must meet every condition **Settle** sets out there', 'then **Settle**, to pass that round''s findings with follow-ups.')
     'budget, no answer'              = @('Anything else (no answer yet, or a settle that fails one of **Settle**''s conditions): release and stop.')
-    'model-tier, the PR closed'      = @('- **`reason=model-tier`:**', '**The PR is closed:** release, and stop.')
+    'model-tier, the PR closed'      = @('- **`reason=model-tier`:**', '**The PR is closed or merged:** release, and stop.')
     'model-tier, a settle request'   = @('**A settle request** newer than the stop isn''t an answer here', 'and keep it Needs human. Release and stop.')
     'model-tier, a retry'            = @('Otherwise retry the round:', 'The panel runs the round again, from its credit check. If the host refuses the reviewer again, the panel posts the same Needs human.')
 }
@@ -316,7 +323,9 @@ Assert-Phrases $narrow @(
     'Before the last round, a settle counts only when all of these hold'
     '1. the item''s last Needs human (`board marker <ID> needs-human -Json`) is `reason=budget` with `next=fix`, and the request is newer than it;'
     '2. the request''s `head` is the `head` of the newest `round` in `board rounds <pr> -Json`, and the PR''s head now'
-    '3. it describes no change: its `Body` holds nothing but the marker line and white space. Anything more reads as a change, and a change needs a round.'
+    'and the stop''s own `head` and `round` pairs name that head and that round, so the request answers this stop whatever the two clocks say;'
+    '3. that round''s outcome is `fix`, and no `settle-check` follows it: its findings are still open;'
+    '4. it describes no change: its `Body`, trimmed, is exactly `` `packet:settle head=<that head>` ``, with no other word or pair inside the code span and nothing outside it. Anything more reads as a change, and a change needs a round.'
     'Any other settle before the last round isn''t an answer'
     'never carries a code change'
     'so nothing a panel hasn''t reviewed reaches Ready to merge this way'

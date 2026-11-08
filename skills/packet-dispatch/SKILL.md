@@ -170,7 +170,7 @@ Follow the [packet-review](../packet-review/SKILL.md) skill for the PR, giving i
 - **Needs human**: the panel has set the status and asked the question. Release the claim and stop.
 - **Stopped**: the round ended with no report and no question (a claim check answered `LOST` or exit 2, or review-scope or the panel's credit check failed). Release the claim, stop, and report what failed. Nothing about a stopped round reads as a pass.
 
-Every implementer run after the PR opens goes through **Fix**, so its credit check runs first. That includes step 9.3's CI fix after a round that passed, which credit-check prices as a CI fix (the fix run, which no round marker books, plus a one-lens round), and a fix the owner asks for in answer to a **Needs human**. Every other round goes through the panel, whose own check (`-Next round`, packet-review §1) runs before its first pair: the next round after a fix, step 9.2's round for a conflict resolution, **Amend**'s round, and a round run again on `resume`.
+Every implementer run after the PR opens goes through **Fix**, so its credit check runs first. That includes step 9.3's CI fix after a round that passed, which credit-check prices as a CI fix (the fix run, which no round marker books, plus a one-lens round), and a fix the owner asks for in answer to a **Needs human**, priced the same way. After a settled round (**Settle**, before the last round) the script prices a CI fix as the round after a fix instead: a dearer estimate, never an error. Every other round goes through the panel, whose own check (`-Next round`, packet-review §1) runs before its first pair: the next round after a fix, step 9.2's round for a conflict resolution, **Amend**'s round, and a round run again on `resume`.
 
 ## 9 · Hand off
 
@@ -216,16 +216,16 @@ When the dependency merges: merge `origin/<defaultBranch>` into the packet branc
 
 ### After a stop
 
-The stop's marker gives its pairs (`reason`, `next`, `round`, `head`, …) and its `CreatedAt`. Only an answer newer than the stop counts: a row in `board rounds <pr> -Json` (trusted authors only) whose `CreatedAt` is later than the marker's. Read the PR with `gh pr view <pr> --json state,headRefOid`.
+The stop's marker gives its pairs (`reason`, `next`, `round`, `head`, …) and its `CreatedAt`. Only an answer newer than the stop counts: a row in `board rounds <pr> -Json` (trusted authors only) whose `CreatedAt` is later than the marker's. Read the PR with `gh pr view <pr> --json state,headRefOid`. First, if a trusted `settle-check` newer than the stop follows the newest round, a settle already passed (a session stopped after **Settle**'s settle-check): check the claim, `board set <ID> "Status=In review"`, and go to step 9.1.
 
 - **`reason=budget`**, three ways on:
-  - **The PR is closed** (the owner chose to stop): release, and stop. The item's status is the owner's to move.
-  - **A raise:** a trusted `packet:budget` on the PR (a `budget` row) newer than the stop. Check the claim, `board set <ID> "Status=In review"`, and carry on at `next=`, where the check runs again: `fix` → step 8, **Fix**, from its credit check; `round` → step 8, the panel, whose own check runs before its first pair. A raise that is still too low stops the packet again, with new numbers.
-  - **A settle:** a `settle-request` row newer than the stop, not `Consumed`, at the newest round's head and describing no change, as **Settle** sets out for a settle before the last round: **Settle**, to pass that round's findings with follow-ups.
+  - **The PR is closed or merged** (the owner chose to stop): release, and stop. The item's status is the owner's to move.
+  - **A raise:** a trusted `packet:budget` on the PR (a `budget` row) newer than the stop. Check the claim, `board set <ID> "Status=In review"`, and carry on at `next=`, where the check runs again: `round` → step 8, the panel, whose own check runs before its first pair; `fix` → step 8, **Fix**, from its credit check, with what the fix was for. That is the newest round's findings only when its outcome is `fix` and no `settle-check` follows it. After a round that passed or was settled, the fix was step 9.3's CI fix: go to step 9.1, where 9.3 reads CI again and sends a fix back through **Fix**. After a round whose outcome is `needs-human`, it is the fix the owner's earlier answer asked for. A raise that is still too low stops the packet again, with new numbers.
+  - **A settle:** a `settle-request` row newer than the stop, not `Consumed`. With the rounds used up, it works as **Settle** after the last round. Before the last round it must meet every condition **Settle** sets out there (`next=fix`, the stop's `round` and `head`, the newest round's head, outcome `fix`, no change described): then **Settle**, to pass that round's findings with follow-ups.
 
-  If a raise and a settle are both newer than the stop, the newer of the two decides. Anything else (no answer yet, or a settle that fails one of **Settle**'s conditions): release and stop. When a settle didn't count, first check the claim and comment on the item, with the stop's own first line again so the next resume still reads it as this stop, saying which condition it failed.
+  If a raise and a settle that counts are both newer than the stop, the newer of the two decides. Anything else (no answer yet, or a settle that fails one of **Settle**'s conditions): release and stop. When a settle didn't count, first check the claim and comment on the item, with the stop's own first line again so the next resume still reads it as this stop, saying which condition it failed.
 - **`reason=model-tier`:**
-  - **The PR is closed:** release, and stop.
+  - **The PR is closed or merged:** release, and stop.
   - **A settle request** newer than the stop isn't an answer here: the head isn't one a panel reviewed. Check the claim and say so on the item, with the stop's own first line again, and keep it Needs human. Release and stop.
   - Otherwise retry the round: check the claim, `board set <ID> "Status=In review"`, and run step 8. The panel runs the round again, from its credit check. If the host refuses the reviewer again, the panel posts the same Needs human.
 
@@ -248,10 +248,10 @@ When only the owner can decide (scope, a contract, a product question, a blockin
 `next` is the step that didn't run. `round` is the round it belongs to: for `next=round`, the round that didn't start; for `next=fix`, the round whose findings the fix would answer. `so-far`, `step` and `ceiling` are the numbers the check printed. `head` is the PR's head now (`gh pr view <pr> --json headRefOid`). Below the first line, quote the line the check printed, then give these options, in this order:
 
 1. **Raise:** comment `` `packet:budget max=<credits>` `` on the PR, as the comment's first words, with a whole number at least the `total` the check printed, then `/packet-dispatch resume <ID>`. A raise holds for the rest of this packet, and the newest one counts.
-2. **Pass with follow-ups:** a settle at this head (**Settle**). Offer it only when `next=fix` and `head` is the head of the newest round in `board rounds <pr>`, so the head is the one the newest round reviewed. The owner comments on the PR with `` `packet:settle head=<head>` `` as the comment's only line, then resumes. You then open one follow-up issue per confirmed finding of round `<N>`, and the PR goes on to CI and the hand-off with no change and no further round. Name every blocking finding it would pass (its number in the round report, lens and file:line).
+2. **Pass with follow-ups:** a settle at this head (**Settle**). Offer it only when `next=fix`, `head` is the head of the newest round in `board rounds <pr>`, that round's outcome is `fix`, and no `settle-check` follows it, so the head is the one the newest round reviewed and its findings are still open. That rules out a CI fix and a fix after the last round. The owner comments on the PR with `` `packet:settle head=<head>` `` as the comment's only line, then resumes. You then open one follow-up issue per confirmed finding of round `<N>`, and the PR goes on to CI and the hand-off with no change and no further round. Name every blocking finding it would pass (its number in the round report, lens and file:line).
 3. **Stop:** close the PR and move the item to Backlog.
 
-With `next=round` there is no option 2: the round was to review a head no panel has seen.
+With `next=round` there is no option 2: the round was to review a head no panel has seen. Nor is there one for any other `next=fix` stop: a CI fix or an owner's fix has no open findings to pass.
 
 ### A model-tier stop
 
@@ -321,12 +321,13 @@ A settle counts only if `board rounds <pr> -Json` lists it as a `settle-request`
 Before the last round, a settle counts only when all of these hold, as well as the checks above (trusted, newer than the last round, a `head`, not `Consumed`):
 
 1. the item's last Needs human (`board marker <ID> needs-human -Json`) is `reason=budget` with `next=fix`, and the request is newer than it;
-2. the request's `head` is the `head` of the newest `round` in `board rounds <pr> -Json`, and the PR's head now (`gh pr view <pr> --json headRefOid`);
-3. it describes no change: its `Body` holds nothing but the marker line and white space. Anything more reads as a change, and a change needs a round.
+2. the request's `head` is the `head` of the newest `round` in `board rounds <pr> -Json`, and the PR's head now (`gh pr view <pr> --json headRefOid`), and the stop's own `head` and `round` pairs name that head and that round, so the request answers this stop whatever the two clocks say;
+3. that round's outcome is `fix`, and no `settle-check` follows it: its findings are still open;
+4. it describes no change: its `Body`, trimmed, is exactly `` `packet:settle head=<that head>` ``, with no other word or pair inside the code span and nothing outside it. Anything more reads as a change, and a change needs a round.
 
 Any other settle before the last round isn't an answer (**Resume**, **After a stop**). One that counts never carries a code change: it passes that round's confirmed findings as follow-ups, so nothing a panel hasn't reviewed reaches Ready to merge this way. On resume, with such a request:
 
-1. Claim. `git fetch origin`, then the checkout must be clean and at the request's head (`git merge --ff-only <head>` if it is behind; anything else goes back to the owner, **Needs human**). Nothing is committed or pushed.
+1. Claim. `git fetch origin`, then the checkout must be clean and at the request's head (`git merge --ff-only <head>` if it is behind; anything else goes back to the owner: a comment on the item with the stop's own first line again, saying why). Nothing is committed or pushed.
 2. **Follow-ups.** Read that round's report on the PR (its `CommentId` in `board rounds <pr> -Json`). Open one follow-up issue per confirmed finding, under packet-review §5's rules: the `<labels.followUp>` label, a link to the PR and the finding, and for a contract finding the title `<ID> contract: <the question>` and the `<labels.needsHuman>` label too. A finding an earlier round already filed (packet-review §3, Already filed) isn't filed again. If a label is missing, or opening one fails, stop with no settle-check: release and report. A later resume opens only the ones not yet open.
 3. Check the claim. Comment on the PR: `` `packet:settle-check head=<the request's head>` `` "Passed with follow-ups after round <N> (budget stop): #…". That head counts as reviewed in step 9.1, as the panel's round reviewed it.
 4. `board set <ID> "Status=In review"`, then continue at step 9.1, 9.2 and 9.3, and in the hand-off say "settled by the owner after round <N>: its findings are follow-ups #…". The next round, if a conflict or a CI fix brings one, passes `-Confirmed -` to review-scope (packet-review §1).
