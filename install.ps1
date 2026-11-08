@@ -129,6 +129,9 @@ function Get-OverlayDiff([System.Collections.IDictionary]$Over, $Cfg, [string]$P
         if ($has -and $Cfg[$k] -is [System.Collections.IDictionary] -and $Over[$k] -is [System.Collections.IDictionary]) { Get-OverlayDiff $Over[$k] $Cfg[$k] "$path."; continue }
         $want = ConvertTo-Json -InputObject $Over[$k] -Compress -Depth 10
         $now = if ($has) { ConvertTo-Json -InputObject $Cfg[$k] -Compress -Depth 10 } else { '(not set)' }
+        # Numbers by value, so a config's 2.0 matches the overlay's 2, as Get-PwConfig reads them.
+        $num = { param($v) $v -is [int] -or $v -is [long] -or $v -is [double] -or $v -is [decimal] }
+        if ($has -and (& $num $Cfg[$k]) -and (& $num $Over[$k]) -and [double]$Cfg[$k] -eq [double]$Over[$k]) { continue }
         if ($now -cne $want) { "${path}: $now -> $want" }
     }
 }
@@ -312,15 +315,16 @@ This install has no agents, no hook and no /packet-dispatch: run the installer w
 '@
 }
 else {
-    # The agents models.agents moves off the kit's class (a kept agent keeps its own line, as said above).
-    $moved = @($agentClass.Keys | Where-Object { $agentClass[$_] -cne $script:AgentModelClass[$_] } | ForEach-Object { "$_ on $($agentClass[$_]) (the kit's: $($script:AgentModelClass[$_]))" })
+    # The agents models.agents moves off the kit's class. A kept agent keeps its own model: line (said
+    # above), so it is left out here and from the warning: its class says nothing about its model.
+    $moved = @($agentClass.Keys | Where-Object { $keptAgents -notcontains $_ -and $agentClass[$_] -cne $script:AgentModelClass[$_] } | ForEach-Object { "$_ on $($agentClass[$_]) (the kit's: $($script:AgentModelClass[$_]))" })
     Write-Output "Agent models: strong $($models.strong -join ' > '); standard $($models.standard -join ' > '); light $($models.light -join ' > ')$(if (-not $configIsNew -and -not $hasModels) { ' (the kit''s defaults: add a models map to .github/packet-workflow.json to change them)' })$(if ($keptAgents.Count) { "; except the kept $($keptAgents -join ', '), which keep$(if ($keptAgents.Count -eq 1) { 's its own model: line (-Force rewrites it)' } else { ' their own model: lines (-Force rewrites them)' })" })."
     if ($moved.Count) { Write-Output "Agent classes from models.agents: $($moved -join '; ')." }
     # VS Code's Local harness checks a subagent's model against the session's cost tier and doesn't run one
     # above it. Classes rank light < standard < strong; equal model lists can't differ in tier.
     $rank = @{ light = 1; standard = 2; strong = 3 }
     $top = 'packet-dispatcher'
-    $above = @($agentClass.Keys | Where-Object { $_ -cne $top -and $rank[$agentClass[$_]] -gt $rank[$agentClass[$top]] -and ($models[$agentClass[$_]] -join "`n") -cne ($models[$agentClass[$top]] -join "`n") })
+    $above = @($agentClass.Keys | Where-Object { $_ -cne $top -and $keptAgents -notcontains $top -and $keptAgents -notcontains $_ -and $rank[$agentClass[$_]] -gt $rank[$agentClass[$top]] -and ($models[$agentClass[$_]] -join "`n") -cne ($models[$agentClass[$top]] -join "`n") })
     if ($above.Count) {
         $names = ($above | ForEach-Object { "$_ ($($agentClass[$_]): $($models[$agentClass[$_]] -join ' > '))" }) -join ', '
         Write-Warning ("$top runs on the $($agentClass[$top]) class ($($models[$agentClass[$top]] -join ' > ')), below $names. " +

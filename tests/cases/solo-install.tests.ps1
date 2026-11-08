@@ -115,6 +115,14 @@ try {
     $r = Invoke-Kit $installer @('-Target', $classes)
     Assert-That ($r.Code -eq 0 -and (Get-AgentModelLine $classes 'packet-dispatcher') -ceq (Get-ModelLine $c.models.strong) -and $r.Text -notmatch 'Local harness' -and $r.Text -notmatch 'Agent classes from models\.agents') 'without models.agents each agent is back on the kit''s class, with no warning and no class line' $r.Text
 
+    # A hand-edited dispatcher is kept with its own model: line, so its class can't put it below a subagent.
+    $dispFile = Join-Path $classes '.github/agents/packet-dispatcher.agent.md'
+    [System.IO.File]::WriteAllText($dispFile, ([System.IO.File]::ReadAllText($dispFile) -replace '(?m)^model:.*$', "model: ['Hand Picked']"), $utf8)
+    $c.models.agents = [ordered]@{ 'packet-dispatcher' = 'standard' }
+    Write-Json (Join-Path $classes '.github/packet-workflow.json') $c
+    $r = Invoke-Kit $installer @('-Target', $classes)
+    Assert-That ($r.Code -eq 0 -and (Get-AgentModelLine $classes 'packet-dispatcher') -ceq "model: ['Hand Picked']" -and $r.Text -match 'kept\s+\.github/agents/packet-dispatcher\.agent\.md' -and $r.Text -notmatch 'Local harness' -and $r.Text -notmatch 'Agent classes from models\.agents') 'a kept dispatcher is named as kept, with no class line and no warning from a class it doesn''t run on' $r.Text
+
     Write-Host '  the default profile'
     $plain = New-SoloTarget
     $r = Invoke-Kit $installer @('-Target', $plain)
@@ -134,7 +142,7 @@ try {
     $existing = New-SoloTarget
     New-Item -ItemType Directory -Path (Join-Path $existing '.github') | Out-Null
     $e = Read-Json $templatePath
-    $e.repo = 'someone/else'; $e.board.provider = 'local'; $e.labels.packet = 'work'; $e.review.lensesPerReviewer = 3; $e.models.agents = [ordered]@{ 'packet-reviewer-light' = 'standard' }
+    $e.repo = 'someone/else'; $e.board.provider = 'local'; $e.labels.packet = 'work'; $e.review.lensesPerReviewer = 3.0; $e.models.agents = [ordered]@{ 'packet-reviewer-light' = 'standard' }
     $e.budget.maxCreditsPerPacket = [ordered]@{ S = 950; M = 1200; L = 2200 }
     $cfgFile = Join-Path $existing '.github/packet-workflow.json'
     # CRLF and no final newline, so a rewrite of any kind would show.
@@ -150,7 +158,7 @@ try {
         'budget.maxCreditsPerPacket.M: 1200 -> 1500')
     Assert-That ($r.Code -eq 0 -and (Get-FileHash -Algorithm SHA256 -LiteralPath $cfgFile).Hash -eq $cfgHash) 'it leaves the config byte-identical' $r.Text
     Assert-That ($r.Text -match '\.github/packet-workflow\.json already exists, so -Profile solo left it as it is\.' -and ((@($listed | Sort-Object) -join "`n") -ceq (@($wantListed | Sort-Object) -join "`n"))) 'and lists only the overlay''s keys that differ (review.maxRounds: 3 -> 2 among them)' ("got:`n$($listed -join "`n")`n`noutput:`n$($r.Text)")
-    Assert-That ($r.Text -notmatch '(?m)^\s+(repo|board|labels|version|models\.(strong|standard|light)|models\.agents\.packet-reviewer-light|review\.lensesPerReviewer|budget\.creditsPerRun)\b') 'never repo, the board or another key the overlay doesn''t hold, nor one that already matches' $r.Text
+    Assert-That ((Get-Content -Raw -LiteralPath $cfgFile) -match '"lensesPerReviewer": 3\.0' -and $r.Text -notmatch '(?m)^\s+(repo|board|labels|version|models\.(strong|standard|light)|models\.agents\.packet-reviewer-light|review\.lensesPerReviewer|budget\.creditsPerRun)\b') 'never repo, the board or another key the overlay doesn''t hold, nor one that already matches (3.0 matches 3)' $r.Text
     $e2 = Read-Json $cfgFile
     Assert-That ($e2.review.maxRounds -eq 3 -and (Get-AgentModelLine $existing 'packet-dispatcher') -ceq (Get-ModelLine $e.models.strong) -and $r.Text -notmatch 'packet-dispatcher on standard') 'the agents follow the config, not the profile: the dispatcher stays on strong' $r.Text
     $r = Invoke-Kit $installer @('-Target', $fresh, '-Profile', 'solo')
