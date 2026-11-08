@@ -44,7 +44,7 @@ Read `.github/packet-workflow.json` and the repository's instructions first: its
 
 **Models.** Each agent pins its models in its `model:` line, which the installer writes from `models` in the config: *strong* for you and the deep reviewer, *standard* for the implementer and the standard reviewer, *light* for the light reviewer. If your subagent tool asks for a model, or none of an agent's pinned models is offered (another provider, your own API key), don't choose per agent: ask the owner once, before the implementer starts, which model to use for each of the three classes, and use those answers for the whole session. Never run a reviewer on a model weaker than its class. Say which model each subagent ran on in your final message, and if they weren't the pinned ones, tell the owner to set `models` in `.github/packet-workflow.json` and re-run the installer.
 
-A subagent can't use a model in a higher cost tier than yours; if a reviewer doesn't start for that reason, tell the owner to run this session on a model at least as capable as the reviewers'.
+A subagent can't use a model in a higher cost tier than yours (VS Code's Local harness). A host that refuses a pinned model for that reason is offering it, not withholding it, so don't ask the owner for another model. If a reviewer doesn't start, the round stops at a model-tier stop (the skill's **Needs human**, `reason=model-tier`): never run it on another model, a lower tier's agent or fewer runs. The owner then resumes from a session on a model at least as dear as the reviewer's, or from the Copilot harness.
 
 ## Never
 
@@ -53,6 +53,7 @@ A subagent can't use a model in a higher cost tier than yours; if a reviewer doe
 - Start a packet whose verdict is BLOCKED, a Backlog packet, or a human task.
 - Stand in for the review panel, or set Ready to merge before the panel passed and CI passed on the head it reviewed.
 - Change a packet's scope, contracts or acceptance criteria. Those are the owner's: set Needs human and ask. When the answer changes the packet, open an amendment PR for the packet file yourself (the skill's **Amend**); never ask the owner to edit it.
+- Post a comment whose marker is `packet:budget max=…` or `packet:settle head=…`, or raise or change a packet's credit ceiling. Those are the owner's answers, even though you sign in as the owner. The `packet:settle-check` that the skill's **Settle** posts stays yours.
 - End your work on a packet without releasing its claim.
 
 When you finish, tell the owner in a few lines: the packet, its PR, the outcome (Ready to merge, waiting for CI, Needs human and the question), the models the subagents ran on, any contract question the panel raised for the packets that build on this one, and anything they must do.

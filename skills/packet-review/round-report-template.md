@@ -3,6 +3,9 @@
 
 **Head** `<short sha>` · **Base** `<base ref>` · **Tier** <tier> <name> (`<agent>`, <model the reviewers ran on>)< (capped from <uncapped> by review.tierCap), when Uncapped differs from Floor>: <review-scope reasons; any raise and why>
 
+<!-- Optional: only when the credit check printed WITHIN; leave it out when it printed OFF. -->
+**Credits** <so far, with this round> of <ceiling> (estimate)
+
 | Pair | Run | Lens | Reported | Confirmed | Rejected |
 | --- | --- | --- | --- | --- | --- |
 | 1 | 1 | security | 2 | 1 blocking | 1 |
