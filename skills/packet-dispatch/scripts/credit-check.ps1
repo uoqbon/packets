@@ -12,8 +12,10 @@
   What it reads, and from where:
     the config and the packet file   at the merge base of -Base and -Head, as review-scope does, so a
                                      branch can't raise its own ceiling or change its size or rates
-    the ceiling                      budget.maxCreditsPerPacket there; unset (budget isn't a table, no
-                                     key, or null) prints OFF after reading only that config
+    the ceiling                      budget.maxCreditsPerPacket there and on origin's default branch: the
+                                     stricter of the two holds (an old base can't loosen it). Unset in
+                                     both (budget isn't a table, no key, or null) prints OFF after
+                                     reading only those two configs
     who is trusted                   the GitHub sign-in and trustedAuthors in the config as merged on
                                      origin's default branch (Get-PwSharedConfig), as board rounds reads
                                      settles
@@ -30,14 +32,16 @@
     fix    after a round with outcome=fix (whose marker already books the fix run): the cheapest round
            that must follow, the last round's confirmed lenses at its tier plus one (the +1 only up
            to review.tierCap, or 3; never below the last round's tier), in review.lensesPerReviewer lenses per run. After a round that passed
-           (a CI fix): the fix run, which no marker books, plus a one-lens round at that round's tier
+           (a CI fix), or after a Needs human (a fix the owner asked for): the fix run, which no
+           marker books, plus a one-lens round at that round's tier
   A raise is the newest trusted PR comment `packet:budget max=<credits>`: it holds for the rest of the
   packet, and only ever raises the ceiling. A trusted raise whose max isn't a whole number above 0 is
   an error.
 
   credit-check.ps1 -Packet <ID> -Base <ref> [-Head HEAD] -Next start|round|fix [-Pr <n>]
                    [-Round <N> -Tier <t> -Lenses <a,b,c> -Runs <n>] [-Json]
-  Prints OFF, or WITHIN|OVER so-far=<n> step=<n> total=<n> ceiling=<n> (config | raised by <login> <date>).
+  Prints OFF, or WITHIN|OVER so-far=<n> step=<n> total=<n> ceiling=<n> (config | config on
+  origin/<default branch> | raised by <login> <date>).
   Exit codes: 0 OFF or WITHIN · 3 OVER · any other code an error (stop; never a pass). An error the
   script finds exits 2; a parameter-binding error (pwsh -File) exits 1.
 #>
@@ -99,7 +103,8 @@ try {
         if ($Pr -notmatch '^\d+$') { Stop-Pw "-Pr must be a pull request number (got '$Pr')" }
     }
 
-    # ---- The config at the base. With no ceiling, that is all this reads.
+    # ---- The configs: at the base, and as merged on origin's default branch. With no ceiling in either,
+    # that is all this reads.
     $root = Get-RepoRoot
     foreach ($ref in $Base, $Head) {
         & git -C $root rev-parse --verify -q "$ref^{commit}" *> $null
@@ -111,12 +116,21 @@ try {
     & git -C $root cat-file -e "${baseSha}:.github/packet-workflow.json" 2>$null
     if ($LASTEXITCODE -ne 0) { Stop-Pw "no .github/packet-workflow.json at the base $($baseSha.Substring(0, 7)), so no ceiling can be read there" }
     $cfg = Get-PwConfig -Ref $baseSha
+    # The default branch's config: who is trusted, and a second ceiling. The stricter of the two holds, so
+    # an old merge base (from before a ceiling was set or lowered) can't loosen it. Read from git only.
+    $shared = Get-PwSharedConfig
     # Get-PwCreditCeiling's rule for unset, read here so an install without a ceiling never reaches the
     # packet file, the PR or the rates.
-    $budget = $cfg['budget']
-    if ($budget -isnot [System.Collections.IDictionary] -or -not $budget.Contains('maxCreditsPerPacket') -or $null -eq $budget['maxCreditsPerPacket']) {
+    $isUnset = {
+        param($c)
+        $b = $c['budget']
+        $b -isnot [System.Collections.IDictionary] -or -not $b.Contains('maxCreditsPerPacket') -or $null -eq $b['maxCreditsPerPacket']
+    }
+    $baseUnset = & $isUnset $cfg
+    $sharedUnset = & $isUnset $shared
+    if ($baseUnset -and $sharedUnset) {
         if ($Json) { [pscustomobject]@{ Result = 'OFF'; Packet = $Packet; Next = $Next; Base = $baseSha } | ConvertTo-Json }
-        else { Write-Output 'OFF (no budget.maxCreditsPerPacket at the base)' }
+        else { Write-Output "OFF (no budget.maxCreditsPerPacket at the base or on origin/$($shared.defaultBranch))" }
         exit 0
     }
 
@@ -125,15 +139,20 @@ try {
     if (-not $pk) { Stop-Pw "no packet file for $Packet at the base $($baseSha.Substring(0, 7))" }
     $size = "$($pk.Size)".ToUpperInvariant()
     if ($size -notin 'S', 'M', 'L') { Stop-Pw "$Packet has no Size of S, M or L at the base (got '$($pk.Size)')" }
-    $ceiling = Get-PwCreditCeiling -Config $cfg -Size $size
+    # The stricter of the base's ceiling and the default branch's, for the size at the base. Either one
+    # that is set but broken stops the check.
+    $baseCeiling = if ($baseUnset) { $null } else { Get-PwCreditCeiling -Config $cfg -Size $size }
+    $sharedCeiling = if ($sharedUnset) { $null } else { Get-PwCreditCeiling -Config $shared -Size $size }
+    $ceilingFrom = 'base'
+    $ceiling = $baseCeiling
+    if ($null -eq $ceiling -or ($null -ne $sharedCeiling -and $sharedCeiling -lt $ceiling)) { $ceiling = $sharedCeiling; $ceilingFrom = 'default-branch' }
 
     # ---- The markers so far, and the step.
     $rows = @()
     $raise = $null
     $prNumber = $null
     if ($Next -ne 'start') {
-        # Who is trusted comes from origin's default branch, never the base or the branch.
-        $shared = Get-PwSharedConfig
+        # Who is trusted comes from origin's default branch ($shared), never the base or the branch.
         # The packet's own open PR: found by its pkt/<id>- branch, or, with -Pr, checked against it. Another
         # packet's PR, or an abandoned one, would price other markers and raises.
         $prefix = "pkt/$($Packet.ToLowerInvariant())-"
@@ -176,11 +195,12 @@ try {
                 $tierNext = [Math]::Max($lastTier, [Math]::Min($lastTier + 1, $cap))
                 [pscustomobject]@{ Kind = 'round'; Round = $lastRound + 1; Tier = [string]$tierNext; Lenses = $(if ($confirmed) { $confirmed -join ',' } else { 'correctness' }); Runs = [string][Math]::Ceiling($n / $per); Outcome = 'pass'; CreatedAt = $null }
             }
-            elseif ($outcome -eq 'pass') {
-                # A CI fix after a passed round: no marker books its run, so this row's outcome=fix does.
+            elseif ($outcome -in 'pass', 'needs-human') {
+                # A CI fix after a passed round, or a fix the owner asked for after a Needs human: no marker
+                # books its run, so this row's outcome=fix does.
                 [pscustomobject]@{ Kind = 'round'; Round = $lastRound + 1; Tier = [string]$lastTier; Lenses = 'correctness'; Runs = '1'; Outcome = 'fix'; CreatedAt = $null }
             }
-            else { Stop-Pw "-Next fix after round $lastRound, whose outcome is '$outcome': only a fix or a passed round is followed by a fix run" }
+            else { Stop-Pw "-Next fix after round $lastRound, whose outcome is '$outcome': only a fix, a passed round or a Needs human is followed by a fix run" }
         }
     }
     $soFar = if ($Next -eq 'start') { 0 } else { [double](Get-PwCreditEstimate -Config $cfg -Size $size -Rounds $rounds).Credits }
@@ -189,7 +209,7 @@ try {
 
     # ---- A raise only ever raises the ceiling.
     $limit = $ceiling
-    $source = 'config'
+    $source = if ($ceilingFrom -eq 'base') { 'config' } else { "config on origin/$($shared.defaultBranch)" }
     $raisedBy = $null; $raisedAt = $null
     if ($raise) {
         $max = "$(Get-PwField $raise 'Max')"
@@ -207,6 +227,7 @@ try {
         [pscustomobject]@{
             Result = $result; Packet = $Packet; Size = $size; Next = $Next; Pr = $(if ($prNumber) { [int]$prNumber } else { $null }); Base = $baseSha
             SoFar = $soFar; Step = $stepCredits; Total = $total; Ceiling = $limit; ConfigCeiling = $ceiling
+            CeilingFrom = $ceilingFrom; BaseCeiling = $(if ($null -ne $baseCeiling) { & $num $baseCeiling } else { $null }); DefaultBranchCeiling = $(if ($null -ne $sharedCeiling) { & $num $sharedCeiling } else { $null })
             Source = $(if ($raisedBy) { 'raised' } else { 'config' }); RaisedBy = $raisedBy; RaisedAt = $raisedAt
         } | ConvertTo-Json
     }

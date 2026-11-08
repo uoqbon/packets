@@ -260,6 +260,14 @@ try {
         $passed = & $estimate 'c1200' 'S' "[$row1Pass]"
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '27', '-Next', 'fix') + (& $at 'c1200')) $gh
         Assert-That ($r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=$passed step=$($ciFix - $passed) total=$ciFix ") '-Next fix after a passed round prices the CI fix run and a one-lens round at that round''s tier' "want so-far=$passed total=$ciFix`n$($r.Text)"
+        # After a Needs human (a fix the owner asked for): priced as a CI fix, at that round's tier.
+        $gh.comments['35'] = @(New-Comment 1 'owner' 'round 1 head=aaa tier=2 lenses=security,correctness,tests runs=1 confirmed=security outcome=needs-human' '2026-10-01T10:00:00Z')
+        $gh.prs += @(@{ number = 35; headRefName = 'pkt/pkt-03-api-endpoints'; state = 'OPEN' })
+        $nhRow = '{ "Kind": "round", "Round": 1, "Tier": "2", "Lenses": "security,correctness,tests", "Runs": "1", "Outcome": "needs-human" }'
+        $nhSoFar = & $estimate 'c1200' 'S' "[$nhRow]"
+        $nhTotal = & $estimate 'c1200' 'S' "[$nhRow, { `"Kind`": `"round`", `"Round`": 2, `"Tier`": `"2`", `"Lenses`": `"correctness`", `"Runs`": `"1`", `"Outcome`": `"fix`" }]"
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '35', '-Next', 'fix') + (& $at 'c1200')) $gh
+        Assert-That ($nhTotal -eq $ciFix -and $r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=$nhSoFar step=$($nhTotal - $nhSoFar) total=$nhTotal ") '-Next fix after a Needs human is priced as a CI fix: the fix run and a one-lens round at that round''s tier' "want so-far=$nhSoFar total=$nhTotal`n$($r.Text)"
         # After a fix round at tier 2, with no cap: its two confirmed lenses at tier 3, in round 2, one run each.
         $nextRow = { param($t, $runs) "[$row1, { `"Kind`": `"round`", `"Round`": 2, `"Tier`": `"$t`", `"Lenses`": `"security,correctness`", `"Runs`": `"$runs`", `"Outcome`": `"pass`" }]" }
         $tier3 = & $estimate 'c1200' 'S' (& $nextRow 3 2)
@@ -330,6 +338,34 @@ try {
 "@
         $m = [regex]::Match($p.Text, 'with=(?<a>\S+)\|without=(?<b>\S+)')
         Assert-That ($p.Code -eq 0 -and $m.Success -and $m.Groups['a'].Value -eq $m.Groups['b'].Value -and $m.Groups['a'].Value -eq '620/1/620/620') 'Get-PwCreditEstimate and Get-PwCreditSummary give the same totals with budget rows among the markers as without' $p.Text
+
+        Write-Host '  the default branch''s ceiling, when stricter'
+        # origin's default branch now sets 900 (and still trusts teammate). The bases above keep theirs.
+        $setMain = {
+            param($Ceiling)
+            $c = Get-Content -Raw -LiteralPath $cfgFile | ConvertFrom-Json -AsHashtable
+            $c.budget.maxCreditsPerPacket = $Ceiling
+            [System.IO.File]::WriteAllText($cfgFile, (ConvertTo-Json -InputObject $c -Depth 10), $utf8)
+            & $git commit -qam "main ceiling $Ceiling"
+            & $git push -q origin main
+        }
+        & $setMain 900
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c1200') + $round2 + @('-Json')) $gh
+        $j = try { $r.Text | ConvertFrom-Json } catch { $null }
+        Assert-That ($r.Code -eq 3 -and $j -and $j.Ceiling -eq 900 -and $j.CeilingFrom -eq 'default-branch' -and $j.BaseCeiling -eq 1200 -and $j.DefaultBranchCeiling -eq 900) 'a base ceiling of 1200 and 900 on the default branch: the stricter 900 holds, and -Json says where it came from' $r.Text
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c1200') + $round2) $gh
+        Assert-That ($r.Code -eq 3 -and $r.Text -match '(?m)^OVER so-far=620 step=394 total=1014 ceiling=900 \(config on origin/main\)$') 'the text line names the default branch''s config when its ceiling holds' $r.Text
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'off-nokey') + $round2) $gh
+        Assert-That ($r.Code -eq 3 -and $r.Text -match 'ceiling=900 \(config on origin/main\)') 'a base from before any ceiling (unset) is no longer OFF when the default branch sets one' $r.Text
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c500') + $round2) $gh
+        Assert-That ($r.Code -eq 3 -and $r.Text -match 'ceiling=500 \(config\)$') 'a base ceiling stricter than the default branch''s still holds' $r.Text
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '22') + (& $at 'c1200') + $round2) $gh
+        Assert-That ($r.Code -eq 0 -and $r.Text -match 'ceiling=2000 \(raised by teammate 2026-10-02\)') 'a trusted raise above both ceilings still raises' $r.Text
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Next', 'start') + (& $at 'c1200')) $ghFail
+        Assert-That ($r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=0 step=$start total=$start ceiling=900 \(config on origin/main\)$" -and $r.Calls.Count -eq 0) '-Next start reads the default branch''s ceiling from git, with no gh call' $r.Text
+        & $setMain '1500'
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c1200') + $round2) $gh
+        Assert-That ($r.Code -eq 2 -and $r.Text -match 'budget\.maxCreditsPerPacket must be a positive number' -and $r.Text -notmatch '(?m)^(WITHIN|OVER|OFF)') 'a broken ceiling on the default branch exits 2, never WITHIN' $r.Text
     }
     finally { Pop-Location }
 }
