@@ -356,6 +356,11 @@ try {
         Assert-That ($settledTotal - 620 -eq $ciFix - $passed -and $settledTotal -lt $tier3 -and $r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=620 step=$($ciFix - $passed) total=$settledTotal ") '-Next fix after a settled fix round prices a CI fix: the same step as after a passed round at that tier, with the settled round''s fix run still in so far' "want so-far=620 step=$($ciFix - $passed) total=$settledTotal (as a fix round: $tier3)`n$($r.Text)"
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '61', '-Next', 'fix') + (& $at 'c1200')) $gh
         Assert-That ($r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=620 step=$($ciFix - $passed) total=$settledTotal ") 'a settle request or a raise after the settle-check leaves the round settled' "want total=$settledTotal`n$($r.Text)"
+        # An untrusted round report after the settle-check is no round: the round stays settled.
+        $gh.comments['67'] = @($r1, (& $settleCheck 2 'owner'), (New-Comment 3 'mallory' 'round 2 head=bbb tier=2 lenses=security runs=1 confirmed=security outcome=fix' '2026-10-03T10:00:00Z'))
+        $gh.prs += @(@{ number = 67; headRefName = 'pkt/pkt-03-api-endpoints'; state = 'OPEN' })
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '67', '-Next', 'fix') + (& $at 'c1200')) $gh
+        Assert-That ($r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=620 step=$($ciFix - $passed) total=$settledTotal ") 'an untrusted round report after the settle-check doesn''t unsettle the round' "want total=$settledTotal`n$($r.Text)"
         # $tier3 is the round after a fix, as PR 21 (no settle) prices it: confirmed lenses at tier 2 + 1.
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21', '-Next', 'fix') + (& $at 'c1200')) $gh
         Assert-That ($r.Text -match "(?m)^(WITHIN|OVER) so-far=620 step=$($tier3 - 620) total=$tier3 ") 'an unsettled fix round still prices the round after a fix' "want total=$tier3`n$($r.Text)"
