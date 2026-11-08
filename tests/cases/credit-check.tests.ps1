@@ -335,6 +335,51 @@ try {
         & $newBase 'c5000' 5000
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21', '-Next', 'fix') + (& $at 'c5000')) $gh
         Assert-That ($tier3 -gt $tier2 -and $tier3 -ne $oneLens -and $r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=620 step=$($tier3 - 620) total=$tier3 ") '-Next fix after a fix round at tier 2 with no cap prices the next round at tier 3, with the confirmed lenses' "want total $tier3 (tier 2 would be $tier2, one lens $oneLens)`n$($r.Text)"
+        # A settled fix round (the narrow settle: a trusted settle-check after it, its findings sent to
+        # follow-ups): the next fix is a CI fix, priced as after a passed round at the same tier. So far still
+        # books the settled round's fix run, as Get-PwCreditEstimate (and progress -Credits) do.
+        $settleCheck = { param([int]$Id, [string]$Login) New-Comment $Id $Login 'settle-check head=aaa' '2026-10-02T09:00:00Z' }
+        $ciRow = '{ "Kind": "round", "Round": 2, "Tier": "2", "Lenses": "correctness", "Runs": "1", "Outcome": "fix" }'
+        $settledTotal = & $estimate 'c1200' 'S' "[$row1, $ciRow]"
+        $gh.comments['60'] = @($r1, (& $settleCheck 2 'teammate'))
+        # Settle requests and raises after the settle-check don't undo it: only a round report does.
+        $gh.comments['61'] = @($r1, (& $settleCheck 2 'owner'), (New-Comment 3 'owner' 'settle head=aaa' '2026-10-02T10:00:00Z'), (New-Comment 4 'teammate' 'budget max=1100' '2026-10-02T11:00:00Z'))
+        # Untrusted settle-checks: a login nobody trusts, and one only the base's trustedAuthors lists.
+        $gh.comments['62'] = @($r1, (& $settleCheck 2 'mallory'))
+        $gh.comments['63'] = @($r1, (& $settleCheck 2 'exmate'))
+        # A trusted settle request alone settles nothing: only the dispatcher's settle-check does.
+        $gh.comments['64'] = @($r1, (New-Comment 2 'owner' 'settle head=aaa' '2026-10-02T09:00:00Z'))
+        # A settle-check older than the newest round: listed after it, but with a smaller comment id.
+        $gh.comments['65'] = @((New-Comment 5 'owner' $round1Fix '2026-10-01T10:00:00Z'), (& $settleCheck 3 'owner'))
+        foreach ($n in 60..65) { $gh.prs += @(@{ number = $n; headRefName = 'pkt/pkt-03-api-endpoints'; state = 'OPEN' }) }
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '60', '-Next', 'fix') + (& $at 'c1200')) $gh
+        Assert-That ($settledTotal - 620 -eq $ciFix - $passed -and $settledTotal -lt $tier3 -and $r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=620 step=$($ciFix - $passed) total=$settledTotal ") '-Next fix after a settled fix round prices a CI fix: the same step as after a passed round at that tier, with the settled round''s fix run still in so far' "want so-far=620 step=$($ciFix - $passed) total=$settledTotal (as a fix round: $tier3)`n$($r.Text)"
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '61', '-Next', 'fix') + (& $at 'c1200')) $gh
+        Assert-That ($r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=620 step=$($ciFix - $passed) total=$settledTotal ") 'a settle request or a raise after the settle-check leaves the round settled' "want total=$settledTotal`n$($r.Text)"
+        # An untrusted round report after the settle-check is no round: the round stays settled.
+        $gh.comments['67'] = @($r1, (& $settleCheck 2 'owner'), (New-Comment 3 'mallory' 'round 2 head=bbb tier=2 lenses=security runs=1 confirmed=security outcome=fix' '2026-10-03T10:00:00Z'))
+        $gh.prs += @(@{ number = 67; headRefName = 'pkt/pkt-03-api-endpoints'; state = 'OPEN' })
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '67', '-Next', 'fix') + (& $at 'c1200')) $gh
+        Assert-That ($r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=620 step=$($ciFix - $passed) total=$settledTotal ") 'an untrusted round report after the settle-check doesn''t unsettle the round' "want total=$settledTotal`n$($r.Text)"
+        # $tier3 is the round after a fix, as PR 21 (no settle) prices it: confirmed lenses at tier 2 + 1.
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21', '-Next', 'fix') + (& $at 'c1200')) $gh
+        Assert-That ($r.Text -match "(?m)^(WITHIN|OVER) so-far=620 step=$($tier3 - 620) total=$tier3 ") 'an unsettled fix round still prices the round after a fix' "want total=$tier3`n$($r.Text)"
+        foreach ($c in @(@{ Pr = '62'; Why = 'a settle-check from an untrusted login changes nothing' },
+                @{ Pr = '63'; Why = 'nor one from a login only the base''s trustedAuthors lists' },
+                @{ Pr = '64'; Why = 'a trusted settle request with no settle-check changes nothing' },
+                @{ Pr = '65'; Why = 'a settle-check older than the newest round (a smaller comment id) changes nothing' })) {
+            $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', $c.Pr, '-Next', 'fix') + (& $at 'c1200')) $gh
+            Assert-That ($r.Text -match "(?m)^(WITHIN|OVER) so-far=620 step=$($tier3 - 620) total=$tier3 ") $c.Why "want total=$tier3`n$($r.Text)"
+        }
+        # A settle-check before a later round: the newest round, a fix, prices the round after it.
+        $round2Fix = 'round 2 head=bbb tier=2 lenses=security,correctness runs=2 confirmed=security,correctness outcome=fix'
+        $gh.comments['66'] = @($r1, (& $settleCheck 2 'owner'), (New-Comment 3 'owner' $round2Fix '2026-10-03T10:00:00Z'))
+        $gh.prs += @(@{ number = 66; headRefName = 'pkt/pkt-03-api-endpoints'; state = 'OPEN' })
+        $row2Fix = '{ "Kind": "round", "Round": 2, "Tier": "2", "Lenses": "security,correctness", "Runs": "2", "Outcome": "fix" }'
+        $after2 = & $estimate 'c1200' 'S' "[$row1, $row2Fix, { `"Kind`": `"round`", `"Round`": 3, `"Tier`": `"3`", `"Lenses`": `"security,correctness`", `"Runs`": `"2`", `"Outcome`": `"pass`" }]"
+        $ci2 = & $estimate 'c1200' 'S' "[$row1, $row2Fix, { `"Kind`": `"round`", `"Round`": 3, `"Tier`": `"2`", `"Lenses`": `"correctness`", `"Runs`": `"1`", `"Outcome`": `"fix`" }]"
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '66', '-Next', 'fix') + (& $at 'c1200')) $gh
+        Assert-That ($after2 -gt $ci2 -and $r.Text -match "(?m)^(WITHIN|OVER) .*total=$after2 ") 'a settle-check before a later fix round doesn''t settle that round' "want total=$after2 (a CI fix: $ci2)`n$($r.Text)"
         & $newBase 'cap2' 1200 -Edit { param($c) $c.review.tierCap = 2 }
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21', '-Next', 'fix') + (& $at 'cap2')) $gh
         Assert-That ($r.Code -eq 0 -and $r.Text -match "total=$tier2 ") 'with review.tierCap 2 at the base it stays at tier 2' "want total $tier2`n$($r.Text)"

@@ -52,6 +52,7 @@ Priority: **P0** the phase fails without it; **P1** planned; **P2** behind the c
 | PKT-7 | Recalculate the cost page and default rates for three tiers | P0 | M | W1 | PKT-1 | correctness, tests |
 | PKT-8 | Document plan-only mode, the solo profile and the ceiling | P1 | M | W3 | PKT-2, PKT-4, PKT-6, PKT-7 | security, correctness |
 | PKT-9 | Add e2e stages for plan-only, solo and the ceiling | P1 | S | W3 | PKT-2, PKT-4, PKT-6 | correctness, tests |
+| PKT-10 | Make every installer error exit 2 | P2 | S | W3 | PKT-4 | ops, tests |
 
 Human tasks: H-2 Calibrate credits per run on Copilot-hosted models (workstream 4); H-3 Release the phase as 0.2.0; H-4 Run the new e2e stages on a sandbox.
 
@@ -78,6 +79,7 @@ flowchart LR
   PKT2 --> PKT9[PKT-9 e2e stages]
   PKT4 --> PKT9
   PKT6 --> PKT9
+  PKT4 --> PKT10[PKT-10 installer exit codes]
   PKT8 --> H3[H-3 release 0.2.0]
   PKT9 --> H3
   PKT9 --> H4[H-4 run the e2e stages]
@@ -97,14 +99,15 @@ A packet's **wave** is when it can start (its dependencies' waves are earlier); 
 | W0 | 2026-11-02 | PKT-1 | Review and merge it as soon as it is done: five packets wait on it. |
 | W1 | 2026-11-04 | PKT-2, PKT-3, PKT-5, PKT-7 | Four PRs in parallel. Review PKT-3 and PKT-5 most closely: they change what the panel and the budget let through. |
 | W2 | 2026-11-09 | PKT-4, PKT-6 | Two PRs. Review PKT-6 most closely. |
-| W3 | 2026-11-12 | PKT-8, PKT-9 | Then H-4 (run the e2e stages), H-3 (release) and H-2 (calibration). |
+| W3 | 2026-11-12 | PKT-8, PKT-9, PKT-10 (P2) | Then H-4 (run the e2e stages), H-3 (release) and H-2 (calibration). PKT-10 waits in Backlog until you promote it. |
 
 ## Keeping parallel agents out of each other's way
 
 1. **Contracts first.** PKT-1 lands the keys, their defaults and checks, `Get-PwCreditCeiling`, `Get-PwAgentModelClass`, the kit's lens list and the `tests/cases/` folder. Later packets code against those names. Only PKT-7 touches `PacketWorkflow.ps1`, the default template or `tests/run-tests.ps1` again, and only for the credit rates and progress's rule for a finished packet.
 2. **Each packet owns paths.** Its Owns list is the only place its builder edits. Files that two packets need are owned in turn, through dependencies:
    - `PacketWorkflow.ps1`, `templates/packet-workflow.json` and `tests/run-tests.ps1`: PKT-1, then PKT-7;
-   - `install.ps1`: PKT-2, then PKT-4;
+   - `install.ps1`: PKT-2, then PKT-4, then PKT-10;
+   - `tests/cases/plan-only.tests.ps1`: PKT-2, then PKT-10 (its four installer exit codes only);
    - `skills/packet-review/SKILL.md` and its round report template: PKT-3, then PKT-6;
    - `README.md`: PKT-2, then PKT-8;
    - `docs/cost.md`: PKT-7, then PKT-8.
@@ -119,6 +122,7 @@ None. A packet that finds it needs a file another packet owns stops and asks the
 
 ## Cut line and fallbacks
 
+- **Behind the cut line from the start:** PKT-10, every installer error on exit 2 (the owner's decision in PKT-4's review). Nothing waits on it, and the release doesn't either. If it merges before H-3, the release notes say the installer's errors now exit 2 where some exited 1.
 - **Behind the cut line if the schedule slips:**
   - PKT-9, the e2e stages: the offline tests still cover the scripts. H-4 goes with it, H-3 drops both dependencies, and the release notes say the e2e stages haven't run.
   - PKT-3's `ModelCheck` field: the installer's warning in PKT-4 and the stop in PKT-6 still cover the Local harness.
