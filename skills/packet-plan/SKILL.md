@@ -51,7 +51,7 @@ Good packets make parallel work safe. Bad ones make agents edit the same files, 
 
 ## Rules for a good packet
 
-**Size.** One packet is one PR that one implementer finishes in one session and that a review panel can clear in at most three rounds. S is about 150 changed lines of logic, M about 400, L about 1,000. Nothing bigger: split it. Two to eight acceptance criteria. A packet with more is two packets.
+**Size.** One packet is one PR that one implementer finishes in one session and that a review panel can clear in at most `review.maxRounds` rounds. S is about 150 changed lines of logic, M about 400, L about 1,000. Nothing bigger: split it. Two to eight acceptance criteria. A packet with more is two packets.
 
 **Owns.** Backticked globs, one per bullet, relative to the repo root: `src/Billing/**`, `tests/Billing.Tests/**`. Include the packet's tests and its decision record. Use `!glob` to carve out a sub-folder another packet owns. Two packets that can run at the same time (neither depends on the other, directly or not) never own the same path. When two need the same file, one owns it and the other depends on it, or the file becomes a shared touchpoint.
 
@@ -70,6 +70,8 @@ Good packets make parallel work safe. Bad ones make agents edit the same files, 
 **Acceptance criteria.** Observable and testable, with the numbers that matter: "50 concurrent requests for distinct items create 50 rows and no duplicates", not "handles concurrency". Each one maps to an automated test, or for non-code packets to a command and its output. Write them as `- [ ] …`.
 
 **Tests to run.** The exact commands, scoped to the packet (`dotnet test --project tests/Billing.Tests`, `npm test -- billing`). Tests run offline and deterministically: external services behind fakes or recorded fixtures, time from an injected clock.
+
+**Review tier under a cap.** When the config sets `review.tierCap` (the solo profile sets 2), the panel reviews auth, migration, contract and concurrency changes at the standard tier unless told otherwise: only review machinery, `.gitattributes`, `review.deepPaths`, `review.maxPaths`, a diff of only lock or generated files, and a packet's own **Review tier** line still reach the top tier. So give a packet that changes auth, a migration or schema, a contract later packets consume, or concurrency a `- **Review tier:** 3` line, and say why in its Dispatcher notes. The line is read at the base, so a packet branch can't add or remove it.
 
 **Review lenses.** Pick from the catalog by risk surface; `correctness` always, `tests` for any code:
 

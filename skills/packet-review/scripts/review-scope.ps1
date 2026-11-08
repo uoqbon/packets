@@ -17,6 +17,19 @@
   round's marker) counts as 3. Project raises are matched on both sides of a rename, before the
   ignore list (lockfiles, minified and generated output), so a project can always raise a path.
 
+  review.tierCap (2 or 3, from the config at the base; null for no cap) caps the measured tier:
+  Floor = min(cap, measured), and Uncapped is the measured tier before the cap. These still reach
+  tier 3 whatever the cap (the forced reasons): review machinery, a .gitattributes change, a
+  review.deepPaths or review.maxPaths match, and a diff of only ignored files. The packet's
+  **Review tier** line still raises past the cap. A round is never below -PreviousTier, but the +1
+  for -FixedConfirmed stops at the cap unless a forced reason holds. Each raise the cap stops stays
+  in Reasons as "capped at <cap> by review.tierCap: <reason>".
+
+  ModelCheck (advisory, never an exit 2): the round's agent, its model class and packet-dispatcher's
+  (Get-PwAgentModelClass over the base config's models), and a Warning when the agent's class ranks
+  above the dispatcher's and the two classes list different models: VS Code's Local harness doesn't
+  start a subagent pinned to a dearer model than the session's.
+
   Lenses:
     round 1 (no -Since)  the packet's Review lenses + the lenses whose review.lensPaths match a changed path
                          + concurrency when added lines match review.concurrencyPattern; never empty
@@ -179,6 +192,8 @@ try {
     $baseSha = (Invoke-PwGit -C $root merge-base $Base $Head | Select-Object -First 1).Trim()
     # The config as it is at the base: a branch can't change its own tier raises or lens rules.
     $script:cfg = Get-PwConfig -Path $ConfigPath -Ref $(if ($ConfigPath) { '' } else { $baseSha })
+    # The tier cap, from the same config at the base (Get-PwConfig fills it: $null, 2 or 3), so a branch can't set it.
+    $cap = $cfg.review.tierCap
     # The project's lens directory (paths.lenses) is review machinery wherever it is configured.
     $lensDir = ConvertTo-PwRepoPath $cfg.paths.lenses
     if ($lensDir) { $machineryRe += '|^' + [regex]::Escape($lensDir) + '/' }
@@ -204,12 +219,16 @@ try {
     $docsPaths = [System.Collections.Generic.List[string]]::new()
     $opaqueAdded = [System.Collections.Generic.List[string]]::new()
     $opaqueNonDocs = [System.Collections.Generic.List[string]]::new()
+    $hitIgnoredForced = $null
     foreach ($r in $rows) {
         $sides = @($r.Path) + $(if ($r.Old) { @($r.Old) } else { @() })
         $hitMax = $sides | Where-Object { Test-Re $_ $cfg.review.maxPaths } | Select-Object -First 1
         $hitDeep = $sides | Where-Object { Test-Re $_ $cfg.review.deepPaths } | Select-Object -First 1
         if ($hitMax -and -not $flags.Contains('max')) { $flags['max'] = "project critical path: $hitMax" }
         if ($hitDeep -and -not $flags.Contains('deep')) { $flags['deep'] = "project deep path: $hitDeep" }
+        # Machinery or an attributes file the ignore list drops (a dist/ bundle under .github/actions) never
+        # raises the measured tier, as before; it still lifts the cap, so it rides along at tier 3 as it did.
+        if (-not $hitIgnoredForced) { $hitIgnoredForced = $sides | Where-Object { (Test-Re $_ $ignoreRe) -and ((Test-Re $_ $machineryRe) -or (Test-Re $_ '(^|/)\.gitattributes$' -IgnoreCase)) } | Select-Object -First 1 }
         if (-not $hitMax -and -not $hitDeep -and -not ($sides | Where-Object { -not (Test-Re $_ $ignoreRe) })) { $ignored++; continue }
         $files++
         $class = 'docs'
@@ -254,6 +273,10 @@ try {
             if (-not $flags.Contains('infra') -and (Test-Re $p $infraRe -IgnoreCase)) { $flags['infra'] = "infra/CI path: $p" }
         }
     }
+    # The forced reasons: these reach tier 3 whatever review.tierCap says.
+    $forced = $files -eq 0 -or [bool]$hitIgnoredForced -or @('machinery', 'attributes', 'max', 'deep' | Where-Object { $flags.Contains($_) }).Count -gt 0
+    # The indexes in Reasons of the raises the cap can stop (every raise to 3 that isn't forced).
+    $cappable = [System.Collections.Generic.List[int]]::new()
     if ($files -eq 0) {
         $tier = 3; $reasons = [System.Collections.Generic.List[string]]@("only ignored files ($ignored) changed; generated output still gets a deep look")
     }
@@ -277,23 +300,39 @@ try {
         elseif ($lines -le 50 -and $files -le 3 -and $controlAdded -eq 0) { $tier = 1; $reasons.Add("$lines lines in $files files, no added control flow") }
         else { $reasons.Add("code change: $lines lines in $files files, $controlAdded added control-flow lines") }
 
-        $raise = { param($t, $why) if ($script:tierNow -lt $t) { $script:tierNow = $t }; $reasons.Add($why) }
+        $raise = { param($t, $why, [switch]$Forced) if ($script:tierNow -lt $t) { $script:tierNow = $t }; if ($t -eq 3 -and -not $Forced) { $cappable.Add($reasons.Count) }; $reasons.Add($why) }
         $script:tierNow = $tier
         if ($flags.Contains('opaque')) { & $raise 2 $flags['opaque'] }
         if ($flags.Contains('junk')) { & $raise 2 $flags['junk'] }
         if ($lines -gt 300) { & $raise 3 "$lines lines > 300" }
         if ($files -gt 8) { & $raise 3 "$files files > 8" }
         if ($subsystems.Count -ge 2) { & $raise 3 "$($subsystems.Count) subsystems touched: $(@($subsystems) -join ' ')" }
-        foreach ($k in 'migration', 'contract', 'auth', 'infra', 'deep') { if ($flags.Contains($k)) { & $raise 3 $flags[$k] } }
+        foreach ($k in 'migration', 'contract', 'auth', 'infra') { if ($flags.Contains($k)) { & $raise 3 $flags[$k] } }
+        if ($flags.Contains('deep')) { & $raise 3 $flags['deep'] -Forced }
         if ($concHit) { & $raise 3 "concurrency in added lines: $($concHit.Substring(0, [Math]::Min(80, $concHit.Length)).Trim())" }
-        foreach ($k in 'machinery', 'attributes', 'max') { if ($flags.Contains($k)) { & $raise 3 $flags[$k] } }
+        foreach ($k in 'machinery', 'attributes', 'max') { if ($flags.Contains($k)) { & $raise 3 $flags[$k] -Forced } }
         $tier = $script:tierNow
     }
+    # The cap: the measured tier becomes min(cap, measured) unless a forced reason holds. With no cap, or
+    # cap 3, $limit is 3 and nothing below changes.
+    $uncapped = $tier
+    $limit = if ($null -ne $cap -and -not $forced) { [int]$cap } else { 3 }
+    if ($tier -gt $limit) {
+        $tier = $limit
+        foreach ($i in $cappable) { $reasons[$i] = "capped at $limit by review.tierCap: $($reasons[$i])" }
+    }
+    if ($null -ne $cap -and $cap -lt 3 -and $hitIgnoredForced -and $files -gt 0) { $reasons.Add("review.tierCap $cap not applied: review machinery or an attributes file among the ignored files: $hitIgnoredForced") }
     $floor = $tier
     if ($pk -and $pk.ReviewTier -and [Math]::Min(3, [int]$pk.ReviewTier) -gt $tier) { $tier = [Math]::Min(3, [int]$pk.ReviewTier); $reasons.Add("raised to $tier by $($pk.Id)'s Review tier line") }
     if ($PreviousTier -gt 0) {
         $carry = [Math]::Min(3, $PreviousTier + $(if ($FixedConfirmed) { 1 } else { 0 }))
-        if ($carry -gt $tier) { $tier = $carry; $reasons.Add("raised to ${tier}: the previous round ran at $PreviousTier$(if ($FixedConfirmed) { ', and its confirmed findings were fixed (+1)' })") }
+        # Never below the previous round's tier; the +1 alone stops at the cap (unless a forced reason holds).
+        $prevTier = [Math]::Min(3, $PreviousTier)
+        $plusCapped = $carry -gt $prevTier -and $carry -gt $limit
+        $wanted = $carry
+        if ($plusCapped) { $carry = [Math]::Max($prevTier, $limit) }
+        if ($carry -gt $tier) { $tier = $carry; $reasons.Add("raised to ${tier}: the previous round ran at $PreviousTier$(if ($FixedConfirmed -and -not $plusCapped) { ', and its confirmed findings were fixed (+1)' })") }
+        if ($plusCapped -and $wanted -gt $tier) { $reasons.Add("capped at $limit by review.tierCap: the previous round ran at $PreviousTier, and its confirmed findings were fixed (+1)") }
     }
 
     # ---- Lenses.
@@ -360,6 +399,23 @@ try {
         $agent = $legacyMax.Trim()
         $reasons.Add("review.agents.4 ($agent) runs tier 3: tiers 3 and 4 merged, so move it to review.agents.3")
     }
+    # ModelCheck: advisory only. A bad models.agents entry at the base goes into Warning, never an exit 2.
+    $modelCheck = [ordered]@{ Agent = $agent; AgentClass = $null; DispatcherClass = $null; Warning = $null }
+    try {
+        $rank = @{ light = 1; standard = 2; strong = 3 }
+        $dispatcherClass = Get-PwAgentModelClass -Models $cfg.models -Agent 'packet-dispatcher'
+        $modelCheck.DispatcherClass = $dispatcherClass
+        $agentClass = if ("$agent".Trim()) { Get-PwAgentModelClass -Models $cfg.models -Agent "$agent".Trim() } else { $null }
+        $modelCheck.AgentClass = $agentClass
+        if ($agentClass -and $dispatcherClass -and $rank[$agentClass] -gt $rank[$dispatcherClass]) {
+            $agentModels = @($cfg.models[$agentClass] | ForEach-Object { "$_".Trim() })
+            $dispatcherModels = @($cfg.models[$dispatcherClass] | ForEach-Object { "$_".Trim() })
+            if (($agentModels -join "`n") -cne ($dispatcherModels -join "`n")) {
+                $modelCheck.Warning = "$agent runs on the $agentClass class ($($agentModels -join ', ')) and packet-dispatcher on the $dispatcherClass class ($($dispatcherModels -join ', ')): VS Code's Local harness doesn't start a subagent pinned to a dearer model than the session's, so this round's reviewers may be refused there. Run the dispatcher's session on a $agentClass-class model, or make the two classes list the same models."
+            }
+        }
+    }
+    catch { $modelCheck.Warning = "the model check couldn't read the base config's models: $($_.Exception.Message)" }
     # Reviewer runs: review.lensesPerReviewer lenses each, neighbours in lensOrder. Pairs: the runs started
     # together (review.maxParallelLenses at a time), each run written as its lenses joined with '+'.
     $per = [int]$cfg.review.lensesPerReviewer
@@ -367,7 +423,7 @@ try {
     $runs = @(for ($i = 0; $i -lt $ordered.Count; $i += $per) { , @($ordered[$i..([Math]::Min($i + $per, $ordered.Count) - 1)]) })
     $runNames = @($runs | ForEach-Object { $_ -join '+' })
     $result = [pscustomobject]@{
-        Tier = $tier; Name = $tierNames[$tier]; Agent = $agent; Floor = $floor
+        Tier = $tier; Name = $tierNames[$tier]; Agent = $agent; Floor = $floor; Uncapped = $uncapped
         Base = $baseSha.Substring(0, 12); Head = $headSha.Substring(0, 12); HeadSha = $headSha; BaseSha = $baseSha
         Files = $files; Lines = $lines
         Breakdown = [ordered]@{ code = $code; tests = $tests; docs = $docs; config = $config; ignored = $ignored }
@@ -378,19 +434,21 @@ try {
         # The panel's limits, from the config at the base like everything above: never the checkout's copy.
         Settings = [ordered]@{
             MaxRounds = [int]$cfg.review.maxRounds; ShouldFixPassFromRound = [int]$cfg.review.shouldFixPassFromRound
-            MaxParallelLenses = $par; LensesPerReviewer = $per
+            MaxParallelLenses = $par; LensesPerReviewer = $per; TierCap = $cap
         }
+        ModelCheck = $modelCheck
     }
     if ($Json) { $result | ConvertTo-Json -Depth 6 }
     else {
-        Write-Output "TIER=$tier ($($tierNames[$tier])) AGENT=$agent FLOOR=$floor"
+        Write-Output "TIER=$tier ($($tierNames[$tier])) AGENT=$agent FLOOR=$floor$(if ($uncapped -ne $floor) { " UNCAPPED=$uncapped (review.tierCap $cap)" })"
         Write-Output "BASE=$($result.Base) HEAD=$($result.Head) FILES=$files LINES=$lines (code $code, tests $tests, docs $docs, config $config, ignored $ignored)"
         Write-Output 'REASONS (a floor: raise it with a reason, never lower it):'
         foreach ($r in $reasons) { Write-Output "  - $r" }
         Write-Output "LENSES=$($ordered -join ',')"
         foreach ($r in $lensWhy) { Write-Output "  - $r" }
         if ($per -gt 1) { Write-Output "RUNS=$($runNames -join ',') ($($runs.Count) reviewer runs, up to $per lenses each)" }
-        Write-Output "SETTINGS=maxRounds $($result.Settings.MaxRounds), should-fix-only rounds pass from round $($result.Settings.ShouldFixPassFromRound), $par reviewer runs at a time, $per lens(es) per run"
+        Write-Output "SETTINGS=maxRounds $($result.Settings.MaxRounds), should-fix-only rounds pass from round $($result.Settings.ShouldFixPassFromRound), $par reviewer runs at a time, $per lens(es) per run$(if ($null -ne $cap) { ", tier cap $cap" })"
+        if ($modelCheck.Warning) { Write-Output "MODEL CHECK: $($modelCheck.Warning)" }
     }
 }
 catch [PwError] {
