@@ -47,14 +47,14 @@ function global:gh {
 }
 '@
 
-function Invoke-WithGh([string]$Script, [string[]]$ScriptArgs, [hashtable]$Gh) {
+function Invoke-WithGh([string]$Script, [string[]]$ScriptArgs, [hashtable]$Gh, [string]$Prelude = '') {
     <# Runs a kit script in a probe with the gh stub; returns Code, Text and the gh calls it made. #>
     $data = Join-Path $tmp "gh-$([guid]::NewGuid().ToString('n')).json"
     [System.IO.File]::WriteAllText($data, (ConvertTo-Json -InputObject $Gh -Depth 10), $utf8)
     Remove-Item -LiteralPath $ghLog -ErrorAction SilentlyContinue
     # Parameter names go in bare: quoted, '-Pr' would be a positional string.
     $argText = ($ScriptArgs | ForEach-Object { if ($_ -cmatch '^-[A-Za-z]+$') { $_ } else { & $quote $_ } }) -join ' '
-    $body = $ghStub.Replace('@DATA@', (& $quote $data)).Replace('@LOG@', (& $quote $ghLog)) + "`n& $(& $quote $Script) $argText`nexit `$LASTEXITCODE"
+    $body = $ghStub.Replace('@DATA@', (& $quote $data)).Replace('@LOG@', (& $quote $ghLog)) + "`n$Prelude`n& $(& $quote $Script) $argText`nexit `$LASTEXITCODE"
     $r = Invoke-CaseProbe $body
     $calls = @(if (Test-Path -LiteralPath $ghLog) { Get-Content -LiteralPath $ghLog })
     [pscustomobject]@{ Code = $r.Code; Text = $r.Text; Calls = $calls }
@@ -154,7 +154,7 @@ try {
         Assert-That ($r.Code -eq 0 -and $r.Text -match '(?m)^OFF' -and $r.Calls.Count -eq 0) 'with maxCreditsPerPacket null it prints OFF and exits 0, with no gh call, for a packet with no file at the base' "$($r.Text)`ncalls: $($r.Calls -join ' | ')"
         $r = Invoke-Check (@('-Packet', 'PKT-99', '-Base', 'main', '-Next', 'fix', '-Json')) $ghFail
         $j = try { $r.Text | ConvertFrom-Json } catch { $null }
-        Assert-That ($r.Code -eq 0 -and $j -and $j.Result -eq 'OFF' -and $r.Calls.Count -eq 0) 'OFF in -Json, -Next fix, no gh call' $r.Text
+        Assert-That ($r.Code -eq 0 -and $j -and $j.Result -eq 'OFF' -and $r.Calls.Count -eq 0 -and @($j.PSObject.Properties.Name) -contains 'Ceiling' -and $null -eq $j.Ceiling) 'OFF in -Json, -Next fix, no gh call, with the same fields as WITHIN (null)' $r.Text
         & $newBase 'off-nokey' $null -Edit { param($c) $c.budget.Remove('maxCreditsPerPacket') }
         & $newBase 'off-notable' $null -Edit { param($c) $c.budget = 5 }
         & $newBase 'off-list' $null -Edit { param($c) $c.budget = @(1500) }
@@ -258,6 +258,34 @@ try {
         Assert-That ($r.Code -ne 0 -and $r.Code -ne 3 -and $r.Text -notmatch '(?m)^(WITHIN|OVER|OFF)') '-Round abc exits non-zero, never 0 or 3' "exit $($r.Code): $($r.Text)"
         $r = Invoke-Kit $creditCheck @('-Packet', 'PKT-03', '-Base', 'c1200', '-Next', 'later')
         Assert-That ($r.Code -ne 0 -and $r.Code -ne 3) 'a -Next that isn''t start, round or fix exits non-zero, never 0 or 3' "exit $($r.Code): $($r.Text)"
+
+        Write-Host '  origin''s default branch must be readable'
+        # A clone of the case repository: its origin is the case repository, with every base as origin/<name>.
+        $clone = Join-Path $tmp 'clone'
+        & $git clone -q $caseRepo $clone
+        Push-Location -LiteralPath $clone
+        try {
+            & $git switch -q -c c1200 origin/c1200
+            # origin/HEAD at a branch whose config says defaultBranch main: Get-PwSharedConfig warns. The
+            # warning goes to stderr, so -Json on stdout still parses (stderr is dropped in the probe).
+            & $git remote set-head origin c1200
+            $r = Invoke-WithGh $creditCheck (@('-Packet', 'PKT-03', '-Pr', '21', '-Base', 'c1200') + $round2 + @('-Json')) $gh '[Console]::SetError([System.IO.TextWriter]::Null)'
+            $j = try { $r.Text | ConvertFrom-Json } catch { $null }
+            Assert-That ($r.Code -eq 0 -and $j -and $j.Result -eq 'WITHIN') 'a config warning doesn''t reach stdout: -Json still parses' $r.Text
+            $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21', '-Base', 'c1200') + $round2) $gh
+            Assert-That ($r.Code -eq 0 -and $r.Text -match "credit-check: warning: config says defaultBranch 'main'") 'the warning is on stderr' $r.Text
+            # origin's default branch with no config: the working tree must not stand in for it.
+            & $git remote set-head origin no-config
+            $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21', '-Base', 'c1200') + $round2) $gh
+            Assert-That ($r.Code -eq 2 -and $r.Text -match 'no \.github/packet-workflow\.json on origin/no-config') 'origin''s default branch without a config exits 2' $r.Text
+            # No origin at all: trust would otherwise come from the checkout.
+            & $git remote remove origin
+            $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21', '-Base', 'c1200') + $round2) $ghFail
+            Assert-That ($r.Code -eq 2 -and $r.Text -match 'no origin here' -and $r.Calls.Count -eq 0) 'with no origin it exits 2 before any gh call' $r.Text
+            $r = Invoke-Check (@('-Packet', 'PKT-03', '-Base', 'c1200', '-Next', 'start')) $ghFail
+            Assert-That ($r.Code -eq 2 -and $r.Text -match 'no origin here') 'with no origin even -Next start exits 2' $r.Text
+        }
+        finally { Pop-Location }
 
         Write-Host '  -Next fix and -Next start'
         # After a passed round (a CI fix): the fix run, which no marker books, plus a one-lens round at tier 2.

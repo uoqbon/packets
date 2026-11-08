@@ -77,6 +77,13 @@ function Get-CcTier($Row) {
     3
 }
 
+function Invoke-CcQuiet([scriptblock]$Block) {
+    <# Runs a config read with its warnings on stderr, so stdout stays the result line (or the JSON). #>
+    & $Block 3>&1 | ForEach-Object {
+        if ($_ -is [System.Management.Automation.WarningRecord]) { [Console]::Error.WriteLine("credit-check: warning: $($_.Message)") } else { $_ }
+    }
+}
+
 try {
     # ---- The arguments' shape, before anything is read: a caller's mistake shows even with no ceiling.
     if (-not $Packet) { Stop-Pw 'usage: -Packet <ID> is required' }
@@ -115,10 +122,16 @@ try {
     # that would let a branch set its own ceiling, so a base without one is an error.
     & git -C $root cat-file -e "${baseSha}:.github/packet-workflow.json" 2>$null
     if ($LASTEXITCODE -ne 0) { Stop-Pw "no .github/packet-workflow.json at the base $($baseSha.Substring(0, 7)), so no ceiling can be read there" }
-    $cfg = Get-PwConfig -Ref $baseSha
+    $cfg = Invoke-CcQuiet { Get-PwConfig -Ref $baseSha }
     # The default branch's config: who is trusted, and a second ceiling. The stricter of the two holds, so
     # an old merge base (from before a ceiling was set or lowered) can't loosen it. Read from git only.
-    $shared = Get-PwSharedConfig
+    # Get-PwSharedConfig falls back to the working tree (the branch's checkout) without an origin, and
+    # Get-PwConfig does when that branch has no config: both are errors here.
+    $remoteRef = Get-PwDefaultRemoteRef
+    if (-not $remoteRef) { Stop-Pw "no origin here, so origin's default branch, which decides who is trusted, can't be read" }
+    & git -C $root cat-file -e "${remoteRef}:.github/packet-workflow.json" 2>$null
+    if ($LASTEXITCODE -ne 0) { Stop-Pw "no .github/packet-workflow.json on $remoteRef, so who is trusted, and its ceiling, can't be read there" }
+    $shared = Invoke-CcQuiet { Get-PwSharedConfig }
     # Get-PwCreditCeiling's rule for unset, read here so an install without a ceiling never reaches the
     # packet file, the PR or the rates.
     $isUnset = {
@@ -129,7 +142,15 @@ try {
     $baseUnset = & $isUnset $cfg
     $sharedUnset = & $isUnset $shared
     if ($baseUnset -and $sharedUnset) {
-        if ($Json) { [pscustomobject]@{ Result = 'OFF'; Packet = $Packet; Next = $Next; Base = $baseSha } | ConvertTo-Json }
+        if ($Json) {
+            # The same fields as WITHIN and OVER, so a reader that skips Result doesn't trip on a missing one.
+            [pscustomobject]@{
+                Result = 'OFF'; Packet = $Packet; Size = $null; Next = $Next; Pr = $null; Base = $baseSha
+                SoFar = $null; Step = $null; Total = $null; Ceiling = $null; ConfigCeiling = $null
+                CeilingFrom = $null; BaseCeiling = $null; DefaultBranchCeiling = $null
+                Source = $null; RaisedBy = $null; RaisedAt = $null
+            } | ConvertTo-Json
+        }
         else { Write-Output "OFF (no budget.maxCreditsPerPacket at the base or on origin/$($shared.defaultBranch))" }
         exit 0
     }
