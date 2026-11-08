@@ -370,7 +370,7 @@ Credits per packet under the solo profile:
 
 **A packet forced to tier 3** adds about 145 (S), 305 (M) or 530 (L) to a typical one. That is what the cap saves on an M or L packet, which would otherwise run at tier 3 throughout: about 24% of an M and 27% of an L. An S packet starts at tier 2 anyway, so on S the cap saves only round 2's step up to tier 3, about 55.
 
-**The ceiling.** The profile's ceilings, S 950, M 1,500 and L 2,200, are about 1.5× a typical packet. A packet that isn't forced stays under them through its two rounds, and through a CI fix after them. A packet forced to tier 3 stays under them through its two rounds, but a CI fix after them takes it over (S about 1,090, M 1,630, L 2,430), and so do one or two lenses more than the typical shape. It then waits at Needs human for the owner's answer. `credit-check.ps1` counts no resume share, so its figures are about 20 below the table's.
+**The ceiling.** The profile's ceilings, S 950, M 1,500 and L 2,200, are about 1.5× a typical packet. A packet that isn't forced stays under them through its two rounds, and through a CI fix after them. A packet forced to tier 3 stays under them through its two rounds, but a CI fix after them takes it over (S about 1,090, M 1,630, L 2,430), and so do one or two lenses more than the typical shape. It then waits at Needs human for the owner's answer. `credit-check.ps1` counts no resume share, so its figures are about 20 below the table's. These ceilings stay as they are until the rates are measured ([Calibrate](#calibrate)). Revisit them then, with how often a forced packet needs a CI fix in mind.
 
 A 10-packet phase (3 S, 5 M, 2 L), with `packet-plan`, board and progress at about 350 as above:
 
