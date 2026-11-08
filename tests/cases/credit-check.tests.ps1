@@ -212,6 +212,11 @@ try {
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '29') + (& $at 'c900') + @('-Next', 'round', '-Round', '3', '-Tier', '3', '-Lenses', 'correctness', '-Runs', '1')) $gh
         Assert-That ($r.Code -eq 0 -and $r.Text -match 'ceiling=2000 \(raised by teammate 2026-10-02\)') 'a raise holds for the rest of the packet, past later rounds' $r.Text
 
+        # The newest raise wins even when it is lower than an older one (the owner's decision on #35).
+        $gh.comments['36'] = @($r1, (New-Comment 2 'teammate' 'budget max=3000' '2026-10-02T08:00:00Z'), (New-Comment 3 'owner' 'budget max=1000' '2026-10-03T08:00:00Z'))
+        $gh.prs += @(@{ number = 36; headRefName = 'pkt/pkt-03-api-endpoints'; state = 'OPEN' })
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '36') + (& $at 'c900') + $round2) $gh
+        Assert-That ($r.Code -eq 3 -and $r.Text -match '(?m)^OVER so-far=620 step=394 total=1014 ceiling=1000 \(raised by owner 2026-10-03\)$') 'the newest raise wins, even below an older one: max=3000 then max=1000 gives a ceiling of 1000' $r.Text
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '32') + (& $at 'c900') + $round2) $gh
         Assert-That ($r.Code -eq 3 -and $r.Text -match 'ceiling=900 \(config\)') 'a trusted comment that quotes a raise below its first line raises nothing' $r.Text
 
