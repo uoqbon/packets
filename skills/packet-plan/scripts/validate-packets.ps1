@@ -218,6 +218,9 @@ try {
     $knownLenses = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $lensDir = Join-Path $PSScriptRoot '../../packet-review/lenses'
     $projectLensDir = Join-Path $cfg.repoRoot $cfg.paths.lenses
+    # A plan-only install has no packet-review skill next to this one: the kit's lens names come from
+    # PacketWorkflow.ps1 instead.
+    if (-not (Test-Path -LiteralPath $lensDir -PathType Container)) { foreach ($l in $script:KitLenses) { [void]$knownLenses.Add($l) } }
     foreach ($dir in @($lensDir, $projectLensDir)) {
         if ($dir -and (Test-Path -LiteralPath $dir)) { foreach ($f in (Get-ChildItem -LiteralPath $dir -Filter '*.md')) { [void]$knownLenses.Add($f.BaseName) } }
     }

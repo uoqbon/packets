@@ -16,7 +16,7 @@ Commands run from the repository root. Kit scripts run only from a **pinned kit*
 2. **Lenses per reviewer run:** `review.lensesPerReviewer` (1). With 2 or 3, one reviewer run covers that many neighbouring lenses, as review-scope groups them (`Runs`); every lens still runs.
 3. **Concurrency:** at most `review.maxParallelLenses` (2) reviewer runs at once. A **pair** is the runs started together: launch them, wait for all of them, then the next pair.
 4. **Rounds:** at most `review.maxRounds` (3) per PR. Nothing changed after the last round merges unreviewed. From round `review.shouldFixPassFromRound` on (by default the last round), a round whose confirmed findings are all should-fix passes with follow-ups (§5).
-5. **Tier floor:** every lens runs on the reviewer agent for the round's tier (§1), or a higher one. Never lower.
+5. **Tier floor:** every lens runs on the reviewer agent for the round's tier (§1), or a higher one. Never lower. Under a `review.tierCap` of 2, the measured tier stops at 2, except where the top tier is forced: review machinery, a `.gitattributes` change, a `review.deepPaths` or `review.maxPaths` match, a diff of only ignored files, and the packet's **Review tier** line (§1).
 
 These settings come from review-scope's `Settings` (§1), which reads the config at the base, never from the PR's checkout: a packet branch can't relax its own panel.
 
@@ -37,7 +37,11 @@ pwsh -File <kit>/.github/skills/packet-review/scripts/review-scope.ps1 -Base ori
 
 For rounds 2 and later add what the previous round's report says: `-Since <its head> -PreviousTier <its tier>`, and, when its outcome was `fix`, `-Confirmed <its confirmed=, as written, e.g. security,data>` and `-FixedConfirmed` (the commits since then fix those findings). After a round that **passed** (a CI fix, a conflict resolution or a re-targeted stack brings the PR back), pass `-Confirmed -` and no `-FixedConfirmed`: its should-fix findings went to follow-up issues and were left unfixed on purpose, so the new round reviews what changed, not those findings.
 
-It returns `Tier`, `Agent`, `Reasons`, `Lenses` (riskiest first), `Runs` (the lenses each reviewer run covers), `Pairs` (the runs started together, each written as its lenses joined with `+`) and `Settings` (the limits above, from the config at the base). The tier is a **floor**: it measures the diff (size, files, subsystems, migrations, contracts, auth, infrastructure, concurrency, review machinery, the project's critical paths), applies the packet's **Review tier** line, and for later rounds keeps the previous tier, plus one after confirmed findings were fixed, up to tier 3, the top. You may raise it with a reason (say, the change can lose data or money); never lower it. Exit 3: nothing changed, so there is no round. Exit 2: stop and report; never guess a tier.
+It returns `Tier`, `Agent`, `Floor`, `Uncapped`, `Reasons`, `Lenses` (riskiest first), `Runs` (the lenses each reviewer run covers), `Pairs` (the runs started together, each written as its lenses joined with `+`), `Settings` (the limits above and `TierCap`, from the config at the base) and `ModelCheck`. The tier is a **floor**: it measures the diff (size, files, subsystems, migrations, contracts, auth, infrastructure, concurrency, review machinery, the project's critical paths), applies the packet's **Review tier** line, and for later rounds keeps the previous tier, plus one after confirmed findings were fixed, up to tier 3, the top. You may raise it with a reason (say, the change can lose data or money); never lower it. Exit 3: nothing changed, so there is no round. Exit 2: stop and report; never guess a tier.
+
+**The tier cap.** With `review.tierCap` 2 in the config at the base (the solo profile; a packet branch can't set it), the measured tier stops at 2: `Floor` is the capped tier and `Uncapped` the tier before the cap, and each raise the cap stopped stays in `Reasons` as `capped at 2 by review.tierCap: <reason>`. These still reach tier 3 whatever the cap: review machinery, a `.gitattributes` change, a `review.deepPaths` or `review.maxPaths` match, and a diff of only ignored files (lock or generated files). The packet's **Review tier** line still raises past the cap, so deep review for auth, migrations, contracts and concurrency comes from that line and from `deepPaths`. A later round never drops below the previous round's tier, but the +1 after fixed findings stops at the cap unless a forced reason holds. The cap only lowers what the diff measures: your own raise with a reason still stands.
+
+**The model check.** `ModelCheck` names the round's agent, its model class and packet-dispatcher's. When its `Warning` is set, tell the owner what it says before the first pair: in VS Code's Local harness, a reviewer pinned to a dearer model than the session's doesn't start. It is advisory: carry on with the round unless the owner says otherwise. It checks only the agent review-scope picked: if you raise the tier yourself, compare that agent's class with packet-dispatcher's in the same way, and tell the owner first when it ranks higher and its class lists different models.
 
 | Tier | Agent | Effort | Remit |
 | --- | --- | --- | --- |
@@ -56,7 +60,7 @@ Reviewers run on the models their agent files pin. If your subagent tool asks fo
 Each reviewer gets this prompt, filled in. It names the packet and the lens texts by the commands that print them, rather than pasting them: the reviewer reads them itself, and the panel's own context stays small.
 
 ```text
-Review tier: <tier> <name> (floor <floor>). Reasons: <review-scope reasons, plus any raise and why>
+Review tier: <tier> <name> (floor <floor><, capped from <uncapped> when Uncapped differs from Floor>). Reasons: <review-scope reasons, plus any raise and why>
 Lens: <lens>. <or, for a run of several:> Lenses: <a>, <b>. Take them one at a time.
 Review only through <this lens / these lenses>; these lenses run separately this round: <the others>.
 Packet: <ID> "<title>". PR #<pr>. Round <N> of <maxRounds>.
