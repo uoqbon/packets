@@ -88,3 +88,4 @@ This doesn't go in `CHANGELOG.md` here: VERSION and the changelog belong to the 
 - The 0.4-per-extra-lens factor stays until H-2 measures it.
 - The solo profile and the per-seat table are PKT-8's. Measured rates are H-2's.
 - `VERSION` and `CHANGELOG.md` are untouched.
+- `README.md` is outside PKT-7's Owns. Its Configure row for `budget.creditsPerRun` (line 102 at this merge) still says the defaults price "tier 3 at what tier 4 cost before the two merged". On the new defaults tier 3 costs half of that. The owner decided on 2026-11-08 that PKT-8, which owns the README, fixes the line. The row should say the defaults are GPT-6.1 Sol's rates from cost.md.
