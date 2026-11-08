@@ -29,7 +29,7 @@ The README and the cost page say what the phase built and what it trades. They c
     - the packet's **Review tier** line.
 
     A branch can't set the cap, and a config change is machinery.
-  - **Amended: "A packet branch can't weaken its own review".** The cap and the ceiling come from the config at the base. A raise counts only as a trusted `packet:budget` comment.
+  - **Amended: "A packet branch can't weaken its own review".** The cap comes from the config at the base. The ceiling is the stricter of the base's and the default branch's, and the credit check prices with both configs and keeps the higher total (PKT-5). A raise counts only as a trusted `packet:budget` comment.
   - **Amended: "A failed check never counts as a pass".** A credit check that exits 2 stops the dispatch, and a reviewer the host refuses stops the round with no report.
 - **README, Copilot specifics → Models.** This replaces "run the dispatcher on a model at least as capable as packet-reviewer-deep's". In the Local harness, a subagent whose model is in a higher cost tier than the session's doesn't run. The kit then stops the round at Needs human, and the installer warns about the setups where that can happen.
 - **README, Use:** the Needs human kinds for the budget and for a refused reviewer, and the settle that passes a round's findings as follow-ups after a budget stop before a fix.
