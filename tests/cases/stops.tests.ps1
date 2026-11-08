@@ -92,7 +92,7 @@ Assert-Phrases $rounds @(
     'Every implementer run after the PR opens goes through **Fix**, so its credit check runs first.'
     'That includes step 9.3''s CI fix after a round that passed, which credit-check prices as a CI fix'
     'and a fix the owner asks for in answer to a **Needs human**, priced the same way.'
-    'After a settled round (**Settle**, before the last round) the script prices a CI fix as the round after a fix instead: a dearer estimate, never an error.'
+    'After a settled round (**Settle**, before the last round), whose marker still says `outcome=fix`, the script prices a CI fix the same way, as it would after a round that passed.'
     'Every other round goes through the panel, whose own check (`-Next round`, packet-review §1) runs before its first pair'
     'step 9.2''s round for a conflict resolution, **Amend**''s round') '§8 says the CI fix, the conflict round and Amend''s round are each covered'
 Assert-Phrases $handOff @('fix it like a review finding (step 8, **Fix**: the credit check, the implementer, push, a round for the fix)') '§9.3''s CI fix goes through §8 Fix'
@@ -168,10 +168,12 @@ function global:gh {
 $roundComment = { param([int]$Id, [string]$Marker) @{ id = $Id; user = @{ login = 'owner' }; body = "``packet:$Marker```n### Review panel"; created_at = '2026-11-01T10:00:00Z'; html_url = "https://example.test/c/$Id" } }
 $gh = @{
     login    = 'owner'
-    prs      = @(@{ number = 21; headRefName = 'pkt/pkt-03-api-endpoints' }, @{ number = 27; headRefName = 'pkt/pkt-03-api-endpoints' })
+    prs      = @(@{ number = 21; headRefName = 'pkt/pkt-03-api-endpoints' }, @{ number = 27; headRefName = 'pkt/pkt-03-api-endpoints' }, @{ number = 28; headRefName = 'pkt/pkt-03-api-endpoints' })
     comments = @{
         '21' = @(& $roundComment 1 'round 1 head=aaa tier=2 lenses=security,correctness runs=2 confirmed=security outcome=fix')
         '27' = @(& $roundComment 1 'round 1 head=aaa tier=2 lenses=security,correctness runs=2 confirmed=- outcome=pass')
+        # Round 1 settled by the narrow settle: its marker still says outcome=fix, and a settle-check follows.
+        '28' = @((& $roundComment 1 'round 1 head=aaa tier=2 lenses=security,correctness runs=2 confirmed=security outcome=fix'), (& $roundComment 2 'settle-check head=aaa'))
     }
 }
 $runCheck = {
@@ -212,6 +214,10 @@ try {
         $ciFixArgs = @($fixArgs | ForEach-Object { if ($_ -eq '21') { '27' } else { $_ } })
         $r = & $runCheck $ciFixArgs
         Assert-That ($r.Code -eq 0 -and $r.Text -match '^WITHIN ') 'a CI fix after a passed round goes through §8 Fix''s check without an error' $r.Text
+        $passedStep = [regex]::Match($r.Text, ' step=(\S+) ').Groups[1].Value
+        $r = & $runCheck @($fixArgs | ForEach-Object { if ($_ -eq '21') { '28' } else { $_ } })
+        $settledStep = [regex]::Match($r.Text, ' step=(\S+) ').Groups[1].Value
+        Assert-That ($r.Code -eq 0 -and $r.Text -match '^WITHIN ' -and $passedStep -and $settledStep -eq $passedStep) 'a CI fix after a settled round is priced as after a passed one: the same step (§8)' "passed step=$passedStep`n$($r.Text)"
         & $setCeiling 1
         $r = & $runCheck $startArgs
         Assert-That ($r.Code -eq 3 -and $r.Text -match '^OVER ') 'under a ceiling no packet meets, Select''s check prints OVER and exits 3' $r.Text
