@@ -75,7 +75,10 @@ try {
     Assert-That ($r.Code -eq 0 -and (Test-Path (Join-Path $models '.github/skills/packet-board/scripts/board.ps1')) -and -not (Test-Path (Join-Path $models '.github/agents'))) '-PlanOnly succeeds with "models": { "strong": [] }' $r.Text
     $before = Get-Snapshot $models
     $r = Invoke-Kit $installer @('-Target', $models)
-    Assert-That ($r.Code -eq 1 -and $r.Text -match 'models\.strong in \.github/packet-workflow\.json must name at least one model' -and (Get-Snapshot $models) -ceq $before) 'without -PlanOnly the same config still fails as it does today, writing nothing' $r.Text
+    # pwsh wraps a thrown message to the console width, inside a coloured "|" gutter (CI's runners do), so
+    # match it with the colours, the gutter and the line breaks taken out.
+    $flat = ($r.Text -replace "`e\[[0-9;]*m", '' -replace '\s*\n\s*\|?\s*', ' ')
+    Assert-That ($r.Code -eq 1 -and $flat -match 'models\.strong in \.github/packet-workflow\.json must name at least one model' -and (Get-Snapshot $models) -ceq $before) 'without -PlanOnly the same config still fails as it does today, writing nothing' $r.Text
     Assert-That ($r.Text -notmatch 'makes the plan-only install full') 'and, stopping on the models map, it doesn''t first claim to make the install full' $r.Text
 
     Write-Host '  -WithInstructions in plan-only mode'
