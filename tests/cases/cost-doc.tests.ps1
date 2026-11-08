@@ -222,6 +222,30 @@ foreach ($row in $seats) {
 }
 Assert-That ($seen['Pro'] -eq 1500 -and $seen['Business'] -eq 1900 -and $seen['Enterprise'] -eq 3900) 'the seat table gives packets a month for Pro 1,500, Business 1,900 and Enterprise 3,900' (($seen.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)" }) -join ', ')
 Assert-That ($inShort -match "about $(& $fmt $soloPer) credits all in" -and $inShort -match "about $([Math]::Round(1500 / $soloPer, 1)) packets a month on Pro, $([Math]::Round(1900 / $soloPer, 1)) on Business") 'the "In short" solo bullet gives the solo per-packet figure and packets a month' $inShort
+Assert-That ($inShort -match "and $([Math]::Round(3900 / $soloPer)) on Enterprise") 'the "In short" solo bullet gives Enterprise''s packets a month too' $inShort
+$capOk = $costText -match 'about (\d+)% of an M and (\d+)% of an L' -and [int]$Matches[1] -eq [Math]::Round(100 * ($soloRow['M forced'] - $soloRow['M typical']) / $soloRow['M forced']) -and [int]$Matches[2] -eq [Math]::Round(100 * ($soloRow['L forced'] - $soloRow['L typical']) / $soloRow['L forced'])
+Assert-That $capOk 'the cap''s saving on M and L is what forcing adds, as a share of the forced packet' ''
+# On S the cap saves only round 2's step from tier 2 to 3: a one-run, two-lens later round.
+$sStep = (98 - 50) * 1.4 * 0.85
+Assert-That ($costText -match 'on S the cap saves only round 2''s step up to tier 3, about (\d+)' -and [Math]::Abs([int]$Matches[1] - $sStep) -le 5) "the cap's saving on S is round 2's step to tier 3 ($sStep)" ''
+$ratios = @((950 / $soloRow['S typical']), (1500 / $soloRow['M typical']), (2200 / $soloRow['L typical']))
+Assert-That ($costText -match 'are about 1\.5× a typical packet' -and -not @($ratios | Where-Object { $_ -lt 1.35 -or $_ -gt 1.65 }).Count) 'the ceilings are about 1.5 times the typical solo packets' ($ratios -join ', ')
+$p = Invoke-CaseProbe @'
+$ec = Merge-PwHashtable $script:Defaults @{}
+$L = @{ S = 'a,b,c', 'a,b'; M = 'a,b,c,d', 'a,b,c'; L = 'a,b,c,d,e', 'a,b,c,d' }
+foreach ($sz in 'S', 'M', 'L') {
+    $runs = @([Math]::Ceiling(($L[$sz][0] -split ',').Count / 3), [Math]::Ceiling(($L[$sz][1] -split ',').Count / 3))
+    $r = @(@{ Kind = 'round'; Round = 1; Tier = '3'; Lenses = $L[$sz][0]; Runs = "$($runs[0])"; Outcome = 'fix' }, @{ Kind = 'round'; Round = 2; Tier = '3'; Lenses = $L[$sz][1]; Runs = "$($runs[1])"; Outcome = 'pass' }, @{ Kind = 'round'; Round = 3; Tier = '3'; Lenses = 'ci'; Runs = '1'; Outcome = 'fix' })
+    "$sz=" + (Get-PwCreditEstimate -Config $ec -Size $sz -Rounds $r).Credits
+}
+'@
+$ci = @{}
+foreach ($sz in 'S', 'M', 'L') { $ci[$sz] = if ($p.Text -match "(?m)^$sz=(\d+)") { [int]$Matches[1] } else { -1 } }
+$ciOk = $costText -match 'a CI fix after them takes it over \(S about ([\d,]+), M ([\d,]+), L ([\d,]+)\)' -and
+    [Math]::Abs((& $num $Matches[1]) - $ci['S']) -le 10 -and [Math]::Abs((& $num $Matches[2]) - $ci['M']) -le 10 -and [Math]::Abs((& $num $Matches[3]) - $ci['L']) -le 10 -and
+    $ci['S'] -gt 950 -and $ci['M'] -gt 1500 -and $ci['L'] -gt 2200
+Assert-That $ciOk 'a forced packet with a CI fix is priced as credit-check prices it, and passes each ceiling' $p.Text
+Assert-That ($costText -match 'about (\d+) phases a month on Pro, (\d+) on Business and (\d+) on Enterprise' -and [int]$Matches[1] -eq [Math]::Floor(1500 / 350) -and [int]$Matches[2] -eq [Math]::Floor(1900 / 350) -and [int]$Matches[3] -eq [Math]::Floor(3900 / 350)) 'plan and board only: phases a month are each seat''s credits over 350' ''
 Assert-That ($costText -match '\| 8 \| \*\*Built:\*\*' -and $costText -match 'Change 8 is built, as `models\.agents`') 'lean change #8 is marked as built' ''
 Assert-That ($costText -match 'forced raises still reach the top tier') 'the tier-floor property says the forced raises still reach the top tier under a cap' ''
 

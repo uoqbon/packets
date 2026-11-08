@@ -24,7 +24,7 @@ Choices [PKT-8](../../plan/solo-budget/packets/PKT-8.md) left open, and why each
 11. **"Expected" is 11% one clean round and 89% typical,** the original project's 8 of 73 one-round packets. The per-seat table uses the expected 10-packet phase over ten (975), since the plan's goal and the review notes give per-month figures on it. The default column uses the default 10-packet phase over ten (2,160).
 12. **Seats.** Pro, Business and Enterprise, as the packet asks, plus Pro+ and Max for reference, from the figures the owner chose to cite (review notes, decision 9). The promotional Business and Enterprise figures (3,000 and 7,000) are left out: their terms couldn't be checked from this session (see the PR), and a page that prices a month from them would overstate a seat once they end.
 13. **What the cap saves is stated per size, honestly for S.** A typical S packet starts at tier 2 with no cap, so the cap saves only round 2's step to tier 3 there (about 55), not the 145 a forced packet adds.
-14. **The ceiling paragraph says what trips it,** from the review notes' option B: a typical packet, forced or not, stays under it; a forced packet with many more lenses can reach it. It says `credit-check.ps1` counts no resume share.
+14. **The ceiling paragraph says what trips it,** priced with `Get-PwCreditEstimate` as `credit-check.ps1` prices each step: an unforced packet stays under through two rounds and a CI fix; a packet forced to tier 3 stays under through its two rounds, but a CI fix after them (a fix run plus a one-lens round at tier 3) or one or two extra lenses takes it over. The review notes' option B said only the forced, many-lens packet trips it; the correctness review found the CI-fix case. It says `credit-check.ps1` counts no resume share.
 15. **Copilot CLI's session limit is a backstop above the ceiling,** with what is and isn't known. The line says it isn't known yet whether it counts subagents' credits, and that it will say once the e2e stage runs, without naming the stage: PKT-9 is being written in parallel and owns the stage numbers.
 16. **The four properties' tier-floor bullet carries the amendment.** The lever rows that said "kit: a per-agent model class" now say `models.agents` is built, and lean change #8 is marked built (#9 is still not).
 
@@ -34,15 +34,21 @@ Choices [PKT-8](../../plan/solo-budget/packets/PKT-8.md) left open, and why each
     - the section's JSON is `templates/packet-workflow.solo.json`, exactly, and the overlay sets no `creditsPerRun`;
     - each of the nine rows prices within 1% of `Get-PwCreditEstimate` on the default rates, with its runs (`Runs=`) and resume share, at tier 2 (or 3 for the forced rows), with runs equal to the lenses over 3 rounded up, and with parts that add up to the total within 5;
     - the expected figures, what a forced packet adds, the phase table, and each seat's packets a month and range follow from those rows;
-    - the "In short" solo bullet, lean change #8 and the amended tier-floor bullet;
+    - the "In short" solo bullet (per packet, Pro, Business and Enterprise), the cap's savings per size, the ceiling's ratio to a typical packet, the plan-only phases a month, the CI-fix figures in the ceiling paragraph, lean change #8 and the amended tier-floor bullet;
     - the README has rows for the three keys, the `creditsPerRun` row no longer prices tier 3 at tier 4's old rate, the ceiling example is the overlay's, the Models bullet names the model-tier stop and not the old advice, the safety row and the budget stop are there, and the defaults the rows give (no cap, no ceiling, no `models.agents` entries) are `$script:Defaults`'.
 
     It keeps PKT-1's rules: plain variables, no `$script:` assignment, kit code only through `Invoke-CaseProbe`.
 
+## Lens review
+
+18. **Security and correctness, each an independent read of the diff against the merged code.** Nothing was blocking.
+    - **Security** found that the README presented instructions as enforcement in three places: the credit check's calls (no hook or script runs it), the narrow settle's conditions (only the dispatcher's instructions check them, and a dispatcher that ignored them could post the settle-check itself) and the first-words rule (only `packet:budget` has it in code). It found that machinery under an ignored path only lifts the cap, that a config raise counts only where both the base and the default branch have it, and that the cap is read at the merge base alone. It also found that `trustedAuthors` now covers spending, and that the implementer signs in as the owner too. The README now says each.
+    - **Correctness** recomputed every solo figure with the estimator and found them right. It found that a CI fix after two forced rounds passes each ceiling (decision 14), and five prose figures the case file didn't pin (the cap's savings, the ceiling ratio, the plan-only phases, Enterprise in "In short"); each is now asserted. Nits fixed: a comma splice, the full list of scripts a bad `tierCap` stops, and the review skill's rule is in its limits, not a Never list.
+
 ## Where the packet and the merged code differ
 
-18. **The credit check's exit codes.** The packet's amended row says "a credit check that exits 2 stops the dispatch"; the code goes on only on 0, and any code but 0 and 3 stops the step (decision 6).
-19. **No name differs.** `install.ps1 -PlanOnly`, the manifest's `mode`, `-Profile solo`, `models.agents`, `review.tierCap`, `budget.maxCreditsPerPacket`, `credit-check.ps1`, `packet:budget`, `packet:settle` and both `reason=` first lines are as merged.
+19. **The credit check's exit codes.** The packet's amended row says "a credit check that exits 2 stops the dispatch"; the code goes on only on 0, and any code but 0 and 3 stops the step (decision 6).
+20. **No name differs.** `install.ps1 -PlanOnly`, the manifest's `mode`, `-Profile solo`, `models.agents`, `review.tierCap`, `budget.maxCreditsPerPacket`, `credit-check.ps1`, `packet:budget`, `packet:settle` and both `reason=` first lines are as merged.
 
 ## Not changed
 
