@@ -271,6 +271,17 @@ try {
         & $newBase 'cap2' 1200 -Edit { param($c) $c.review.tierCap = 2 }
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21', '-Next', 'fix') + (& $at 'cap2')) $gh
         Assert-That ($r.Code -eq 0 -and $r.Text -match "total=$tier2 ") 'with review.tierCap 2 at the base it stays at tier 2' "want total $tier2`n$($r.Text)"
+        # A tier-3 round under cap 2 is carried at 3, as review-scope carries it: the cap holds back only the +1.
+        $gh.comments['33'] = @(New-Comment 1 'owner' 'round 1 head=aaa tier=3 lenses=security,correctness,tests runs=1 confirmed=security,correctness outcome=fix' '2026-10-01T10:00:00Z')
+        $gh.prs += @(@{ number = 33; headRefName = 'pkt/pkt-03-api-endpoints'; state = 'OPEN' })
+        $carried = & $estimate 'cap2' 'S' '[{ "Kind": "round", "Round": 1, "Tier": "3", "Lenses": "security,correctness,tests", "Runs": "1", "Outcome": "fix" }, { "Kind": "round", "Round": 2, "Tier": "3", "Lenses": "security,correctness", "Runs": "2", "Outcome": "pass" }]'
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '33', '-Next', 'fix') + (& $at 'cap2')) $gh
+        Assert-That ($r.Text -match "(?m)^(WITHIN|OVER) .*total=$carried ") 'after a tier-3 fix round, review.tierCap 2 doesn''t lower the next round below tier 3' "want total $carried`n$($r.Text)"
+        $gh.comments['34'] = @(New-Comment 1 'owner' 'round 1 head=aaa tier=3 lenses=security,correctness,tests runs=1 confirmed=- outcome=pass' '2026-10-01T10:00:00Z')
+        $gh.prs += @(@{ number = 34; headRefName = 'pkt/pkt-03-api-endpoints'; state = 'OPEN' })
+        $ciCarried = & $estimate 'cap2' 'S' '[{ "Kind": "round", "Round": 1, "Tier": "3", "Lenses": "security,correctness,tests", "Runs": "1", "Outcome": "pass" }, { "Kind": "round", "Round": 2, "Tier": "3", "Lenses": "correctness", "Runs": "1", "Outcome": "fix" }]'
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '34', '-Next', 'fix') + (& $at 'cap2')) $gh
+        Assert-That ($r.Text -match "(?m)^(WITHIN|OVER) .*total=$ciCarried ") 'a CI fix after a tier-3 pass under cap 2 is priced at tier 3' "want total $ciCarried`n$($r.Text)"
         & $newBase 'per2' 1200 -Edit { param($c) $c.review.lensesPerReviewer = 2 }
         $grouped = & $estimate 'per2' 'S' (& $nextRow 3 1)
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21', '-Next', 'fix') + (& $at 'per2')) $gh

@@ -28,8 +28,8 @@
     round  the round review-scope chose: -Round (one more than the last round marker), -Tier, -Lenses
            and -Runs
     fix    after a round with outcome=fix (whose marker already books the fix run): the cheapest round
-           that must follow, the last round's confirmed lenses at its tier plus one (up to
-           review.tierCap, or 3), in review.lensesPerReviewer lenses per run. After a round that passed
+           that must follow, the last round's confirmed lenses at its tier plus one (the +1 only up
+           to review.tierCap, or 3; never below the last round's tier), in review.lensesPerReviewer lenses per run. After a round that passed
            (a CI fix): the fix run, which no marker books, plus a one-lens round at that round's tier
   A raise is the newest trusted PR comment `packet:budget max=<credits>`: it holds for the rest of the
   packet, and only ever raises the ceiling. A trusted raise whose max isn't a whole number above 0 is
@@ -172,12 +172,13 @@ try {
                 # The fix run is booked on that marker already: price the round that must follow it.
                 $confirmed = @("$(Get-PwField $last 'Confirmed')".ToLowerInvariant() -split '[,+\s]+' | Where-Object { $_ -and $_ -ne '-' } | Select-Object -Unique)
                 $n = [Math]::Max(1, $confirmed.Count)
-                $tierNext = [Math]::Min($lastTier + 1, $cap)
+                # As review-scope carries it (PKT-3): never below the last round's tier; the cap holds back only the +1.
+                $tierNext = [Math]::Max($lastTier, [Math]::Min($lastTier + 1, $cap))
                 [pscustomobject]@{ Kind = 'round'; Round = $lastRound + 1; Tier = [string]$tierNext; Lenses = $(if ($confirmed) { $confirmed -join ',' } else { 'correctness' }); Runs = [string][Math]::Ceiling($n / $per); Outcome = 'pass'; CreatedAt = $null }
             }
             elseif ($outcome -eq 'pass') {
                 # A CI fix after a passed round: no marker books its run, so this row's outcome=fix does.
-                [pscustomobject]@{ Kind = 'round'; Round = $lastRound + 1; Tier = [string][Math]::Min($lastTier, $cap); Lenses = 'correctness'; Runs = '1'; Outcome = 'fix'; CreatedAt = $null }
+                [pscustomobject]@{ Kind = 'round'; Round = $lastRound + 1; Tier = [string]$lastTier; Lenses = 'correctness'; Runs = '1'; Outcome = 'fix'; CreatedAt = $null }
             }
             else { Stop-Pw "-Next fix after round $lastRound, whose outcome is '$outcome': only a fix or a passed round is followed by a fix run" }
         }
