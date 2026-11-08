@@ -108,6 +108,15 @@ Assert-Phrases $review1 @(
 Assert-Order $review @('review-scope.ps1 -Base origin/<baseRefName>', 'credit-check.ps1 -Packet <ID>', '## 2 · Run the lenses') 'the round check runs after review-scope and before §2'
 Assert-Phrases $reviewLimits @('6. **Credits:** a round starts only when `credit-check -Next round` (§1) says') 'the review skill''s limits add a sixth: the credit ceiling'
 
+# Each check has exactly three exit bullets, exit 0, exit 3 and any other, and only exit 0 goes on: a
+# fourth bullet (say, one that lets exit 2 through) fails here.
+foreach ($c in @(@{ N = '§1 Select'; T = $select }, @{ N = '§8 Fix'; T = $rounds }, @{ N = 'packet-review §1'; T = $review1 })) {
+    $bullets = @([regex]::Matches($c.T, '(?m)^[ \t]*- (?<label>Exit [^:]*|Any other exit)[^\n]*') | ForEach-Object { [pscustomobject]@{ Label = $_.Groups['label'].Value; Line = $_.Value } })
+    $labels = @($bullets | ForEach-Object Label) -join ' | '
+    $goOn = @($bullets | Where-Object { $_.Line -match '\bgo on\b' } | ForEach-Object Label)
+    Assert-That ($labels -ceq 'Exit 0 (`OFF` or `WITHIN`) | Exit 3 (`OVER`) | Any other exit' -and ($goOn -join ',') -ceq 'Exit 0 (`OFF` or `WITHIN`)') "$($c.N)'s check has exactly the exit 0, exit 3 and any-other bullets, and only exit 0 goes on" ("labels: $labels`ngo on: $($goOn -join ', ')")
+}
+
 Write-Host '  the commands the skills give, run against credit-check.ps1'
 # Each command, as the skill writes it, with its placeholders filled in. Its shape is checked before the
 # config is read, so even OFF proves the call is well formed; a gh stub answers the PR's markers.
@@ -262,8 +271,8 @@ try {
     finally { Pop-Location }
 }
 finally {
-    if ($caseRepo) { Remove-CaseRepo $caseRepo }
-    Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
+    try { if ($caseRepo) { Remove-CaseRepo $caseRepo } }
+    finally { if (-not $Keep) { Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue } }
 }
 
 Write-Host '  Needs human: the two stops and their options'
@@ -289,6 +298,7 @@ Assert-Phrases $review2 @(
     '**A reviewer the host won''t start stops the round.**'
     'start no other model, no lower tier''s agent, no general-purpose agent and no fewer runs in its place, and post no report'
     'the model-tier stop''s first line (the packet-dispatch skill''s **Needs human**, **A model-tier stop**), quoting the host''s message'
+    'Let any run already started finish, and set its answer aside.'
     'Return Needs human.') 'packet-review §2: a refused reviewer stops the round, never a lighter one, and returns Needs human'
 Assert-Phrases $review @('and returns Pass, Fix, Needs human, or Stopped when a check fails.', 'stop the round with no report, and return Stopped.', 'say what failed, and return Stopped. Never start a pair on a check that failed.') 'the panel returns Stopped, never a pass, when a check fails'
 Assert-Phrases $review2 @('A host that lists a pinned model but refuses to start it for the session''s cost tier is offering it, not withholding it: that is the stop below, not a reason to use the owner''s model or ask for one.') 'packet-review §2: a refused pinned model isn''t one the host withholds'
@@ -298,6 +308,9 @@ Assert-Phrases $agentSubagents @('A host that refuses a pinned model for that re
 
 Write-Host '  resume after a stop'
 Assert-Phrases $resume @('If the marker has `reason=budget` or `reason=model-tier` (its `Pairs`), go to **After a stop** below.') 'Resume sends both stops to After a stop'
+$again = ([regex]::Matches($afterStop, [regex]::Escape('with the stop''s own first line again'))).Count
+Assert-That ($again -eq 2) 'a refused settle is answered under the stop''s own first line, after a budget stop and after a model-tier stop, so the next resume still reads the stop' "found $again"
+Assert-Phrases $afterStop @('Read the PR with `gh pr view <pr> --json state,headRefOid`.') 'after a stop, resume reads the PR''s state and head'
 Assert-Phrases $afterStop @('If a raise and a settle that counts are both newer than the stop, the newer of the two decides.') 'a settle that doesn''t count never overrides a raise'
 Assert-Phrases $afterStop @('Only an answer newer than the stop counts: a row in `board rounds <pr> -Json` (trusted authors only) whose `CreatedAt` is later than the marker''s.') 'only a trusted answer newer than the stop counts'
 # Each way on, and where it ends: another check, or a release.
@@ -332,7 +345,9 @@ Assert-Phrases $narrow @(
     'Nothing is committed or pushed.'
     'Open one follow-up issue per confirmed finding, under packet-review §5''s rules'
     'for a contract finding the title `<ID> contract: <the question>` and the `<labels.needsHuman>` label too'
-    'If a label is missing, or opening one fails, stop with no settle-check') 'a settle before the last round counts only after reason=budget next=fix, at the newest round''s head, with no change, and carries no code'
+    'If a label is missing, or opening one fails, stop with no settle-check'
+    'A finding an earlier round already filed (packet-review §3, Already filed) isn''t filed again.'
+    'A later resume opens only the ones not yet open.') 'a settle before the last round counts only after reason=budget next=fix, at the newest round''s head, with no change, and carries no code'
 Assert-Order $narrow @('2. **Follow-ups.**', '3. Check the claim. Comment on the PR: `` `packet:settle-check head=<the request''s head>` ``', '4. `board set <ID> "Status=In review"`, then continue at step 9.1') 'it opens the follow-ups before the settle-check, then goes on to step 9.1'
 Assert-Order $dispatch @('### After the last round', 'When the rounds are used up and something still needs a change', '### Before the last round: pass with follow-ups') 'the settle after the last round is kept as it was, ahead of the narrow one'
 
@@ -342,7 +357,7 @@ Assert-Phrases $never ($neverWants + @('The `packet:settle-check` that **Settle*
 Assert-Phrases $agentNever ($neverWants + @('The `packet:settle-check` that the skill''s **Settle** posts stays yours.')) 'the dispatcher agent''s Never list does the same'
 
 Write-Host '  the last round, not three'
-$three = '(?i)three rounds|\bround 3\b|third round|after round three'
+$three = '(?i)\b(three|3)\s+(review\s+)?rounds?\b|\bround\s+(3|three)\b|third round|\brounds\s+1\s*(-|to|–)\s*3\b'
 $hits = @(foreach ($f in @(@{ N = 'packet-dispatch/SKILL.md'; T = $dispatch }, @{ N = 'packet-review/SKILL.md'; T = $review }, @{ N = 'round-report-template.md'; T = $template }, @{ N = 'packet-dispatcher.agent.md'; T = $agent })) { foreach ($m in [regex]::Matches($f.T, $three)) { "$($f.N): $($m.Value)" } })
 Assert-That ($hits.Count -eq 0) 'no text in the dispatch or review skill, the report template or the dispatcher agent says "three rounds" or "round 3"' ($hits -join "`n")
 Assert-Phrases $handOff @('If the last round (`review.maxRounds`) is used, **Needs human**.') '§9.3 stops after the last round (review.maxRounds)'
