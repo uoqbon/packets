@@ -106,19 +106,27 @@ $ghLookup = @{ login = 'owner'; comments = $gh.comments; prs = @(@($gh.prs | Whe
 $ghFail = @{ fail = $true }
 $round2 = @('-Next', 'round', '-Round', '2', '-Tier', '2', '-Lenses', 'security,correctness', '-Runs', '1')
 
-$caseRepo = New-CaseRepo
+$caseRepo = $null
 try {
+    $caseRepo = New-CaseRepo
     Push-Location -LiteralPath $caseRepo
     try {
         $git = { $out = & git @args 2>&1; if ($LASTEXITCODE -ne 0) { throw "git $($args -join ' ') failed: $out" } }
         $cfgFile = Join-Path $caseRepo '.github/packet-workflow.json'
         $pk3 = Join-Path $caseRepo 'docs/plan/phase-1/packets/PKT-03.md'
         $mainPk3 = [System.IO.File]::ReadAllText($pk3)
-        # origin's default branch trusts teammate (and the GitHub sign-in, owner) for markers.
+        # origin's default branch trusts teammate (and the GitHub sign-in, owner) for markers. The check also
+        # prices with its config and packet file, and keeps the higher total: so main starts as cheap as any
+        # base below (0.1.1 rates, tier cap 2, three lenses a run, PKT-03 an S packet), and the bases decide
+        # the price until the last section makes main dearer.
         $mainCfg = Get-Content -Raw -LiteralPath $cfgFile | ConvertFrom-Json -AsHashtable
         $mainCfg.trustedAuthors = @('teammate')
+        $mainCfg.budget.creditsPerRun = ConvertTo-Json -InputObject $rates011 -Depth 5 | ConvertFrom-Json -AsHashtable
+        $mainCfg.review.tierCap = 2
+        $mainCfg.review.lensesPerReviewer = 3
         [System.IO.File]::WriteAllText($cfgFile, ($mainCfg | ConvertTo-Json -Depth 10), $utf8)
-        & $git commit -qam 'trust teammate'
+        [System.IO.File]::WriteAllText($pk3, ($mainPk3 -replace '\*\*Size:\*\* M', '**Size:** S'), $utf8)
+        & $git commit -qam 'trust teammate; main as cheap as the bases'
         & $git push -q origin main
         & $git fetch -q origin
 
@@ -129,6 +137,8 @@ try {
             & $git switch -q -c $Name $From
             $c = Get-Content -Raw -LiteralPath $cfgFile | ConvertFrom-Json -AsHashtable
             $c.trustedAuthors = @('teammate', 'exmate')
+            $c.review.tierCap = $null
+            $c.review.lensesPerReviewer = 1
             # A fresh copy each time, so an edit below can't reach the next base's rates.
             $c.budget.creditsPerRun = ConvertTo-Json -InputObject $rates011 -Depth 5 | ConvertFrom-Json -AsHashtable
             $c.budget.maxCreditsPerPacket = $Ceiling
@@ -158,7 +168,8 @@ try {
         & $newBase 'off-nokey' $null -Edit { param($c) $c.budget.Remove('maxCreditsPerPacket') }
         & $newBase 'off-notable' $null -Edit { param($c) $c.budget = 5 }
         & $newBase 'off-list' $null -Edit { param($c) $c.budget = @(1500) }
-        foreach ($b in 'off-nokey', 'off-notable', 'off-list') {
+        & $newBase 'off-typo' $null -Edit { param($c) $c.budget.creditsPerRun.dispatcher = 'fifty' }
+        foreach ($b in 'off-nokey', 'off-notable', 'off-list', 'off-typo') {
             $r = Invoke-Check (@('-Packet', 'PKT-99') + (& $at $b) + @('-Next', 'start')) $ghFail
             Assert-That ($r.Code -eq 0 -and $r.Text -match '(?m)^OFF' -and $r.Calls.Count -eq 0) "OFF when the base's budget is $b (Get-PwCreditCeiling's rule for unset)" $r.Text
         }
@@ -181,7 +192,9 @@ try {
         $r = Invoke-Check (@('-Packet', 'pkt-03') + (& $at 'c900') + $round2 + @('-Json')) $ghLookup
         $j = try { $r.Text | ConvertFrom-Json } catch { $null }
         Assert-That ($r.Code -eq 3 -and $j -and $j.Result -eq 'OVER' -and $j.Pr -eq 21 -and $j.SoFar -eq 620 -and $j.Step -eq 394 -and $j.Total -eq 1014 -and $j.Ceiling -eq 900 -and $j.Source -eq 'config' -and $r.Calls -match '^pr list' -and $r.Text -match '"Total": 1014,' -and $r.Text -notmatch '1014\.0') 'without -Pr it finds the packet''s open PR (not a newer closed one, nor another packet''s); -Json carries the same numbers as integers and still exits 3' "$($r.Text)`ncalls: $($r.Calls -join ' | ')"
-        Assert-That (-not ($r.Calls | Where-Object { $_ -match '-X|POST|PATCH|DELETE|comment' -and $_ -notmatch '/comments\?per_page' })) 'it never posts or changes anything on GitHub' ($r.Calls -join "`n")
+        $prCalls = (Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c900') + $round2) $gh).Calls
+        $writes = @(@($r.Calls) + @($prCalls) | Where-Object { $_ -match '-X|POST|PATCH|DELETE|comment' -and $_ -notmatch '/comments\?per_page' })
+        Assert-That ($writes.Count -eq 0 -and @($prCalls | Where-Object { $_ -match '/pulls/21$' }).Count -eq 1) 'it never posts or changes anything on GitHub, with -Pr or without' ((@($r.Calls) + @($prCalls)) -join "`n")
 
         Write-Host '  per-size ceiling'
         & $newBase 'size-s' @{ S = 1200; M = 500 } -Size 'S'
@@ -207,6 +220,14 @@ try {
         Assert-That ($r.Code -eq 3 -and $r.Text -match 'ceiling=900 \(config\)') 'a raise below the configured ceiling changes nothing: a raise only ever raises' $r.Text
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '26') + (& $at 'c900') + $round2) $gh
         Assert-That ($r.Code -eq 2 -and $r.Text -match "credit-check: the raise by teammate .*max='lots'" -and $r.Text -notmatch 'WITHIN|OVER') 'a trusted max=lots exits 2' $r.Text
+        $n = 40
+        foreach ($bad in 'max=0', 'max=1234567890', 'max=-5', '') {
+            $n++
+            $gh.comments["$n"] = @($r1, (New-Comment 2 'teammate' "budget $bad".Trim() '2026-10-02T08:00:00Z'))
+            $gh.prs += @(@{ number = $n; headRefName = 'pkt/pkt-03-api-endpoints'; state = 'OPEN' })
+            $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', "$n") + (& $at 'c900') + $round2) $gh
+            Assert-That ($r.Code -eq 2 -and $r.Text -match 'credit-check: the raise by teammate' -and $r.Text -notmatch '(?m)^(WITHIN|OVER)') "a trusted raise with $(if ($bad) { $bad } else { 'no max' }) exits 2" $r.Text
+        }
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '28') + (& $at 'c900') + $round2) $gh
         Assert-That ($r.Code -eq 0 -and $r.Text -match 'ceiling=2000 \(raised by teammate 2026-10-03\)') 'the newest trusted raise counts: a later max=2000 replaces an earlier max=lots' $r.Text
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '29') + (& $at 'c900') + @('-Next', 'round', '-Round', '3', '-Tier', '3', '-Lenses', 'correctness', '-Runs', '1')) $gh
@@ -388,14 +409,15 @@ try {
         Write-Host '  the default branch''s ceiling, when stricter'
         # origin's default branch now sets 900 (and still trusts teammate). The bases above keep theirs.
         $setMain = {
-            param($Ceiling)
+            param([scriptblock]$Edit, [string]$Size = '')
             $c = Get-Content -Raw -LiteralPath $cfgFile | ConvertFrom-Json -AsHashtable
-            $c.budget.maxCreditsPerPacket = $Ceiling
+            & $Edit $c
             [System.IO.File]::WriteAllText($cfgFile, (ConvertTo-Json -InputObject $c -Depth 10), $utf8)
-            & $git commit -qam "main ceiling $Ceiling"
+            if ($Size) { [System.IO.File]::WriteAllText($pk3, ($mainPk3 -replace '\*\*Size:\*\* M', "**Size:** $Size"), $utf8) }
+            & $git commit -qam 'main changes'
             & $git push -q origin main
         }
-        & $setMain 900
+        & $setMain { param($c) $c.budget.maxCreditsPerPacket = 900 }
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c1200') + $round2 + @('-Json')) $gh
         $j = try { $r.Text | ConvertFrom-Json } catch { $null }
         Assert-That ($r.Code -eq 3 -and $j -and $j.Ceiling -eq 900 -and $j.CeilingFrom -eq 'default-branch' -and $j.BaseCeiling -eq 1200 -and $j.DefaultBranchCeiling -eq 900) 'a base ceiling of 1200 and 900 on the default branch: the stricter 900 holds, and -Json says where it came from' $r.Text
@@ -407,15 +429,43 @@ try {
         Assert-That ($r.Code -eq 3 -and $r.Text -match 'ceiling=500 \(config\)$') 'a base ceiling stricter than the default branch''s still holds' $r.Text
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '22') + (& $at 'c1200') + $round2) $gh
         Assert-That ($r.Code -eq 0 -and $r.Text -match 'ceiling=2000 \(raised by teammate 2026-10-02\)') 'a trusted raise above both ceilings still raises' $r.Text
+        # A raise between the two ceilings: measured against the stricter 900, so 1100 raises.
+        $gh.comments['50'] = @($r1, (New-Comment 2 'teammate' 'budget max=1100' '2026-10-02T08:00:00Z'))
+        $gh.prs += @(@{ number = 50; headRefName = 'pkt/pkt-03-api-endpoints'; state = 'OPEN' })
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '50') + (& $at 'c1200') + $round2) $gh
+        Assert-That ($r.Code -eq 0 -and $r.Text -match 'total=1014 ceiling=1100 \(raised by teammate 2026-10-02\)') 'a raise between the default branch''s 900 and the base''s 1200 raises: it is measured against the stricter ceiling' $r.Text
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Next', 'start') + (& $at 'c1200')) $ghFail
         Assert-That ($r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=0 step=$start total=$start ceiling=900 \(config on origin/main\)$" -and $r.Calls.Count -eq 0) '-Next start reads the default branch''s ceiling from git, with no gh call' $r.Text
-        & $setMain '1500'
+        Write-Host '  priced with both configs: the higher total holds'
+        # The default branch's rates are now dearer than a base's: dispatcher 450 instead of 50.
+        & $setMain { param($c) $c.budget.maxCreditsPerPacket = 5000; $c.budget.creditsPerRun.dispatcher = 450 }
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c5000') + $round2 + @('-Json')) $gh
+        $j = try { $r.Text | ConvertFrom-Json } catch { $null }
+        Assert-That ($r.Code -eq 0 -and $j -and $j.PricedWith -eq 'default-branch' -and $j.BaseTotal -eq 1014 -and $j.DefaultBranchTotal -eq 1414 -and $j.Total -eq 1414 -and $j.SoFar -eq 1020 -and $j.Step -eq 394) 'an old base''s cheaper rates don''t lower the price: the default branch''s higher total holds' $r.Text
+        # The default branch makes PKT-03 an M packet; the base still says S.
+        & $setMain { param($c) $c.budget.creditsPerRun.dispatcher = 50 } -Size 'M'
+        $mTotal = & $estimate 'origin/main' 'M' "[$row1, { `"Kind`": `"round`", `"Round`": 2, `"Tier`": `"2`", `"Lenses`": `"security,correctness`", `"Runs`": `"1`", `"Outcome`": `"pass`" }]"
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c5000') + $round2 + @('-Json')) $gh
+        $j = try { $r.Text | ConvertFrom-Json } catch { $null }
+        Assert-That ($mTotal -gt 1014 -and $r.Code -eq 0 -and $j -and $j.PricedWith -eq 'default-branch' -and $j.Size -eq 'M' -and $j.Total -eq $mTotal) 'an old base''s smaller size doesn''t lower the price: priced as the default branch''s M packet' "want $mTotal`n$($r.Text)"
+        # The default branch drops the tier cap and groups one lens a run; the base keeps cap 2.
+        & $setMain { param($c) $c.review.tierCap = $null; $c.review.lensesPerReviewer = 1 } -Size 'S'
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21', '-Next', 'fix') + (& $at 'cap2') + @('-Json')) $gh
+        $j = try { $r.Text | ConvertFrom-Json } catch { $null }
+        Assert-That ($j -and $j.PricedWith -eq 'default-branch' -and $j.Total -eq $tier3 -and $j.BaseTotal -eq $tier2) 'an old base''s tier cap doesn''t lower the fix round''s price' "want $tier3 (base $tier2)`n$($r.Text)"
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c5000') + $round2 + @('-Json')) $gh
+        $j = try { $r.Text | ConvertFrom-Json } catch { $null }
+        Assert-That ($j -and $j.PricedWith -eq 'base' -and $j.Total -eq 1014 -and $j.DefaultBranchTotal -eq 1014) 'on a tie the base''s pricing is named' $r.Text
+        & $setMain { param($c) $c.budget.creditsPerRun.dispatcher = 'fifty' }
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c5000') + $round2) $gh
+        Assert-That ($r.Code -eq 2 -and $r.Text -match 'budget\.creditsPerRun\.dispatcher' -and $r.Text -notmatch '(?m)^(WITHIN|OVER|OFF)') 'a rates typo on the default branch exits 2, never WITHIN' $r.Text
+        & $setMain { param($c) $c.budget.creditsPerRun.dispatcher = 50; $c.budget.maxCreditsPerPacket = '1500' }
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c1200') + $round2) $gh
         Assert-That ($r.Code -eq 2 -and $r.Text -match 'budget\.maxCreditsPerPacket must be a positive number' -and $r.Text -notmatch '(?m)^(WITHIN|OVER|OFF)') 'a broken ceiling on the default branch exits 2, never WITHIN' $r.Text
     }
     finally { Pop-Location }
 }
 finally {
-    Remove-CaseRepo $caseRepo
-    if (-not $Keep) { Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue }
+    try { if ($caseRepo) { Remove-CaseRepo $caseRepo } }
+    finally { if (-not $Keep) { Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue } }
 }

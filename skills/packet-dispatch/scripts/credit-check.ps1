@@ -153,6 +153,7 @@ try {
             [pscustomobject]@{
                 Result = 'OFF'; Packet = $Packet; Size = $null; Next = $Next; Pr = $null; Base = $baseSha
                 SoFar = $null; Step = $null; Total = $null; Ceiling = $null; ConfigCeiling = $null
+                PricedWith = $null; BaseTotal = $null; DefaultBranchTotal = $null
                 CeilingFrom = $null; BaseCeiling = $null; DefaultBranchCeiling = $null
                 Source = $null; RaisedBy = $null; RaisedAt = $null
             } | ConvertTo-Json
@@ -161,15 +162,27 @@ try {
         exit 0
     }
 
-    # ---- The packet's size, and its ceiling, at the base.
+    # ---- The packet, as the base has it and as origin's default branch has it.
     $pk = @(Get-PwPackets -Config $cfg -Ref $baseSha) | Where-Object { $_.Id -eq $Packet } | Select-Object -First 1
     if (-not $pk) { Stop-Pw "no packet file for $Packet at the base $($baseSha.Substring(0, 7))" }
-    $size = "$($pk.Size)".ToUpperInvariant()
-    if ($size -notin 'S', 'M', 'L') { Stop-Pw "$Packet has no Size of S, M or L at the base (got '$($pk.Size)')" }
-    # The stricter of the base's ceiling and the default branch's, for the size at the base. Either one
-    # that is set but broken stops the check.
-    $baseCeiling = if ($baseUnset) { $null } else { Get-PwCreditCeiling -Config $cfg -Size $size }
-    $sharedCeiling = if ($sharedUnset) { $null } else { Get-PwCreditCeiling -Config $shared -Size $size }
+    # On the default branch the packet may be gone (moved or renamed since the base): the base's then stands in.
+    $pkShared = @(Get-PwPackets -Config $shared -Ref $remoteRef) | Where-Object { $_.Id -eq $Packet } | Select-Object -First 1
+    if (-not $pkShared) { $pkShared = $pk }
+    # Two views, each with its own config, size, ceiling and step: the base's, and the default branch's.
+    # The check prices the packet in both and keeps the higher total (the owner's decision on #35), so an
+    # old base can't lower the rates, the tier cap, the lens grouping or the size; and the stricter ceiling.
+    $views = @(
+        [pscustomobject]@{ Name = 'base'; Config = $cfg; Packet = $pk; Unset = $baseUnset; Where = "the base $($baseSha.Substring(0, 7))" },
+        [pscustomobject]@{ Name = 'default-branch'; Config = $shared; Packet = $pkShared; Unset = $sharedUnset; Where = $remoteRef })
+    foreach ($v in $views) {
+        $sz = "$($v.Packet.Size)".ToUpperInvariant()
+        if ($sz -notin 'S', 'M', 'L') { Stop-Pw "$Packet has no Size of S, M or L at $($v.Where) (got '$($v.Packet.Size)')" }
+        $v | Add-Member -NotePropertyName Size -NotePropertyValue $sz
+        # A ceiling that is set but broken stops the check, on either side.
+        $v | Add-Member -NotePropertyName Ceiling -NotePropertyValue $(if ($v.Unset) { $null } else { Get-PwCreditCeiling -Config $v.Config -Size $sz })
+    }
+    $baseCeiling = $views[0].Ceiling
+    $sharedCeiling = $views[1].Ceiling
     $ceilingFrom = 'base'
     $ceiling = $baseCeiling
     if ($null -eq $ceiling -or ($null -ne $sharedCeiling -and $sharedCeiling -lt $ceiling)) { $ceiling = $sharedCeiling; $ceilingFrom = 'default-branch' }
@@ -202,37 +215,51 @@ try {
     $rounds = Get-PwRoundRows $rows
     $last = $rounds | Select-Object -Last 1
     $lastRound = if ($last) { [int](Get-PwField $last 'Round') } else { 0 }
-    $per = [int]$cfg.review.lensesPerReviewer
-    $cap = if ($null -ne $cfg.review.tierCap) { [int]$cfg.review.tierCap } else { 3 }
-    $step = switch ($Next) {
-        # Round 1 at tier 1, or at the packet's Review tier line, which review-scope raises round 1 to.
-        'start' { [pscustomobject]@{ Kind = 'round'; Round = 1; Tier = $(if ("$($pk.ReviewTier)" -match '^[1-4]$') { [string][Math]::Min(3, [int]$pk.ReviewTier) } else { '1' }); Lenses = 'correctness'; Runs = '1'; Outcome = 'pass'; CreatedAt = $null } }
-        'round' {
-            if ($roundN -ne $lastRound + 1) { Stop-Pw "-Round $roundN isn't one more than the last round marker on PR #$prNumber (round $lastRound)" }
-            [pscustomobject]@{ Kind = 'round'; Round = $roundN; Tier = [string]$tierN; Lenses = ($lensList -join ','); Runs = [string]$runsN; Outcome = 'pass'; CreatedAt = $null }
-        }
-        'fix' {
-            if (-not $last) { Stop-Pw "-Next fix needs a round before it, and PR #$prNumber has no round marker" }
-            $outcome = "$(Get-PwField $last 'Outcome')"
-            $lastTier = Get-CcTier $last
-            if ($outcome -eq 'fix') {
-                # The fix run is booked on that marker already: price the round that must follow it.
-                $confirmed = @("$(Get-PwField $last 'Confirmed')".ToLowerInvariant() -split '[,+\s]+' | Where-Object { $_ -and $_ -ne '-' } | Select-Object -Unique)
-                $n = [Math]::Max(1, $confirmed.Count)
-                # As review-scope carries it (PKT-3): never below the last round's tier; the cap holds back only the +1.
-                $tierNext = [Math]::Max($lastTier, [Math]::Min($lastTier + 1, $cap))
-                [pscustomobject]@{ Kind = 'round'; Round = $lastRound + 1; Tier = [string]$tierNext; Lenses = $(if ($confirmed) { $confirmed -join ',' } else { 'correctness' }); Runs = [string][Math]::Ceiling($n / $per); Outcome = 'pass'; CreatedAt = $null }
+    if ($Next -eq 'round' -and $roundN -ne $lastRound + 1) { Stop-Pw "-Round $roundN isn't one more than the last round marker on PR #$prNumber (round $lastRound)" }
+    if ($Next -eq 'fix') {
+        if (-not $last) { Stop-Pw "-Next fix needs a round before it, and PR #$prNumber has no round marker" }
+        $outcome = "$(Get-PwField $last 'Outcome')"
+        if ($outcome -notin 'fix', 'pass', 'needs-human') { Stop-Pw "-Next fix after round $lastRound, whose outcome is '$outcome': only a fix, a passed round or a Needs human is followed by a fix run" }
+    }
+    $newStep = {
+        <# The step's row, priced with one view's config (tier cap, lens grouping) and packet (Review tier). #>
+        param($View)
+        $per = [int]$View.Config.review.lensesPerReviewer
+        $cap = if ($null -ne $View.Config.review.tierCap) { [int]$View.Config.review.tierCap } else { 3 }
+        switch ($Next) {
+            # Round 1 at tier 1, or at the packet's Review tier line, which review-scope raises round 1 to.
+            'start' { [pscustomobject]@{ Kind = 'round'; Round = 1; Tier = $(if ("$($View.Packet.ReviewTier)" -match '^[1-4]$') { [string][Math]::Min(3, [int]$View.Packet.ReviewTier) } else { '1' }); Lenses = 'correctness'; Runs = '1'; Outcome = 'pass'; CreatedAt = $null } }
+            'round' { [pscustomobject]@{ Kind = 'round'; Round = $roundN; Tier = [string]$tierN; Lenses = ($lensList -join ','); Runs = [string]$runsN; Outcome = 'pass'; CreatedAt = $null } }
+            'fix' {
+                $lastTier = Get-CcTier $last
+                if ($outcome -eq 'fix') {
+                    # The fix run is booked on that marker already: price the round that must follow it.
+                    $confirmed = @("$(Get-PwField $last 'Confirmed')".ToLowerInvariant() -split '[,+\s]+' | Where-Object { $_ -and $_ -ne '-' } | Select-Object -Unique)
+                    $n = [Math]::Max(1, $confirmed.Count)
+                    # As review-scope carries it (PKT-3): never below the last round's tier; the cap holds back only the +1.
+                    $tierNext = [Math]::Max($lastTier, [Math]::Min($lastTier + 1, $cap))
+                    [pscustomobject]@{ Kind = 'round'; Round = $lastRound + 1; Tier = [string]$tierNext; Lenses = $(if ($confirmed) { $confirmed -join ',' } else { 'correctness' }); Runs = [string][Math]::Ceiling($n / $per); Outcome = 'pass'; CreatedAt = $null }
+                }
+                else {
+                    # A CI fix after a passed round, or a fix the owner asked for after a Needs human: no marker
+                    # books its run, so this row's outcome=fix does.
+                    [pscustomobject]@{ Kind = 'round'; Round = $lastRound + 1; Tier = [string]$lastTier; Lenses = 'correctness'; Runs = '1'; Outcome = 'fix'; CreatedAt = $null }
+                }
             }
-            elseif ($outcome -in 'pass', 'needs-human') {
-                # A CI fix after a passed round, or a fix the owner asked for after a Needs human: no marker
-                # books its run, so this row's outcome=fix does.
-                [pscustomobject]@{ Kind = 'round'; Round = $lastRound + 1; Tier = [string]$lastTier; Lenses = 'correctness'; Runs = '1'; Outcome = 'fix'; CreatedAt = $null }
-            }
-            else { Stop-Pw "-Next fix after round $lastRound, whose outcome is '$outcome': only a fix, a passed round or a Needs human is followed by a fix run" }
         }
     }
-    $soFar = if ($Next -eq 'start') { 0 } else { [double](Get-PwCreditEstimate -Config $cfg -Size $size -Rounds $rounds).Credits }
-    $total = [double](Get-PwCreditEstimate -Config $cfg -Size $size -Rounds (@($rounds) + @($step))).Credits
+    foreach ($v in $views) {
+        $stepRow = & $newStep $v
+        $vSoFar = if ($Next -eq 'start') { 0 } else { [double](Get-PwCreditEstimate -Config $v.Config -Size $v.Size -Rounds $rounds).Credits }
+        $vTotal = [double](Get-PwCreditEstimate -Config $v.Config -Size $v.Size -Rounds (@($rounds) + @($stepRow))).Credits
+        $v | Add-Member -NotePropertyName SoFar -NotePropertyValue $vSoFar
+        $v | Add-Member -NotePropertyName Total -NotePropertyValue $vTotal
+    }
+    # The higher total; on a tie, the base's.
+    $priced = if ($views[1].Total -gt $views[0].Total) { $views[1] } else { $views[0] }
+    $size = $priced.Size
+    $soFar = $priced.SoFar
+    $total = $priced.Total
     $stepCredits = $total - $soFar
 
     # ---- A raise only ever raises the ceiling.
@@ -255,6 +282,7 @@ try {
         [pscustomobject]@{
             Result = $result; Packet = $Packet; Size = $size; Next = $Next; Pr = $(if ($prNumber) { [int]$prNumber } else { $null }); Base = $baseSha
             SoFar = $soFar; Step = $stepCredits; Total = $total; Ceiling = $limit; ConfigCeiling = $ceiling
+            PricedWith = $priced.Name; BaseTotal = & $num $views[0].Total; DefaultBranchTotal = & $num $views[1].Total
             CeilingFrom = $ceilingFrom; BaseCeiling = $(if ($null -ne $baseCeiling) { & $num $baseCeiling } else { $null }); DefaultBranchCeiling = $(if ($null -ne $sharedCeiling) { & $num $sharedCeiling } else { $null })
             Source = $(if ($raisedBy) { 'raised' } else { 'config' }); RaisedBy = $raisedBy; RaisedAt = $raisedAt
         } | ConvertTo-Json
