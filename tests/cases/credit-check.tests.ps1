@@ -217,6 +217,10 @@ try {
         $gh.prs += @(@{ number = 36; headRefName = 'pkt/pkt-03-api-endpoints'; state = 'OPEN' })
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '36') + (& $at 'c900') + $round2) $gh
         Assert-That ($r.Code -eq 3 -and $r.Text -match '(?m)^OVER so-far=620 step=394 total=1014 ceiling=1000 \(raised by owner 2026-10-03\)$') 'the newest raise wins, even below an older one: max=3000 then max=1000 gives a ceiling of 1000' $r.Text
+        $gh.comments['37'] = @($r1, (New-Comment 2 'teammate' 'budget max=3000' '2026-10-02T08:00:00Z'), (New-Comment 3 'owner' 'budget max=800' '2026-10-03T08:00:00Z'))
+        $gh.prs += @(@{ number = 37; headRefName = 'pkt/pkt-03-api-endpoints'; state = 'OPEN' })
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '37') + (& $at 'c900') + $round2) $gh
+        Assert-That ($r.Code -eq 3 -and $r.Text -match 'ceiling=900 \(config\)$') 'a newest raise below the ceiling drops the older raise with it: max=3000 then max=800 leaves the configured 900' $r.Text
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Pr', '32') + (& $at 'c900') + $round2) $gh
         Assert-That ($r.Code -eq 3 -and $r.Text -match 'ceiling=900 \(config\)') 'a trusted comment that quotes a raise below its first line raises nothing' $r.Text
 
@@ -237,6 +241,7 @@ try {
             'no packet file at the base'                    = @{ Args = @('-Packet', 'PKT-99', '-Pr', '21') + (& $at 'c1200') + $round2; Gh = $gh; Want = 'no packet file for PKT-99 at the base' }
             'a -Round that skips one'                       = @{ Args = @('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c1200') + @('-Next', 'round', '-Round', '3', '-Tier', '2', '-Lenses', 'tests', '-Runs', '1'); Gh = $gh; Want = "-Round 3 isn't one more than the last round marker on PR #21 \(round 1\)" }
             'a -Round that repeats the last'                = @{ Args = @('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c1200') + @('-Next', 'round', '-Round', '1', '-Tier', '2', '-Lenses', 'tests', '-Runs', '1'); Gh = $gh; Want = "-Round 1 isn't one more" }
+            'a fractional -Tier'                            = @{ Args = @('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c1200') + @('-Next', 'round', '-Round', '2', '-Tier', '2.5', '-Lenses', 'tests', '-Runs', '1'); Gh = $gh; Want = "-Tier must be a whole number \(got '2\.5'\)" }
             '-Next round without -Runs'                     = @{ Args = @('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c1200') + @('-Next', 'round', '-Round', '2', '-Tier', '2', '-Lenses', 'tests'); Gh = $gh; Want = 'missing -Runs' }
             'more runs than lenses'                         = @{ Args = @('-Packet', 'PKT-03', '-Pr', '21') + (& $at 'c1200') + @('-Next', 'round', '-Round', '2', '-Tier', '2', '-Lenses', 'tests', '-Runs', '2'); Gh = $gh; Want = '-Runs must be from 1 to the number of lenses' }
             '-Next fix with no round yet'                   = @{ Args = @('-Packet', 'PKT-03', '-Pr', '20', '-Next', 'fix') + (& $at 'c1200'); Gh = $gh; Want = 'has no round marker' }
@@ -330,6 +335,14 @@ try {
         $start = & $estimate 'c1200' 'S' '[{ "Kind": "round", "Round": 1, "Tier": "1", "Lenses": "correctness", "Runs": "1", "Outcome": "pass" }]'
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Next', 'start') + (& $at 'c1200')) $ghFail
         Assert-That ($r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=0 step=$start total=$start ceiling=1200 \(config\)$" -and $r.Calls.Count -eq 0) '-Next start prices the base and a one-lens round at tier 1, with no PR and no gh call' $r.Text
+        # A packet whose Review tier line is 3: review-scope raises round 1 to tier 3, so start prices it there.
+        & $git switch -q -c 'c1200-tier3' 'c1200'
+        [System.IO.File]::WriteAllText($pk3, ([System.IO.File]::ReadAllText($pk3) -replace '(?m)^(- \*\*Locks:\*\*.*)$', "`$1`n- **Review tier:** 3"), $utf8)
+        & $git commit -qam 'PKT-03 is reviewed at tier 3'
+        & $git switch -q main
+        $start3 = & $estimate 'c1200' 'S' '[{ "Kind": "round", "Round": 1, "Tier": "3", "Lenses": "correctness", "Runs": "1", "Outcome": "pass" }]'
+        $r = Invoke-Check (@('-Packet', 'PKT-03', '-Next', 'start') + (& $at 'c1200-tier3')) $ghFail
+        Assert-That ($start3 -gt $start -and $r.Code -eq 0 -and $r.Text -match "(?m)^WITHIN so-far=0 step=$start3 total=$start3 ") '-Next start prices round 1 at the packet''s Review tier line' "want total $start3`n$($r.Text)"
         & $newBase 'c300' 300
         $r = Invoke-Check (@('-Packet', 'PKT-03', '-Next', 'start') + (& $at 'c300')) $ghFail
         Assert-That ($r.Code -eq 3 -and $r.Text -match "(?m)^OVER so-far=0 step=$start total=$start ceiling=300 ") 'a ceiling no packet of that size can meet stops it at -Next start' $r.Text

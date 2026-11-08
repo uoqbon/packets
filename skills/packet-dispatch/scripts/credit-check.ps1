@@ -52,10 +52,11 @@ param(
     [string]$Head = 'HEAD',
     [ValidateSet('start', 'round', 'fix')][string]$Next,
     [string]$Pr,
-    [int]$Round = 0,
-    [int]$Tier = 0,
+    # Whole numbers, checked below: as [int], -Tier 2.5 would bind as 2 without a word.
+    [string]$Round,
+    [string]$Tier,
     [string]$Lenses,
-    [int]$Runs = 0,
+    [string]$Runs,
     [switch]$Json
 )
 
@@ -96,12 +97,17 @@ try {
     if ($Next -eq 'round') {
         $missing = @(foreach ($n in 'Round', 'Tier', 'Lenses', 'Runs') { if (-not $PSBoundParameters.ContainsKey($n)) { "-$n" } })
         if ($missing) { Stop-Pw "-Next round needs -Round, -Tier, -Lenses and -Runs (missing $($missing -join ', '))" }
-        if ($Round -lt 1) { Stop-Pw "-Round must be 1 or more (got $Round)" }
-        if ($Tier -lt 1 -or $Tier -gt 3) { Stop-Pw "-Tier must be 1, 2 or 3 (got $Tier)" }
+        foreach ($n in 'Round', 'Tier', 'Runs') {
+            if ("$($PSBoundParameters[$n])" -notmatch '^\s*\d{1,6}\s*$') { Stop-Pw "-$n must be a whole number (got '$($PSBoundParameters[$n])')" }
+        }
+        # New names: the parameters stay [string], and would turn an [int] assigned to them back into one.
+        $roundN = [int]$Round; $tierN = [int]$Tier; $runsN = [int]$Runs
+        if ($roundN -lt 1) { Stop-Pw "-Round must be 1 or more (got $roundN)" }
+        if ($tierN -lt 1 -or $tierN -gt 3) { Stop-Pw "-Tier must be 1, 2 or 3 (got $tierN)" }
         # As review-scope counts them: lower case, each once; a run name such as security+data is two.
         $lensList = @("$Lenses".ToLowerInvariant() -split '[,+\s]+' | Where-Object { $_ -and $_ -ne '-' } | Select-Object -Unique)
         if (-not $lensList.Count) { Stop-Pw '-Lenses must name at least one lens' }
-        if ($Runs -lt 1 -or $Runs -gt $lensList.Count) { Stop-Pw "-Runs must be from 1 to the number of lenses ($($lensList.Count)) (got $Runs)" }
+        if ($runsN -lt 1 -or $runsN -gt $lensList.Count) { Stop-Pw "-Runs must be from 1 to the number of lenses ($($lensList.Count)) (got $runsN)" }
     }
     elseif ($roundArgs) { Stop-Pw "$($roundArgs -join ', ') only go with -Next round" }
     if ($Next -eq 'start' -and $Pr) { Stop-Pw '-Next start runs before the packet has a PR: leave out -Pr' }
@@ -199,10 +205,11 @@ try {
     $per = [int]$cfg.review.lensesPerReviewer
     $cap = if ($null -ne $cfg.review.tierCap) { [int]$cfg.review.tierCap } else { 3 }
     $step = switch ($Next) {
-        'start' { [pscustomobject]@{ Kind = 'round'; Round = 1; Tier = '1'; Lenses = 'correctness'; Runs = '1'; Outcome = 'pass'; CreatedAt = $null } }
+        # Round 1 at tier 1, or at the packet's Review tier line, which review-scope raises round 1 to.
+        'start' { [pscustomobject]@{ Kind = 'round'; Round = 1; Tier = $(if ("$($pk.ReviewTier)" -match '^[1-4]$') { [string][Math]::Min(3, [int]$pk.ReviewTier) } else { '1' }); Lenses = 'correctness'; Runs = '1'; Outcome = 'pass'; CreatedAt = $null } }
         'round' {
-            if ($Round -ne $lastRound + 1) { Stop-Pw "-Round $Round isn't one more than the last round marker on PR #$prNumber (round $lastRound)" }
-            [pscustomobject]@{ Kind = 'round'; Round = $Round; Tier = [string]$Tier; Lenses = ($lensList -join ','); Runs = [string]$Runs; Outcome = 'pass'; CreatedAt = $null }
+            if ($roundN -ne $lastRound + 1) { Stop-Pw "-Round $roundN isn't one more than the last round marker on PR #$prNumber (round $lastRound)" }
+            [pscustomobject]@{ Kind = 'round'; Round = $roundN; Tier = [string]$tierN; Lenses = ($lensList -join ','); Runs = [string]$runsN; Outcome = 'pass'; CreatedAt = $null }
         }
         'fix' {
             if (-not $last) { Stop-Pw "-Next fix needs a round before it, and PR #$prNumber has no round marker" }
