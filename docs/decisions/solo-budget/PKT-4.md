@@ -36,6 +36,13 @@ Choices [PKT-4](../../plan/solo-budget/packets/PKT-4.md) left open, and why each
 15. **The tests are in `tests/cases/solo-install.tests.ps1`** (33 assertions), under PKT-1's case-file rules: plain variables, kit code only through `Invoke-Kit` and `Invoke-CaseProbe`, nothing dot-sourced, no `$script:` assignment. Each target is a fresh `git init` with a GitHub origin URL and `origin/HEAD` at `trunk`, in its own temporary folder, removed in `finally` (kept with `-Keep`). Nothing depends on time or on the order of hashtable keys, so the file is deterministic. `Get-PwConfig` runs on the written solo config through `Invoke-CaseProbe`.
 16. **What isn't covered:** the warning's behaviour in a real Local harness session (PKT-9's e2e stages and H-4 check that), and output under a non-UTF-8 Windows console.
 
+## Lens review
+
+17. **Each of the packet's lenses was run as an independent review of the diff.**
+    - **ops:** nothing blocking. Upgrades of older configs (no `models`, no `tierCap`), `-DryRun`, `-Force`, `-PlanOnly` with `-Profile`, and the exit codes and streams all behaved. One nit: dot-sourcing the library sets UTF-8 output, which decision 5 now says.
+    - **correctness:** nothing blocking; every acceptance criterion reproduced, six bad `models.agents` shapes each exit 2 with `.github` unchanged. Two nits fixed: a kept agent is left out of the class line and the warning (decisions 11 and 13), and numbers are compared by value (decision 4). A third, that the class report is its own line rather than part of "Agent models:", stays as decision 11 explains.
+    - **tests:** 20 mutations of `install.ps1`; 16 were caught and 4 survived. Two survivors are equivalent mutants (`-gt` to `-ge` on the rank; merging the overlay into the shared `$template`). The other two, a warning hard-wired to `packet-reviewer-deep` and one that never says "those agents", are now caught by a case with the dispatcher on light and three different lists. Nits fixed: each bad-entry case checks exit 2 for both runs, the kit-classes case checks all five agents, `creditsPerRun` is compared with the template's rather than a pinned rate, and the no-warning checks match the warning itself rather than any `WARNING`.
+
 ## Names that differ from the packet
 
 - None of the consumed names changed: `Get-PwAgentModelClass`, `$script:AgentModelClass`, `install.ps1 -PlanOnly` and the manifest's `mode` are used as merged. `Merge-PwHashtable` is not used, for the reason in decision 2; the packet expected the installer to merge into an ordered copy.

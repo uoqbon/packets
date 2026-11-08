@@ -70,7 +70,7 @@ try {
     $tplPaths = @(Get-KeyPaths (Read-Json $templatePath) | Where-Object { $_ -notlike 'models.agents.*' -and $_ -notlike 'budget.maxCreditsPerPacket.*' })
     $gotPaths = @(Get-KeyPaths $cfgGot | Where-Object { $_ -notlike 'models.agents.*' -and $_ -notlike 'budget.maxCreditsPerPacket.*' })
     Assert-That (($gotPaths -join ',') -ceq ($tplPaths -join ',') -and $cfgText.IndexOf('"agents": {') -lt $cfgText.IndexOf('"review": {') -and $cfgText.IndexOf('"maxRounds": 2') -lt $cfgText.IndexOf('"maxParallelLenses"')) 'the solo config''s keys come out in the default template''s order' ($gotPaths -join ', ')
-    Assert-That ($cfgGot.budget.creditsPerRun.dispatcher -eq 25 -and ($cfgGot.models.strong -join '|') -ceq ((Read-Json $templatePath).models.strong -join '|')) 'creditsPerRun and the model lists are the default template''s' ($cfgGot.budget | ConvertTo-Json -Depth 5)
+    Assert-That (($cfgGot.budget.creditsPerRun | ConvertTo-Json -Depth 10 -Compress) -ceq ((Read-Json $templatePath).budget.creditsPerRun | ConvertTo-Json -Depth 10 -Compress) -and ($cfgGot.models.strong -join '|') -ceq ((Read-Json $templatePath).models.strong -join '|')) 'creditsPerRun and the model lists are the default template''s' ($cfgGot.budget | ConvertTo-Json -Depth 5)
     Push-Location -LiteralPath $fresh
     try {
         $p = Invoke-CaseProbe '$c = Get-PwConfig; "rv $($c.review.maxRounds) $($c.review.lensesPerReviewer) $($c.review.shouldFixPassFromRound) $($c.review.tierCap)"; "ceiling $(Get-PwCreditCeiling -Config $c -Size S) $(Get-PwCreditCeiling -Config $c -Size M) $(Get-PwCreditCeiling -Config $c -Size L)"; "class $(Get-PwAgentModelClass -Models $c.models -Agent packet-dispatcher)"'
@@ -80,7 +80,7 @@ try {
     Assert-That ($p.Text -match '(?m)^ceiling 950 1500 2200\r?$' -and $p.Text -match '(?m)^class standard\r?$') 'and the ceilings per size, and the dispatcher on standard' $p.Text
     $shipped = @($kitAgents | Where-Object { (Get-AgentModelLine $fresh $_) -cne (Get-ModelLine (Read-Json $templatePath).models.strong) })
     Assert-That ($shipped.Count -eq 0 -and $r.Text -match 'Agent classes from models\.agents: packet-dispatcher on standard \(the kit''s: strong\)\.') 'with the shipped lists every agent gets the same models; the summary names the dispatcher''s class' ("$($shipped -join ', ')`n$($r.Text)")
-    Assert-That ($r.Text -notmatch 'Local harness' -and $r.Text -notmatch 'WARNING') 'with identical lists (both templates as shipped) it doesn''t warn' $r.Text
+    Assert-That ($r.Text -notmatch 'Local harness' -and $r.Text -notmatch 'WARNING: packet-dispatcher runs on') 'with identical lists (both templates as shipped) it doesn''t warn' $r.Text
 
     Write-Host '  a model class per agent'
     $classes = New-SoloTarget
@@ -109,11 +109,18 @@ try {
     Write-Json (Join-Path $classes '.github/packet-workflow.json') $c
     $flat = Get-Flat (Invoke-Kit $installer @('-Target', $classes)).Text
     Assert-That ($flat -match 'WARNING: packet-dispatcher runs on the light class [^.]*below packet-reviewer-deep \(strong: Strong One \(copilot\) > Strong Two \(copilot\)\)\. In VS Code' -and $flat -match 'give that agent the dispatcher') 'a higher class with the same list as the dispatcher''s (standard here) is not named; one with another list is' $flat
+    # Dispatcher on light, three different lists: every subagent above it is named, and the fix is plural.
+    $c.models.standard = @('Standard One (copilot)')
+    Write-Json (Join-Path $classes '.github/packet-workflow.json') $c
+    $flat = Get-Flat (Invoke-Kit $installer @('-Target', $classes)).Text
+    Assert-That ($flat -match 'WARNING: packet-dispatcher runs on the light class \(Light''s One \(copilot\)\), below packet-reviewer-deep \(strong: Strong One \(copilot\) > Strong Two \(copilot\)\), packet-implementer \(standard: Standard One \(copilot\)\), packet-reviewer-standard \(standard: Standard One \(copilot\)\)\. In VS Code' -and $flat -match 'give those agents the dispatcher''s class' -and $flat -notmatch 'below [^.]*packet-reviewer-light') 'with the dispatcher on light and three lists, it names every subagent above it (not the light reviewer) and says those agents' $flat
     # No models.agents: the kit's classes, and the dispatcher on strong is never below a subagent.
     $c.models.Remove('agents')
     Write-Json (Join-Path $classes '.github/packet-workflow.json') $c
     $r = Invoke-Kit $installer @('-Target', $classes)
-    Assert-That ($r.Code -eq 0 -and (Get-AgentModelLine $classes 'packet-dispatcher') -ceq (Get-ModelLine $c.models.strong) -and $r.Text -notmatch 'Local harness' -and $r.Text -notmatch 'Agent classes from models\.agents') 'without models.agents each agent is back on the kit''s class, with no warning and no class line' $r.Text
+    $kitLines = [ordered]@{ 'packet-dispatcher' = Get-ModelLine $c.models.strong; 'packet-reviewer-deep' = Get-ModelLine $c.models.strong; 'packet-implementer' = Get-ModelLine $c.models.standard; 'packet-reviewer-standard' = Get-ModelLine $c.models.standard; 'packet-reviewer-light' = Get-ModelLine $c.models.light }
+    $offKit = @($kitAgents | Where-Object { (Get-AgentModelLine $classes $_) -cne $kitLines[$_] })
+    Assert-That ($r.Code -eq 0 -and $offKit.Count -eq 0 -and $r.Text -notmatch 'Local harness' -and $r.Text -notmatch 'Agent classes from models\.agents') 'without models.agents each agent is back on the kit''s class, with no warning and no class line' $r.Text
 
     # A hand-edited dispatcher is kept with its own model: line, so its class can't put it below a subagent.
     $dispFile = Join-Path $classes '.github/agents/packet-dispatcher.agent.md'
@@ -182,9 +189,8 @@ try {
         $before = Get-SoloSnapshot $bad
         $r0 = Invoke-Kit $installer @('-Target', $bad, '-Profile', 'solo', '-Force')
         $r = Invoke-Kit $installer @('-Target', $bad, '-Force', '-WithInstructions')
-        Assert-That ($r0.Code -ne 0 -and $r.Code -ne 0 -and (Get-SoloSnapshot $bad) -ceq $before -and (Get-Flat $r.Text) -match $cases[$name].message -and $r.Text -match 'Nothing was written') "a models.agents entry naming $name makes the install exit non-zero before it writes; the target's files and manifest are unchanged" ("code $($r.Code)`n$($r.Text)")
+        Assert-That ($r0.Code -eq 2 -and $r.Code -eq 2 -and (Get-SoloSnapshot $bad) -ceq $before -and (Get-Flat $r.Text) -match $cases[$name].message -and $r.Text -match 'Nothing was written') "a models.agents entry naming $name makes the install exit 2 (with and without -Profile solo) before it writes; the target's files and manifest are unchanged" ("codes $($r0.Code) $($r.Code)`n$($r.Text)")
     }
-    Assert-That ($r.Code -eq 2) 'it exits 2, as the kit''s scripts do on an error' "code $($r.Code)"
     $r = Invoke-Kit $installer @('-Target', $bad, '-PlanOnly')
     Assert-That ($r.Code -ne 0 -and $r.Text -match 'refused') '(-PlanOnly on that full install is still refused first, as PKT-2 has it)' $r.Text
 
