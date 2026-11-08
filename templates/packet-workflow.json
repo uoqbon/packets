@@ -132,10 +132,10 @@
     "monthlyCredits": 0,
     "maxCreditsPerPacket": null,
     "creditsPerRun": {
-      "dispatcher": 50, "dispatcherPerRound": { "S": 300, "M": 330, "L": 390 }, "dispatcherPerReviewerRun": 35,
+      "dispatcher": 25, "dispatcherPerRound": { "S": 150, "M": 165, "L": 195 }, "dispatcherPerReviewerRun": 18,
       "implementer": { "S": 105, "M": 200, "L": 355 },
       "implementerFix": { "S": 40, "M": 55, "L": 75 },
-      "reviewerByTier": { "S": [20, 50, 195], "M": [30, 70, 280], "L": [40, 95, 380] },
+      "reviewerByTier": { "S": [20, 50, 98], "M": [30, 70, 140], "L": [40, 95, 190] },
       "laterRoundFactor": 0.85
     }
   }

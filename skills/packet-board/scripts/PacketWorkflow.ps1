@@ -64,10 +64,10 @@ $script:Defaults = @{
         # Get-PwCreditCeiling checks it where it is used.
         maxCreditsPerPacket = $null
         creditsPerRun  = @{
-            dispatcher = 50; dispatcherPerRound = @{ S = 300; M = 330; L = 390 }; dispatcherPerReviewerRun = 35
+            dispatcher = 25; dispatcherPerRound = @{ S = 150; M = 165; L = 195 }; dispatcherPerReviewerRun = 18
             implementer = @{ S = 105; M = 200; L = 355 }
             implementerFix = @{ S = 40; M = 55; L = 75 }
-            reviewerByTier = @{ S = @(20, 50, 195); M = @(30, 70, 280); L = @(40, 95, 380) }
+            reviewerByTier = @{ S = @(20, 50, 98); M = @(30, 70, 140); L = @(40, 95, 190) }
             laterRoundFactor = 0.85
         }
     }
@@ -878,7 +878,8 @@ function Get-PwCreditSummary {
     <# A phase's estimated credits. -Packets: objects with Id, Size, Pr and Rounds (round marker rows).
        -Today is a UTC date: the AI-credit pool resets on the 1st, UTC. This month counts each round in
        the UTC month of its report, and a packet's base (preflight, brief, first implementer run) in the
-       month of its round 1. A packet is finished once its last round passed or went to the owner. #>
+       month of its round 1. A packet is finished once its last round passed or went to the owner, or
+       once a settle check follows its last round (a settle after a budget stop leaves that round at fix). #>
     param([Parameter(Mandatory)]$Config, [object[]]$Packets = @(), [DateTime]$Today = [DateTime]::UtcNow)
     $month = [DateTime]::new($Today.Year, $Today.Month, 1)
     $inMonth = { param($at) if (-not $at) { return $false }; $d = ([DateTimeOffset]$at).UtcDateTime; $d.Year -eq $month.Year -and $d.Month -eq $month.Month }
@@ -889,9 +890,17 @@ function Get-PwCreditSummary {
             $mtd = Get-PwSum @($e.Rounds | Where-Object { & $inMonth $_.CreatedAt }) 'Credits'
             if (& $inMonth ($e.Rounds | Select-Object -First 1).CreatedAt) { $mtd += $e.Base }
             $lastOutcome = "$(Get-PwField ($rounds | Select-Object -Last 1) 'Outcome')"
+            # The marker rows come oldest first: a settle check after the last round report settles it.
+            $settled = $false
+            $all = @(@(Get-PwField $p 'Rounds') | Where-Object { $null -ne $_ })
+            for ($i = $all.Count - 1; $i -ge 0; $i--) {
+                $k = Get-PwField $all[$i] 'Kind'
+                if ($k -eq 'settle-check') { $settled = $true; break }
+                if ($k -eq 'round' -or -not $k) { break }
+            }
             [pscustomobject]@{
                 Id = (Get-PwField $p 'Id'); Size = $e.Size; Pr = (Get-PwField $p 'Pr'); Rounds = $e.Rounds.Count; ReviewerRuns = $e.ReviewerRuns; ImplementerRuns = $e.ImplementerRuns
-                Credits = $e.Credits; ThisMonth = [Math]::Round($mtd); Finished = $lastOutcome -in 'pass', 'needs-human'
+                Credits = $e.Credits; ThisMonth = [Math]::Round($mtd); Finished = $settled -or $lastOutcome -in 'pass', 'needs-human'
             }
         })
     $finished = @($rows | Where-Object Finished)
