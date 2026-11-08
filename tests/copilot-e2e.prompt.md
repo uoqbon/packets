@@ -289,43 +289,43 @@ Write `.packet-e2e/report.md` and show it to me:
 
 These stages check what the offline tests can't see of plan-only mode, the solo profile and the credit ceiling: what the Copilot coding agent and GitHub do to the board after a hand-off, what a host does with a reviewer above the session's cost tier, and whether a dispatch stops at its ceiling and resumes. They don't need stages 1 to 9 first. The ground rules hold, with these additions:
 
-- **Their own sandboxes.** Stage 10 runs in a second sandbox, for a plan-only install. Stages 11 and 12 share a third one, fresh, for a solo install. At the start of a stage, ask me for its repository (owner/name), unless `state.md` already names it. I open this prompt in a clone of that sandbox, so `.packet-e2e/` is that clone's. Ground rule 1 applies with that repository in place of the sandbox above.
+- **Their own sandboxes.** Stage 10 runs in a second sandbox, for a plan-only install. Stages 11 and 12 share a third one, fresh, for a solo install. I open this prompt in a clone of that sandbox, so `.packet-e2e/` is that clone's, and I name the stage (`/packet-kit-e2e 10`, `11` or `12`): in a fresh clone the next unfinished stage would be 1. I give this stage's sandbox as the sandbox input; if I didn't, ask me for it before anything else, unless `state.md` already names it. Ground rule 1 applies with that repository in place of the sandbox above.
 - **The pinned kit.** Ground rule 3 as written. Until the stage's setup PR merges, use the workspace's `.github/skills`, and say so in the report.
-- **Credits.** Each stage opens with the credits it expects, from `<kitSource>/docs/cost.md` and the solo table in `<kitSource>/docs/plan/solo-budget/review-notes.md` (*Credits on GPT-6.1 Sol*). The scripts (`install.ps1`, `board`, `credit-check`, `review-scope`) cost nothing. The chat sessions, the coding agent and the subagents do. Before the first step that spends credits, tell me the stage's figure and ⏸ wait for me to approve paid usage for it. Note in `state.md` the UTC time the stage starts and ends. Its last check is **Credits**: ask me what the AI usage report shows for that window (by model, where it breaks them down). The result is PASS within 0.6× to 1.75× of the figure (the cost page's range). It is FAIL outside that range, naming `budget.creditsPerRun` in `templates/packet-workflow.json` and docs/cost.md, which H-2 calibrates. It is BLOCKED if the report can't show the window. Your own session is in that window too: say how much of it is yours, if the report can tell, or that it can't.
+- **Credits.** Each stage opens with the credits it expects, from `<kitSource>/docs/cost.md` and the solo table in `<kitSource>/docs/plan/solo-budget/review-notes.md` (*Credits on GPT-6.1 Sol*). The scripts (`install.ps1`, `board`, `credit-check`, `review-scope`) cost nothing. The chat sessions, the coding agent and the subagents do. Before the first step that spends credits, tell me the stage's figure and ⏸ wait for me to approve paid usage for it. Note in `state.md` the UTC time the stage starts and ends. Its last check is **Credits**: ask me what the AI usage report shows for that window (by model, where it breaks them down). Your own session, which runs across every ⏸ wait, is in that window too, so grade the kit's sessions alone: the window's total less your share, and anything else I used Copilot for in it. The result is PASS within 0.6× to 1.75× of the stage's figure (the cost page's range). Outside that range it is FAIL, naming `budget.creditsPerRun` in `templates/packet-workflow.json` and docs/cost.md; the report lists it under a heading of its own, **Calibration**, apart from kit defects, since it is a data point for H-2, not a broken check. It is BLOCKED if the report can't show the window or can't separate your share.
 - **Results.** Checks are `S10.1` and so on, in `state.md` as before. When a stage ends, add a section for it to `.packet-e2e/report.md`, laid out as stage 9 lays out the report, with a **Credits** line (expected, actual, and the window) and the stage's **Answers for H-4**.
 
 ## Stage 10 · Plan-only
 
-**Expected credits:** about 250, plus the coding agent's run. That is `packet-plan` on a five-item spec, about 200, and a board or progress session, 15–20 each (cost page, *Per phase*). The kit doesn't estimate the coding agent (risk 8 in the review notes), so this stage measures it.
+**Expected credits:** about 200 for `packet-plan` on a five-item spec (cost page, *Per phase*), plus the coding agent's run. You run `board` as a script, which costs nothing. The kit doesn't estimate the coding agent (risk 8 in the review notes), so this stage measures it, and S10.11 grades the planning session alone.
 
 1. **Install.** In the plan-only sandbox, which has no kit yet: `pwsh -File <kitSource>/install.ps1 -Target . -PlanOnly -DryRun`, then without `-DryRun`.
    - **S10.1 File list:** the `add` lines are exactly these: every file under the kit source's `skills/packet-plan/`, `skills/packet-board/` and `skills/packet-progress/` (dotfiles aside), each under `.github/skills/`; `.github/skills/packet-dispatch/scripts/check-scope.ps1`; and `.github/packet-workflow.json`. Write a short script into `.packet-e2e/` that builds the expected list from the kit source and compares it with the output. Don't eyeball it. There is nothing under `.github/agents/` or `.github/hooks/`, no `packet-review` folder, and no `packet-dispatch/SKILL.md`. The summary says `(plan only: planning, the board and progress)` and ends `This install has no agents, no hook and no /packet-dispatch: run the installer without -PlanOnly to add them.` `.github/packet-workflow.kit.json` has `"mode": "plan-only"`.
    - **S10.2 Second run:** `-PlanOnly` again prints no `add` or `update` line, and `<n> file(s) already up to date`, where `<n>` is S10.1's count without the config.
-   - **S10.3 Discovery:** in a new chat, as S1.3 does, list the skills you can use without reading any files. Expected: `packet-plan`, `packet-board` and `packet-progress`, and no `packet-dispatch` or `packet-review`. The kit adds no custom agents.
+   - **S10.3 Discovery:** skills are found when a session starts, and yours started before the install. ⏸ Ask me to open a new chat in this workspace and run `/packet-kit-e2e 10` there; in it, as S1.3 does, list the skills you can use without reading any files. Expected: `packet-plan`, `packet-board` and `packet-progress`, and no `packet-dispatch` or `packet-review`. The kit adds no custom agents.
 
    In `.github/packet-workflow.json`, check that `repo` is this sandbox. Ask me for `board.provider`, as S2.4 does. `github-project` shows what GitHub's own project workflows do to an item's Status, which is what this stage is about. Leave everything else as the installer wrote it.
 2. **Plan, setup and sync.** Run stage 3, items 1 to 7, in this sandbox: the mini plan, the scaffold, `/packet-plan docs/specs/textkit.md e2e-textkit` in a new chat, its checks, the validator, the negative probe and the setup PR. Then run stage 4, items 1 to 3.
    - **S10.4 Plan:** S3.4 to S3.6 hold from a plan-only install. The validator (`.github/skills/packet-plan/scripts/validate-packets.ps1 -Phase e2e-textkit`) reports 0 errors, though the review skill's lens folder isn't installed (it falls back to the kit's lens names).
    - **S10.5 Board:** S4.3 holds: a second `sync` reports `0 created, 0 updated`, and `board next -Phase e2e-textkit` makes only the foundation packet `START`.
 3. **Hand-off to the coding agent.** Call the foundation packet `<ID>` and its issue `<n>`.
-   - **S10.6 Before:** `board get <ID>` is Ready. Then do what the board skill's `## Without a dispatcher` says before a hand-off: `board set <ID> "Status=In progress"`, then `board get <ID>` again, and `board ref <ID>` (the closing line the PR should carry). Record all three.
+   - **S10.6 Before:** `board get <ID>` is Ready. Then do what the board skill's `## Without a dispatcher` says before a hand-off: `board set <ID> "Status=In progress"`, then `board get <ID>` again, and `board ref <ID>` (the closing line the PR should carry). PASS when the first is Ready and the second In progress.
 
    ⏸ Ask me to assign issue `<n>` to Copilot (the issue's Assignees, *Copilot*), and to come back once its draft PR appears. Tell me before I go: if GitHub asks me to approve the workflow run on Copilot's PR, I approve it. You never start a workflow (ground rule 2).
-   - **S10.7 While it works:** `board get <ID>`, `gh issue view <n> --json state,assignees,labels` and `gh pr view <pr> --json number,isDraft,headRefName,body,closingIssuesReferences`. Record the item's status, and whether anything but the kit changed it (labels, a project workflow, an assignee). Record the PR's branch (not a `pkt/` one), whether its body has `board ref`'s line or another closing keyword, and whether `closingIssuesReferences` lists `<n>`.
-   - **S10.8 Scope:** run the scope check as the board skill's `## Without a dispatcher` step 3 runs it, from your pinned kit with `-Head origin/<the PR's branch>`. PASS if it exits 0 or 1 and prints its list. An `OUTSIDE` line is the agent's work, not a kit defect: record it as a note on the hand-off. Exit 2 is FAIL.
+   - **S10.7 While it works:** `board get <ID>`, `gh issue view <n> --json state,assignees,labels` and `gh pr view <pr> --json number,isDraft,headRefName,body,closingIssuesReferences`. Record the item's status, and whether anything but the kit changed it (labels, a project workflow, an assignee). Record the PR's branch (not a `pkt/` one), whether its body has `board ref`'s line or another closing keyword, and whether `closingIssuesReferences` lists `<n>`. PASS once recorded: a status change by anything but the kit is a note for H-4, not a kit defect.
+   - **S10.8 Scope:** run the scope check as the board skill's `## Without a dispatcher` step 3 runs it, from your pinned kit with `-Head origin/<the PR's branch>`. PASS if it exits 0 with `OK`, or 1 with its list. An `OUTSIDE` line is the agent's work, not a kit defect: record it as a note on the hand-off. Exit 2 is FAIL.
 
-   ⏸ When the agent marks the PR ready and CI has passed, ask me to review and merge it.
-   - **S10.9 After the merge:** before any `reconcile`, record `board get <ID>` and `gh issue view <n> --json state,stateReason`. Did the merge close the issue, and did anything move the item?
-4. **S10.10 Reconcile:** `board reconcile`, then `board get <ID>` is Done and `board next -Phase e2e-textkit` makes both feature packets `START`. If the issue stayed open, the item doesn't become Done. That is a FAIL of the hand-off guidance, which promises the merge closes the item: the board skill's `## Without a dispatcher` step 2 and the README's *Plan and board only*. Record what the PR body said instead.
+   ⏸ When the agent marks the PR ready and CI has passed, ask me to review and merge it. If `closingIssuesReferences` doesn't list `<n>`, first ask me to add `board ref`'s line to the PR body, as the board skill's step 2 says the person handing off does, and record that it was needed.
+   - **S10.9 After the merge:** before any `reconcile`, record `board get <ID>` and `gh issue view <n> --json state,stateReason`. Did the merge close the issue, and did anything move the item? PASS once recorded.
+4. **S10.10 Reconcile:** `board reconcile`, then `board get <ID>` is Done and `board next -Phase e2e-textkit` makes both feature packets `START`. FAIL only if the PR body had `board ref`'s line and the issue still stayed open, or the item didn't become Done after `reconcile`: name the board skill's `## Without a dispatcher` step 2 and the README's *Plan and board only*, which promise the merge closes the item.
 5. **S10.11 Credits**, as the rules above say. Record the coding agent's share on its own, if the report shows it.
 
 **Answers for H-4:** none of its four questions is answered here. The Azure Boards hand-off is H-4's own item, outside this prompt; S10.7 and S10.9 record what the GitHub side did.
 
 ## Stage 11 · Solo
 
-**Expected credits:** about 1,800 on the shipped models, and up to about 2,600 if the strong model is Claude Opus 5.5. The parts:
+**Expected credits:** about 1,800 at GPT-6.1 Sol's rates, and about 2,600 when the dearer strong model of step 5 is Claude Opus 5.5 (twice the rate). S11.12 grades on the figure for the strong model you used, scaling the word-count packet's part by that model's rate. The parts:
 
-- `packet-plan` on a six-item spec: about 225.
+- `packet-plan` on a six-item spec: about 215.
 - The foundation dispatch: about 675, a typical solo S packet (two rounds at tier 2), or 370 for one clean round (the review notes' solo table).
 - The word-count packet: about 815, an S packet forced to tier 3. Its tier-3 reviewer runs and the resumed dispatcher run on the dearer strong model, at that model's rate (Opus 5.5 costs twice GPT-6.1 Sol: cost page, *Rates*).
 - Two `resume` sessions: 40 each.
@@ -334,7 +334,7 @@ These stages check what the offline tests can't see of plan-only mode, the solo 
    - **S11.1 Solo config:** compare with a script. `review.maxRounds` is 2, `review.lensesPerReviewer` 3, `review.shouldFixPassFromRound` 2 and `review.tierCap` 2. `budget.maxCreditsPerPacket` is `{"S":950,"M":1500,"L":2200}` and `models.agents` is `{"packet-dispatcher":"standard"}`. Every other key is as in `<kitSource>/templates/packet-workflow.json`, `budget.creditsPerRun` included, apart from `repo`, `defaultBranch` and `guardrails.protectedBranches`, which the installer fills in. The output has `Agent classes from models.agents: packet-dispatcher on standard (the kit's: strong).` and no `WARNING`, since the shipped lists are all the same. `packet-dispatcher.agent.md`'s `model:` line lists the standard class.
 
    Then set `repo`, `board.provider` and `commands.ci` as S2.4 does. Leave `review.deepPaths` empty for now. Keep `trustedAuthors` empty: S12.7's second account must not be in it. Run the installer again with `-Profile solo`: it says `.github/packet-workflow.json already exists and already has the solo profile's settings.`
-2. **Plan.** Write the solo mini plan below to `docs/specs/textkit-solo.md`. Add the scaffold (stage 3, item 2). Then run stage 3, items 3 to 7, with `/packet-plan docs/specs/textkit-solo.md e2e-solo` and `-Phase e2e-solo`. It has no slow packet, so item 4's slow-packet check is N/A. Then run stage 4, items 1 to 3, with `-Phase e2e-solo`. Note in `state.md` the IDs of the foundation, word count, title case, reverse and initials packets, and each one's **Review lenses**.
+2. **Plan.** Write the solo mini plan below to `docs/specs/textkit-solo.md`. Add the scaffold (stage 3, item 2). Then run stage 3, items 3 to 7, with `/packet-plan docs/specs/textkit-solo.md e2e-solo` and `-Phase e2e-solo`. It has no slow packet, so item 4's slow-packet check is N/A. Then run stage 4, items 1 to 3, with `-Phase e2e-solo`. Read their checks for this plan: five packets and a human task, all Ready, no slow packet; the four feature packets depend only on the foundation, own disjoint paths and list `TextKit.ps1` as a shared touchpoint; `board next` makes only the foundation `START` and the four feature packets `BLOCKED` on it. Note in `state.md` the IDs of the foundation, word count, title case, reverse and initials packets, and each one's **Review lenses**.
 3. **One dispatch end to end, in Copilot CLI with a session limit.** This run also answers H-4's first question (S11.6).
 
    ⏸ Ask me to:
@@ -345,21 +345,21 @@ These stages check what the offline tests can't see of plan-only mode, the solo 
    5. paste the dispatcher's final message here.
 
    When I'm back:
-   - **S11.2 Dispatch:** S5.1 to S5.10 hold for it. Under `review.maxRounds` 2, `board rounds <pr>` lists one or two rounds, not three.
+   - **S11.2 Dispatch:** S5.1 to S5.10 hold for it. Under `review.maxRounds` 2, `board rounds <pr>` lists one or two rounds, not three. Ending Needs human after round 2, the last round, with a blocking finding is also a PASS (risk 6 in the review notes): then S5.2, S5.6 and S5.8 read that ending instead, and the comment offers a settle.
    - **S11.3 Rounds and tiers:** record each round's `tier=` and `lenses=` from its `packet:round` marker (`board rounds <pr>`), and its report header. From `<kit>`, run `review-scope.ps1 -Base origin/<default> -Head <round 1's head> -Packet <ID> -Json` and record `Floor`, `Uncapped` and `Reasons`. Expected:
      - no round above tier 2 unless `Reasons` name a forced raise (review machinery, a `.gitattributes` change, a `deepPaths` or `maxPaths` match, a diff of only ignored files, the packet's Review tier line);
-     - a round whose `Uncapped` is above its `Floor` says `(capped from <Uncapped> by review.tierCap)` in its header, and other rounds don't;
+     - round 1's header says `(capped from <Uncapped> by review.tierCap)` when its `Uncapped` is above its `Floor`, and not otherwise; for round 2, record what its header says;
      - no reviewer run covers more than three lenses (the report's Run column).
 
      Record the tiers as, for example, `2 (capped from 3), 2`.
    - **S11.4 Credits line:** each round report has `**Credits** <n> of 950 (estimate)`, with `<n>` rising from round to round. `pwsh -File <kit>/.github/skills/packet-progress/scripts/progress.ps1 -Phase e2e-solo -Credits` lists the packet at or under 950. Record its estimate.
-   - **S11.5 Measured:** ask me for the AI usage report's credits for the CLI session's window. Record them beside S11.4's estimate, by model if the report shows it.
+   - **S11.5 Measured:** ask me for the AI usage report's credits for the CLI session's window. Record them beside S11.4's estimate, by model if the report shows it. If the report can't show that window (it gives only days, say), it is BLOCKED, and so is S11.6; ask me to run step 3 on an otherwise idle day next time.
    - **S11.6 Session limit (H-4's first question):** compare step 4's spend with S11.5's credits. The estimator puts a solo S packet's dispatcher (`dispatcher`, `dispatcherPerRound` and `dispatcherPerReviewerRun`) at about half of its total. So:
      - a CLI figure of 0.9 of the report's or more: the limit counts the subagents' credits;
      - 0.7 or less: it counts the dispatcher's alone;
      - in between, or if the CLI showed no spend: BLOCKED, with both figures.
 
-     Record the answer, the two figures, `copilot --version`, and whether the limit stopped anything (it shouldn't have).
+     Record the answer, the two figures, `copilot --version`, and whether the limit stopped anything (it shouldn't have). If it did stop the session, that answers the question too: the limit counts what the CLI counted when it stopped. Record where it stopped and `board claims <ID>`, wait out the lease (`claims.leaseMinutes`), and ask me to type `/packet-dispatch resume <ID>` in a new CLI session without a limit; S11.2 to S11.4 then read the resumed run.
 4. ⏸ Ask me to merge the foundation PR. Then `board reconcile`, and `board next -Phase e2e-solo` makes the four feature packets `START`.
 5. **A reviewer above the session's tier, in VS Code's Local harness.**
    1. Ask me for a model in a higher cost tier than the standard class's first entry, spelled as my picker writes it (Claude Opus 5.5, if it's offered).
@@ -384,13 +384,13 @@ These stages check what the offline tests can't see of plan-only mode, the solo 
      - the dearer model: the host didn't apply the cost tier here; `HOST`;
      - GPT-6.1 Sol or Claude Sonnet 5.5: it fell back without a word, which is risk 5; `HOST`. The kit stops on a refusal and can't see a silent fallback.
 
-     Either way, record the harness and versions as S1.4 does, and mark S11.8 BLOCKED. To still see the stop, put the dearer model alone in `models.strong`, move `deepPaths` to the reverse packet's module, merge, run the installer again, and run S11.8 on that packet. Stage 12 then uses the initials packet in its place.
+     Either way, record the harness and versions as S1.4 does, and mark S11.8 BLOCKED. To still see the stop, on a branch put the dearer model alone in `models.strong`, move `deepPaths` to the reverse packet's module and run the installer again; commit, push and open a PR, ⏸ ask me to merge it, then repeat step 5.4 for that packet and run S11.8's checks on that packet as **S11.8b** (S11.10 and S11.11 then use it too). That costs about 815 more, at the strong model's rate. Stage 12 then uses the initials packet in its place.
    - **S11.10 A settle isn't an answer to a model-tier stop** (the model-tier half of stage 12's settle refusal). ⏸ Ask me to comment `` `packet:settle head=<the stop's head>` `` on the PR, as the comment's only line, then to type `/packet-dispatch resume <ID>` in the same standard-model session. Expected:
      - no round runs;
      - a new item comment whose first line repeats the stop's own (`` `packet:needs-human reason=model-tier agent=packet-reviewer-deep round=1 head=<sha>` ``) and says the settle isn't an answer here;
      - `board get <ID>` is still Needs human, and `board claims <ID>` prints nothing;
      - `board rounds <pr>` lists the `settle-request` and no `settle-check`.
-6. **Resume on the strong model.** ⏸ Ask me to type `/packet-dispatch resume <ID>` in a Local session whose model is the dearer one.
+6. **Resume on the strong model.** ⏸ Ask me to open a Local session, pick **packet-dispatcher**, then pick the dearer model in the model picker (the dispatcher's own `model:` line still lists the standard class), confirm the session header shows it, and type `/packet-dispatch resume <ID>`. If the host won't let the session leave the agent's pinned model, record `HOST` with the harness and versions, and take the stop's option 3 instead: `models.agents` gives `packet-reviewer-deep` the dispatcher's class, in a PR I merge, then the installer again and the resume.
    - **S11.11 Resume:** the round ran again from its credit check. `board rounds <pr>` has `round 1` with `head` equal to the stop's `head` and `tier=3`. The report header names `packet-reviewer-deep` and the dearer model. Ask me which model the reviewer's subagent header showed (S5.11's rules). The packet ends Ready to merge (S5.1 to S5.10), or Needs human after round 2, the last round. Record which. ⏸ Ask me to merge it if it is Ready to merge.
 7. **S11.12 Credits**, as the rules above say. Give step 3's CLI window apart from the rest, if the report can.
 
@@ -438,20 +438,20 @@ Run it in stage 11's sandbox, after stage 11. Each packet here is one of the sol
 **Expected credits:** about 1,300, or up to about 2,000 if the spare packet runs. The parts:
 
 - One packet through a raise, its fix and round 2: about 675, a typical solo S packet.
-- One packet passed with follow-ups after round 1: about 410, the base, round 1 and its booked fix run, at the numbers below.
+- One packet passed with follow-ups after round 1: about 370 spent (the base and round 1, at the numbers below; the estimate also books a fix run of 40 that the settle never runs).
 - Six `resume` sessions: 40 each.
-- The spare, if a round 1 confirms nothing: up to 675 more.
+- The spare, if a round 1 still confirms nothing: up to 675 more.
 
 **How the ceiling is set.** These numbers come from `credit-check.ps1` on the template's rates, and were checked offline.
 
 - `credit-check -Next start` prices a packet's base and a one-lens round 1 at tier 1, or at its Review tier line. A packet with two or more Review lenses always prices its real round 1 higher than that. So a ceiling equal to the start price lets Select through, and stops the packet before round 1, with `next=round`.
 - From that stop, a raise to `so-far + step + implementerFix.S` lets round 1 run. If round 1 confirms findings, the packet then stops before the fix, with `next=fix`. That is because round 1's `packet:round … outcome=fix` marker books the fix run, which makes the new so-far exactly that sum. The fix check then adds at least one more round on top.
-- For an S packet with no Review tier line, the start price is 318. Round 1 at tier 2 with two lenses in one run prints `so-far=130 step=238`, so the raise is 368 + 40 = 408. The fix check after it prints `so-far=408 step=210 total=618`.
+- For an S packet with no Review tier line, the start price is 318. Round 1 at tier 2 with two lenses in one run prints `so-far=130 step=238`, so the raise is 368 + 40 = 408. The fix check after it, with one confirmed lens, prints `so-far=408 step=210 total=618` (with two, `step=228`).
 - The rule depends only on the stop's numbers. A round of any shape still lands inside the window.
 
 `<kit>`'s `credit-check` below is `pwsh -File <kit>/.github/skills/packet-dispatch/scripts/credit-check.ps1`. Packet A is title case, packet B is reverse and packet C is initials, the spare. If S11.9 used reverse, then B is initials and there is no spare.
 
-1. **The ceiling at the start price.** Run `credit-check -Packet <A> -Base origin/<default> -Head origin/<default> -Next start` and note its `total` as `<T>`. On a branch, set `budget.maxCreditsPerPacket.S` to `<T>`, commit, push and open a PR. ⏸ Ask me to merge it. Credit-check reads the stricter of the base's ceiling and the default branch's, so this holds for every S packet from now on.
+1. **The ceiling at the start price.** First check, from `state.md`, that A is an S packet with at least two Review lenses (B and C too, before their turn); the method needs both. Run `credit-check -Packet <A> -Base origin/<default> -Head origin/<default> -Next start` and note its `total` as `<T>`. On a branch, set `budget.maxCreditsPerPacket.S` to `<T>`, commit, push and open a PR. ⏸ Ask me to merge it. Credit-check reads the stricter of the base's ceiling and the default branch's, so this holds for every S packet from now on.
 2. **A stop before round 1.** ⏸ Ask me to dispatch A in a new worktree session (Local harness or Copilot harness, on the standard class's first model) and paste the final message. Expected: Select prints `WITHIN … total=<T> ceiling=<T> (config)`, the implementer runs, the PR opens, and round 1's credit check prints `OVER`.
    - **S12.1 `next=round` stop:**
      - `board get <A>` is Needs human, and `board claims <A>` prints nothing;
@@ -459,13 +459,13 @@ Run it in stage 11's sandbox, after stage 11. Each packet here is one of the sol
      - the comment quotes the check's `OVER … (config)` line, and offers a raise and a stop, with no pass-with-follow-ups option;
      - `board rounds <pr>` lists no `packet:round` report, and no reviewer ran (ask me).
 
-     Note `so-far` and `step`.
+     Note `so-far` and `step`. If round 1 ran instead (one lens at tier 1 prices exactly `<T>`), S12.1 and S12.2 are BLOCKED for A: let it go on, and take the next packet.
    - **S12.2 A settle isn't an answer before a round** (stage 12's settle refusal; S11.10 is its model-tier half). ⏸ Ask me to comment `` `packet:settle head=<the stop's head>` `` on the PR, as its only line, then to type `/packet-dispatch resume <A>`. Expected:
      - no follow-up issue and no round;
      - `board rounds <pr>` lists the `settle-request`, not `(used)`, and no `settle-check`;
      - a new item comment whose first line repeats the stop's own `` `packet:needs-human reason=budget next=round …` `` line, and says which of **Settle**'s conditions failed (a settle before the last round needs a `next=fix` stop);
      - `board get <A>` is still Needs human, and `board claims <A>` prints nothing.
-3. **A raise into the fix window.** Work out `<c>` = `so-far` + `step` + `budget.creditsPerRun.implementerFix.S` from the config at the base (40 on the template's rates). ⏸ Ask me to comment `` `packet:budget max=<c>` `` on the PR, as the comment's first words, then to type `/packet-dispatch resume <A>`.
+3. **A seeded defect, then a raise into the fix window.** Round 1 must confirm a finding for the stops below, and these modules are small enough to pass clean. ⏸ Ask me to make one commit in A's worktree, inside its own paths, that breaks its null-or-empty case and deletes the test for it (`e2e: seeded defect`), and to push it from there, so the worktree stays at the PR head. Then work out `<c>` = `so-far` + `step` + `budget.creditsPerRun.implementerFix.S` from the config at the base (40 on the template's rates). ⏸ Ask me to comment `` `packet:budget max=<c>` `` on the PR, as the comment's first words, then to type `/packet-dispatch resume <A>`.
    - **S12.3 Raise read:** `board rounds <pr>` lists `budget 0 max=<c> by <my login>`. The resume set In review and ran round 1. Its `packet:round 1` report has `**Credits** <so-far + step> of <c> (estimate)`. If round 1 stops before its round again (the panel raised the tier itself), work out `<c>` again from the new stop.
    - **S12.4 `next=fix` stop:** if round 1's marker says `outcome=fix`:
      - `board get <A>` is Needs human, and `board claims <A>` prints nothing;
@@ -477,7 +477,7 @@ Run it in stage 11's sandbox, after stage 11. Each packet here is one of the sol
    - **S12.5 Resume after a raise:**
      - `board rounds <pr>` lists both `budget` rows, the newer one `max=2000`;
      - the fix ran: a `Round-1 review fixes (<A>)` commit is on the PR;
-     - a `packet:round 2` report follows it, at tier 2 or lower unless a forced reason holds, with `**Credits** <n> of 2000 (estimate)`;
+     - a `packet:round 2` report follows it, at round 1's tier or one above it up to the cap of 2 (more only with a forced reason), with `**Credits** <n> of 2000 (estimate)`;
      - A ends Ready to merge (S5.1 to S5.10), or Needs human after round 2, the last round. Record which.
 
      ⏸ Ask me to merge it if it is Ready to merge.
@@ -487,7 +487,7 @@ Run it in stage 11's sandbox, after stage 11. Each packet here is one of the sol
      - `board rounds <pr>` doesn't list it;
      - from `<kit>`, `review-scope.ps1 -Base origin/<default> -Head <the stop's head> -Packet <B> -Json` gives round 1's `Tier`, `Lenses` and `Runs`. Then `credit-check -Packet <B> -Base origin/<default> -Head <the stop's head> -Pr <pr> -Next round -Round 1 -Tier <Tier> -Lenses <Lenses joined with commas> -Runs <the number of Runs>` prints `OVER so-far=<the stop's so-far> step=<the stop's step> … ceiling=<T> (config)`, not `(raised by …)`, and exits 3;
      - the resume ran no round and posted no new `packet:needs-human` comment (`board marker <B> needs-human -Json` has the stop's `CreatedAt`): `board get <B>` is still Needs human, `board claims <B>` prints nothing, and `board rounds <pr>` has no `packet:round` report.
-6. **Settle: pass with follow-ups.** Raise into the fix window as in step 3, for B.
+6. **Settle: pass with follow-ups.** Seed a defect and raise into the fix window as in step 3, for B.
    - **S12.8 `next=fix` stop:** S12.3 and S12.4 hold for B. If round 1 passed, record BLOCKED, and run steps 5 and 6 with C if C hasn't been used.
    - **S12.9 Pass with follow-ups.** ⏸ Ask me to comment `` `packet:settle head=<the stop's head>` `` on the PR, as the comment's only line, then to type `/packet-dispatch resume <B>`. Expected:
      - one follow-up issue per confirmed finding of round 1, with the `labels.followUp` label and a link to the PR and the finding. A contract finding is titled `<B> contract: …` and also carries `labels.needsHuman`. Record the issue numbers;
@@ -498,7 +498,7 @@ Run it in stage 11's sandbox, after stage 11. Each packet here is one of the sol
 
      ⏸ Ask me to merge it.
 7. **S12.10 Credits**, as the rules above say.
-8. **Clean-up:** add the ceiling to stage 9's clean-up list. `budget.maxCreditsPerPacket.S` is still `<T>`, and the solo profile's value is 950.
+8. **Clean-up:** add the ceiling to the clean-up list in this clone's report. `budget.maxCreditsPerPacket.S` is still `<T>`, and the solo profile's value is 950.
 
 **Answers for H-4:** the fourth question, whether a dispatch stops at the ceiling and resumes. Answer it from:
 - the stops: S12.1, S12.4 and S12.6;

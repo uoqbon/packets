@@ -4,7 +4,7 @@ Choices [PKT-9](../../plan/solo-budget/packets/PKT-9.md) left open, and why each
 
 ## Where the stages go
 
-1. **After stage 9, as stages 10, 11 and 12, under a short preamble.** Stage 9 is the report, so the new stages come after it, but no existing number moves: the README and the tests cite S1.4, S5.11, S8.7 and S8.8. The preamble says what the three stages add to the ground rules. Each new stage ends by adding its own section to `report.md`, laid out the way stage 9 lays out the report. The frontmatter's `argument-hint` now reads `stage 1-12`.
+1. **After stage 9, as stages 10, 11 and 12, under a short preamble.** Stage 9 is the report, so the new stages come after it, but no existing number moves: the README and the tests cite S1.4, S8.7 and S8.8. The preamble says what the three stages add to the ground rules. Each new stage ends by adding its own section to `report.md`, laid out the way stage 9 lays out the report. The frontmatter's `argument-hint` now reads `stage 1-12`.
 2. **Each stage asks for its sandbox when it starts. There are no new `${input:…}` placeholders.** The prompt asks for every placeholder before anything else. New placeholders would make a run of stages 1 to 9 ask for two sandboxes it never uses. Stage 10 needs a second sandbox, because a plan-only install can't share a repository with a full one: `-PlanOnly` is refused on a full install. Stage 11 needs a fresh one, because `-Profile` only chooses the template for a new config. Stage 12 continues in stage 11's sandbox, which already has the solo config, the plan and the board. Ground rule 1 then applies to whichever sandbox the stage names. H-4 asks for exactly these two sandboxes.
 3. **Check IDs follow the existing format** (`S10.1` and so on, numbered by check, not by step). The ⏸ checkpoints tell the owner what to do and what to paste back, as stages 5 to 8 do. Any check that only a second account can run is MANUAL without one, as S8.4 is.
 
@@ -31,12 +31,15 @@ Choices [PKT-9](../../plan/solo-budget/packets/PKT-9.md) left open, and why each
 
 14. **The fix window is set with a `packet:budget` raise after a `next=round` stop, not with `budget.maxCreditsPerPacket` itself.** The packet's step 1 says to set the config value between round 1's estimate and that plus the cheapest round after a fix. That window depends on round 1's tier, lenses and runs, which aren't known until review-scope runs on the PR. The dispatcher runs round 1 straight after it opens the PR, so there is no point at which to set it. Two pieces of merged code close the gap:
     - the ceiling is set to `-Next start`'s price. Select then goes through, and round 1's check stops with `next=round`, which the packet's step 4 needs anyway;
-    - from that stop, a raise to `so-far + step + implementerFix.S` is exact. Round 1's `outcome=fix` marker books the fix run, so after round 1 the so-far is that sum, and the fix check adds at least one round on top.
+    - from that stop, a raise to `so-far + step + implementerFix.S` lands in the window: exactly for S, whose fix rate is even, and within 1 for M and L, since the estimator rounds each round's row. Round 1's `outcome=fix` marker books the fix run, so after round 1 the so-far is that sum, and the fix check adds at least one round on top.
 
-    A raise is also the only way to resume from a budget stop. PKT-6's decision 10d says a ceiling raised in the config isn't an answer on its own. The numbers were checked offline with the merged `credit-check.ps1` and a stubbed `gh`. On the template's rates, an S packet starts at 318. Round 1 at tier 2 with two lenses prints `so-far=130 step=238`, so the raise is 408. The fix check after it prints `OVER so-far=408 step=210 total=618 ceiling=408 (raised by …)`, and round 1's own check is `WITHIN … total=368 ceiling=408`. With four lenses in two runs, the same rule gives 496, and so-far is 496.
+    A raise is also the only way to resume from a budget stop. PKT-6's decision 10d says a ceiling raised in the config isn't an answer on its own. The numbers were checked offline with the merged `credit-check.ps1` and a stubbed `gh`. On the template's rates, an S packet starts at 318. Round 1 at tier 2 with two lenses prints `so-far=130 step=238`, so the raise is 408. The fix check after it, with one confirmed lens, prints `OVER so-far=408 step=210 total=618 ceiling=408 (raised by …)` (with two, `step=228`), and round 1's own check is `WITHIN … total=368 ceiling=408`. With four lenses in two runs, the same rule gives 496, and so-far is 496.
 15. **The packet's steps run in this order: 4 (budget half), 1, 2; then 5, 1, 3.** Packet A takes the `next=round` stop and the refused settle (S12.1, S12.2), then the raise into the window (S12.3), the `next=fix` stop (S12.4), and the raise and resume (S12.5). Packet B takes the untrusted raise at its `next=round` stop (S12.6, S12.7), then the window again (S12.8) and the settle (S12.9). The untrusted raise goes before B's own raise. A trusted raise posted earlier would decide the ceiling whatever the untrusted one says, and the check would prove nothing.
+15a. **Round 1 is made to confirm a finding.** The stops before a fix, the second raise and the settle all need round 1 to end `outcome=fix`, and the mini plan's modules are small enough to pass clean (the tests review). So before each raise into the window, the owner pushes one commit, inside the packet's paths, that breaks its null-or-empty case and drops its test. It is pushed from the packet's own worktree, so the dispatcher's checkout stays at the PR head the panel checks. It also means the settle passes a blocking finding as a follow-up, which the narrow settle allows and its options name.
 16. **The untrusted raise is judged on three readers:** `board rounds` doesn't list it; `credit-check` with round 1's own arguments (from review-scope at the stop's head) still prints `(config)` and exits 3; and the resume leaves no new `packet:needs-human` comment. A resume with no answer releases and stops without a comment (packet-dispatch, **After a stop**), and the stop's `CreatedAt` shows that.
 17. **Every check names the marker it reads:** `packet:needs-human reason=budget …` or `reason=model-tier …` (through `board marker … needs-human -Json`), `packet:budget max=…` (the `budget` rows of `board rounds`), `packet:settle head=…` (`settle-request`, `(used)`), `packet:settle-check head=…`, `packet:round …` and `packet:handoff …`.
+
+15b. **The Credits checks grade the kit's sessions alone.** The verifier's own session spans every ⏸ wait, so it would swamp the comparison; a stage whose share can't be separated is BLOCKED. A figure outside the range is reported under **Calibration**, apart from kit defects: it is a data point for H-2. Stage 10 grades `packet-plan` alone and records the coding agent apart.
 
 ## Where the packet and the merged code differ
 
@@ -69,6 +72,26 @@ Only a live run can check the rest:
 ## Tests
 
 18. **No test was added.** The packet's Owns has no test file, and `tests/run-tests.ps1` is PKT-7's. The two existing assertions that read the e2e prompt still find the guard headings and the stop line that S1.4, S8.7 and S8.8 quote, and those stages are unchanged. The suite passes: 623 passed and 0 failed, both before and after this change.
+
+## Lens review
+
+19. **Each of the packet's lenses had an independent review of the diff.** Neither found anything blocking.
+    - **correctness** checked every command, flag, marker and output line against `main`, reproduced the installer output and stage 12's numbers, and confirmed no existing stage moved. Fixed:
+      - S11.9's fallback ran the installer after the merge, and had no ⏸ before it;
+      - S10.3's new chat needs the owner, and so does naming the stage in a fresh clone;
+      - S11.11 now says how to put the dispatcher session on the dearer model;
+      - stage 12 checks each packet's size and lens count first, and has a branch for a round 1 that doesn't stop;
+      - the fix check's numbers say they hold for one confirmed lens;
+      - decision 14 says the raise is exact only for S.
+      Nits fixed: the solo plan's own expectations for stages 3 and 4, round 2's tier, S10.8's `OK`, the capped-from check limited to round 1, the clean-up wording, and the stage numbers the tests cite.
+    - **tests** checked that every in-scope item and H-4's questions map to a check, and that the suite passes unchanged. Fixed:
+      - the Credits checks now grade without the verifier's session (decision 15b);
+      - round 1 is made to confirm a finding (decision 15a);
+      - S10.10 fails only if the closing line was there;
+      - S11.2 accepts a Needs human after round 2;
+      - S11.5 and S11.6 are BLOCKED without the window, and have a path for a limit that trips;
+      - the recording checks in stage 10 have result rules.
+      Nits fixed: the expected figures for stages 10 to 12, and the S11.8b record and its cost.
 
 ## Pointers for PKT-8 or a later change
 
