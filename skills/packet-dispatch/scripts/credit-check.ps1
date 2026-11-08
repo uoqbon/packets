@@ -33,7 +33,11 @@
            that must follow, the last round's confirmed lenses at its tier plus one (the +1 only up
            to review.tierCap, or 3; never below the last round's tier), in review.lensesPerReviewer lenses per run. After a round that passed
            (a CI fix), or after a Needs human (a fix the owner asked for): the fix run, which no
-           marker books, plus a one-lens round at that round's tier
+           marker books, plus a one-lens round at that round's tier. A round with outcome=fix that a
+           trusted packet:settle-check follows (no round report after it, as progress.ps1 -Credits
+           reads a settle) was settled: its findings went to follow-ups, so it is priced as a passed
+           round, a CI fix. So far still books that round's fix run, as Get-PwCreditEstimate and
+           progress do
   A raise is the newest trusted PR comment `packet:budget max=<credits>`: it holds for the rest of the
   packet, and only ever raises the ceiling. A trusted raise whose max isn't a whole number above 0 is
   an error.
@@ -220,6 +224,17 @@ try {
         if (-not $last) { Stop-Pw "-Next fix needs a round before it, and PR #$prNumber has no round marker" }
         $outcome = "$(Get-PwField $last 'Outcome')"
         if ($outcome -notin 'fix', 'pass', 'needs-human') { Stop-Pw "-Next fix after round $lastRound, whose outcome is '$outcome': only a fix, a passed round or a Needs human is followed by a fix run" }
+        # A settled round (the narrow settle after a budget stop) keeps outcome=fix, but its findings went to
+        # follow-ups, so the fix that comes next is a CI fix. Settled is PKT-7's rule in Get-PwCreditSummary:
+        # walking back from the newest trusted row (oldest first, by comment id), a settle-check comes before
+        # any round report. A settle request, a raise or an untrusted comment never settles a round.
+        $settled = $false
+        for ($i = $rows.Count - 1; $i -ge 0; $i--) {
+            $k = Get-PwField $rows[$i] 'Kind'
+            if ($k -eq 'settle-check') { $settled = $true; break }
+            if ($k -eq 'round' -or -not $k) { break }
+        }
+        if ($outcome -eq 'fix' -and $settled) { $outcome = 'pass' }
     }
     $newStep = {
         <# The step's row, priced with one view's config (tier cap, lens grouping) and packet (Review tier). #>
@@ -241,7 +256,7 @@ try {
                     [pscustomobject]@{ Kind = 'round'; Round = $lastRound + 1; Tier = [string]$tierNext; Lenses = $(if ($confirmed) { $confirmed -join ',' } else { 'correctness' }); Runs = [string][Math]::Ceiling($n / $per); Outcome = 'pass'; CreatedAt = $null }
                 }
                 else {
-                    # A CI fix after a passed round, or a fix the owner asked for after a Needs human: no marker
+                    # A CI fix after a passed or settled round, or a fix the owner asked for after a Needs human: no marker
                     # books its run, so this row's outcome=fix does.
                     [pscustomobject]@{ Kind = 'round'; Round = $lastRound + 1; Tier = [string]$lastTier; Lenses = 'correctness'; Runs = '1'; Outcome = 'fix'; CreatedAt = $null }
                 }
