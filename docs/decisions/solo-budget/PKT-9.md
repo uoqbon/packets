@@ -11,7 +11,7 @@ Choices [PKT-9](../../plan/solo-budget/packets/PKT-9.md) left open, and why each
 ## Credits
 
 4. **Each stage opens with an "Expected credits" line, and closes with a Credits check against the AI usage report.** The figures come from docs/cost.md (`packet-plan` per phase, board sessions, the per-run table, `resume` at 40, the model rates) and from its *Solo profile* section, which PKT-8 added (#43): a solo S packet at 675 typical, 370 for one clean round, 820 when forced to tier 3. This PR first took them from the review notes' table, which gives 815 for the forced packet; once #43 merged, the stages cite the cost page, as the packet asks.
-5. **A Credits check passes within 0.6× to 1.75× of its figure.** That is the cost page's own range. Outside it, the check fails and names `budget.creditsPerRun` and the cost page, which H-2 calibrates. If the report can't show the stage's window, the check is BLOCKED, never PASS. The verifier's own chat session falls in the same window, so the stage records how much of the total is its own, or that the report can't tell.
+5. **A Credits check passes within 0.6× to 1.75× of its figure.** That is the cost page's own range. Outside it, the result is `CALIBRATION`, not FAIL (the owner's decision on #44): the report lists it under a **Calibration** heading with both figures and the ratio, naming `budget.creditsPerRun` and the cost page, which H-2 calibrates. An estimate that misses is a data point, not a broken kit. If the report can't show the stage's window, the check is BLOCKED, never PASS. The verifier's own chat session falls in the same window, so the stage records how much of the total is its own, or that the report can't tell.
 6. **A stage that spends credits stops for approval first.** H-4 says paid usage is approved for calibration only (decision 10), so each stage asks the owner to approve its figure before it spends anything.
 
 ## Stage 10 · Plan-only
@@ -39,7 +39,7 @@ Choices [PKT-9](../../plan/solo-budget/packets/PKT-9.md) left open, and why each
 16. **The untrusted raise is judged on three readers:** `board rounds` doesn't list it; `credit-check` with round 1's own arguments (from review-scope at the stop's head) still prints `(config)` and exits 3; and the resume leaves no new `packet:needs-human` comment. A resume with no answer releases and stops without a comment (packet-dispatch, **After a stop**), and the stop's `CreatedAt` shows that.
 17. **Every check names the marker it reads:** `packet:needs-human reason=budget …` or `reason=model-tier …` (through `board marker … needs-human -Json`), `packet:budget max=…` (the `budget` rows of `board rounds`), `packet:settle head=…` (`settle-request`, `(used)`), `packet:settle-check head=…`, `packet:round …` and `packet:handoff …`.
 
-15b. **The Credits checks grade the kit's sessions alone.** The verifier's own session spans every ⏸ wait, so it would swamp the comparison; a stage whose share can't be separated is BLOCKED. A figure outside the range is reported under **Calibration**, apart from kit defects: it is a data point for H-2. Stage 10 grades `packet-plan` alone and records the coding agent apart.
+15b. **The Credits checks grade the kit's sessions alone.** The verifier's own session spans every ⏸ wait, so it would swamp the comparison; a stage whose share can't be separated is BLOCKED. A figure outside the range is `CALIBRATION` (decision 5), reported apart from kit defects. Stage 10 grades `packet-plan` alone and records the coding agent apart.
 
 ## Where the packet and the merged code differ
 
