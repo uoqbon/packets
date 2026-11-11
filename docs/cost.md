@@ -13,6 +13,7 @@ The run counts per packet come from three sources: the kit's rules, the stage 5 
 - **Budget profile.** It keeps every safety property and gets to about 9 packets a month.
 - **Lean profile.** On one model its trade-offs save only about 1% more, so it also gets to about 9.
 - **Fit.** The pool fits a steady flow of packets: a 10-packet phase every month or two. Under the budget profile a 10-packet phase is about 14,100 credits, a little over the pool, so a phase every month still needs paid usage above the pool or the kit on the team's own API key.
+- **One seat.** The [solo profile](#solo-profile) puts a packet at about 975 credits all in: about 1.5 packets a month on Pro, 1.9 on Business and 4 on Enterprise.
 
 ## What a credit is
 
@@ -178,7 +179,7 @@ Each lever is measured alone, against the 10-packet phase above (21,600 credits)
 
 The safety column covers the four properties that must hold:
 
-- the tier is a floor;
+- the tier is a floor: review-scope measures it from the diff, with the config and packet file at the base, the panel may raise it and never lower it, and a later round is never below the one before. Under `review.tierCap` the measured raises stop at the cap, but the forced raises still reach the top tier: review machinery, a `.gitattributes` change, a diff of only lock or generated files, `review.deepPaths` and `review.maxPaths`, and the packet's **Review tier** line;
 - markers count only from trusted authors;
 - CI must pass on the reviewed head;
 - only the owner merges.
@@ -204,9 +205,9 @@ The safety column covers the four properties that must hold:
 
 | Lever | Saves | Quality lost | Safety | Change |
 | --- | --- | --- | --- | --- |
-| Dispatcher on the standard class | nothing while every class lists the same models; with a dearer strong class, the difference in the dispatcher's rates | medium, with a dearer strong class: the brief's facts, and triage of strong-model findings, on a lighter model | none of the four directly, but in the Local harness a subagent won't start on a model in a higher cost tier than the session's, so tier 3 reviewers may not start | kit: a per-agent model class in `install.ps1` |
+| Dispatcher on the standard class | nothing while every class lists the same models; with a dearer strong class, the difference in the dispatcher's rates | medium, with a dearer strong class: the brief's facts, and triage of strong-model findings, on a lighter model | none of the four directly, but in the Local harness a subagent won't start on a model in a higher cost tier than the session's, so a tier 3 round can stop at Needs human (`reason=model-tier`) | config: `models.agents` (built; the solo profile sets it) |
 | No +1 tier after a round whose fixes were all should-fix | 1% (230): S packets only, since M and L start at the top tier | low to medium | **weakens the tier floor's re-review rule** | skill text |
-| Deep (tier 3) reviewer on the standard class | nothing while every class lists the same models; with a dearer strong class, the difference in tier 3's rates | medium, with a dearer strong class: cross-file tracing on the lighter model | **weakens what tier 3 means**: agent and remit kept, model lighter | kit: a per-agent model class |
+| Deep (tier 3) reviewer on the standard class | nothing while every class lists the same models; with a dearer strong class, the difference in tier 3's rates | medium, with a dearer strong class: cross-file tracing on the lighter model | **weakens what tier 3 means**: agent and remit kept, model lighter | config: `models.agents` (built) |
 | Raise the tier-3 line threshold from 300 to 800 | 6% (1,400) | medium: an M packet's first round runs at tier 2 | **weakens the tier floor** | kit: thresholds in config (now constants in `review-scope.ps1`) |
 | Don't count a declared touchpoint toward "two subsystems" | small (S packets with a touchpoint start at tier 2) | low: the one-line edit is still reviewed, and checked by `check-scope` | **weakens the tier floor** for those packets | kit: `review-scope.ps1` |
 
@@ -281,11 +282,11 @@ One more change, for safety rather than credits: review-scope now reports the pa
 
 On the sandbox's real markers (written as tier 4, and priced at tier 3), `progress.ps1 -Credits` estimates PKT-1 at 1,529 credits on the default rates, against this page's 1,530. On 0.1.1's rates it was 2,858, against 2,870.
 
-The **lean profile** adds these trade-offs, each named. They are not built:
+The **lean profile** adds these trade-offs, each named. Change 8 is built, as `models.agents`; change 9 is not:
 
 | # | Change | Saves on top, 10-packet phase | Trade-off |
 | --- | --- | --- | --- |
-| 8 | A per-agent model class written by `install.ps1`, for example `"models": { "agents": { "packet-dispatcher": "standard", "packet-reviewer-deep": "standard" } }` | 0 while every class lists the same models; with a dearer strong class, the difference in the dispatcher's and tier 3's rates | Tier 3 runs on a lighter model; the dispatcher's brief and triage do too. In the Local harness, check that tier 3 reviewers still start from a standard-class dispatcher. |
+| 8 | **Built:** a per-agent model class written by `install.ps1`, for example `"models": { "agents": { "packet-dispatcher": "standard", "packet-reviewer-deep": "standard" } }` | 0 while every class lists the same models; with a dearer strong class, the difference in the dispatcher's and tier 3's rates | Tier 3 runs on a lighter model; the dispatcher's brief and triage do too. With only the dispatcher moved, the installer warns when a reviewer's class ranks above it and lists different models, and in the Local harness a round on that reviewer stops at Needs human (`reason=model-tier`). |
 | 9 | Pass `-FixedConfirmed` only when a fixed finding was blocking | 110: S packets only, since M and L start at the top tier | The tier floor no longer rises after should-fix-only fixes. |
 
 On one model the lean profile adds about 1% to the budget profile's saving. It is worth its trade-offs only with a dearer strong class.
@@ -312,6 +313,122 @@ Applied in order, the budget profile's steps save:
 3. Prompts name files and logs are trimmed: 450 more.
 
 Moving CI files to the setup PR comes on top for any packet that would have owned them.
+
+## Solo profile
+
+For one seat's allowance rather than a team pool. `install.ps1 -Profile solo` writes a new config from the template with these settings on top (`templates/packet-workflow.solo.json`). On an existing config it writes nothing and lists the settings that differ:
+
+```json
+{
+  "models": {
+    "agents": { "packet-dispatcher": "standard" }
+  },
+  "review": {
+    "maxRounds": 2,
+    "lensesPerReviewer": 3,
+    "shouldFixPassFromRound": 2,
+    "tierCap": 2
+  },
+  "budget": {
+    "maxCreditsPerPacket": { "S": 950, "M": 1500, "L": 2200 }
+  }
+}
+```
+
+It sets no rates, so it prices with the default `budget.creditsPerRun` above: GPT-6.1 Sol in every class. With those lists the dispatcher on the standard class runs the same model and costs the same. It is set so that the dispatcher stays put if `models.strong` later names a dearer model.
+
+**How the figures are worked out.** The same method as the defaults, with `Get-PwCreditEstimate` on the default rates:
+
+- **Rounds.** Two at most. A typical packet is two rounds with one fix run; "one clean round" is the best case.
+- **Tiers.** Under the cap of 2, S, M and L all run at tier 2 unless a forced reason holds. A packet forced to tier 3 runs both rounds there.
+- **Lenses.** The defaults' counts: S 3 then 2, M 4 then 3, L 5 then 4, and for one clean round S 2, M 3, L 4. Three lenses share a reviewer run, so the runs are the lenses divided by 3, rounded up.
+- **Resume.** Half a 40-credit `resume` session on a two-round packet, as above.
+
+Each part is rounded to the nearest 5 on its own, so a row's parts can miss its total by 5.
+
+Credits per packet under the solo profile:
+
+| Packet | Rounds (tiers) | Lenses per round | Reviewer runs per round | Dispatcher | Reviewers | Implementer | Resume | **Total** |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| S, one clean round | 1 (2) | 2 | 1 | 195 | 70 | 105 | – | **370** |
+| S, typical | 2 (2, 2) | 3, 2 | 1, 1 | 360 | 150 | 145 | 20 | **675** |
+| S, forced to tier 3 | 2 (3, 3) | 3, 2 | 1, 1 | 360 | 295 | 145 | 20 | **820** |
+| M, one clean round | 1 (2) | 3 | 1 | 210 | 125 | 200 | – | **535** |
+| M, typical | 2 (2, 2) | 4, 3 | 2, 1 | 410 | 305 | 255 | 20 | **985** |
+| M, forced to tier 3 | 2 (3, 3) | 4, 3 | 2, 1 | 410 | 605 | 255 | 20 | **1,290** |
+| L, one clean round | 1 (2) | 4 | 2 | 255 | 265 | 355 | – | **875** |
+| L, typical | 2 (2, 2) | 5, 4 | 2, 2 | 485 | 530 | 430 | 20 | **1,465** |
+| L, forced to tier 3 | 2 (3, 3) | 5, 4 | 2, 2 | 485 | 1,060 | 430 | 20 | **1,995** |
+
+**Expected per packet.** In the original project 8 of 73 packets (11%) passed in one round. Taking 11% one clean round and 89% typical:
+
+| Size | Expected |
+| --- | --- |
+| S | 640 |
+| M | 935 |
+| L | 1,400 |
+
+**A packet forced to tier 3** adds about 145 (S), 305 (M) or 530 (L) to a typical one. That is what the cap saves on an M or L packet, which would otherwise run at tier 3 throughout: about 24% of an M and 27% of an L. An S packet starts at tier 2 anyway, so on S the cap saves only round 2's step up to tier 3, about 55.
+
+**The ceiling.** The profile's ceilings, S 950, M 1,500 and L 2,200, are about 1.5× a typical packet. A packet that isn't forced stays under them through its two rounds, and through a CI fix after them. A packet forced to tier 3 stays under them through its two rounds, but a CI fix after them takes it over (S about 1,090, M 1,630, L 2,430), and so do one or two lenses more than the typical shape. It then waits at Needs human for the owner's answer. `credit-check.ps1` counts no resume share, so its figures are about 20 below the table's. These ceilings stay as they are until the rates are measured ([Calibrate](#calibrate)). Revisit them then, with how often a forced packet needs a CI fix in mind.
+
+A 10-packet phase (3 S, 5 M, 2 L), with `packet-plan`, board and progress at about 350 as above:
+
+| Solo phase, 10 packets | Packets | `packet-plan`, board, progress | **Total** | Per packet, all in |
+| --- | --- | --- | --- | --- |
+| Typical | 9,880 | 350 | **10,230** | 1,025 |
+| Expected | 9,395 | 350 | **9,745** | 975 |
+
+Packets a month on one seat, at 975 a packet all in under the solo profile and 2,160 under the defaults, if the whole allowance goes to the kit. The ranges are the 0.6× to 1.75× above:
+
+| Seat | Credits a month | Default | **Solo** | Solo range |
+| --- | --- | --- | --- | --- |
+| Pro | 1,500 | 0.7 | **1.5** | 0.9–2.6 |
+| Business | 1,900 | 0.9 | **1.9** | 1.1–3.2 |
+| Enterprise | 3,900 | 1.8 | **4.0** | 2.3–6.7 |
+| Pro+ | 7,000 | 3.2 | **7.2** | 4.1–12.0 |
+| Max | 20,000 | 9.3 | **20.5** | 11.7–34.2 |
+
+Pro's 1,500 is 1,000 base credits plus a 500 "flex allotment", and base credits are spent first. GitHub calls the flex allotment "a variable part of your included usage", while base credits "never change". So a plan's total can change with no change in its price, and more of it is flex on the larger plans: Pro+ is 3,900 base and 3,100 flex, and Max is 10,000 base and 10,000 flex. Individual allowances and the team pool both reset at 00:00:00 UTC on the first day of each calendar month, whatever the billing date, and unused credits are forfeited. Business and Enterprise are the per-seat figures from [What a credit is](#what-a-credit-is). The individual figures are for plans on usage-based billing: a Pro or Pro+ subscriber who stayed on an existing annual plan is still on premium requests.
+
+Sources, read 2026-11-09:
+
+- [Usage-based billing for individuals](https://docs.github.com/en/copilot/concepts/billing-and-usage/individuals/billing)
+- [Usage-based billing for organizations and enterprises](https://docs.github.com/en/copilot/concepts/billing-and-usage/organizations-and-enterprises/billing)
+- [Model multipliers for annual plans on request-based billing (legacy)](https://docs.github.com/en/copilot/reference/copilot-billing/request-based-billing-legacy/model-multipliers-for-annual-plans)
+
+**Plan and board only.** A 10-packet phase costs about 350 credits to plan, sync and track: about 4 phases a month on Pro, 5 on Business and 11 on Enterprise, before any hand-off. A hand-off to the Copilot coding agent draws on the same credits, and the kit doesn't estimate it.
+
+**What the profile trades:**
+
+- **Two rounds.** A blocking finding in round 2 goes to you instead of a third round: about 15% of packets, against about 10% with three rounds.
+- **Should-fix findings in round 2 become follow-ups,** as they would in the last round under the defaults.
+- **Three lenses per reviewer run.** Every lens still runs, at the round's tier, but one reviewer splits its attention three ways. The 0.4-per-extra-lens credit factor is extrapolated for three.
+- **The tier cap.** Auth, migrations, contracts, infrastructure, concurrency and large or cross-cutting diffs go to the standard reviewer at medium effort, without the deep remit, and a round after fixes no longer goes up a tier. Deep review then comes from the forced reasons: give a packet that needs it a **Review tier: 3** line in the plan, or list its paths in `review.deepPaths`.
+- **The ceiling** stops a packet at Needs human for your answer, which costs you a step.
+- **The dispatcher on the standard class** costs nothing with the shipped lists.
+
+All four safety properties hold, with the tier floor as amended above: under the cap the forced raises still reach tier 3.
+
+**Copilot CLI's session limit.** Copilot CLI (1.0.66 and later) and the Copilot SDK (1.0.5 and later) can cap a session's real spend: `/limits set max-ai-credits <n>` in a session, `copilot -p … --max-ai-credits <n>` for a scripted run, or `sessionLimits.maxAiCredits` in the SDK. It is in public preview, and the CLI requires at least 30.
+
+- **It measures real spend,** where the kit's ceiling is an estimate.
+- **It is a soft limit.** A response already in progress finishes, and the next model call is blocked, so spend can pass the limit slightly.
+- **It stops between model calls, not between the kit's steps.** So it can stop partway through an implementer run, with the claim held and the work uncommitted. The kit's ceiling stops between steps.
+- **What happens next depends on the mode.** In a session, Copilot asks you to raise the limit and continues from where it stopped. A `copilot -p` run ends.
+- **GitHub's pages differ on how long it lasts.** The how-to and the changelog say a whole session, and the how-to says a `copilot -p` limit holds until Copilot finishes responding. The command reference says it applies to each response and "resets per user message". So don't count on one interactive limit across several messages.
+- **Subagents.** GitHub's changelog says Copilot tracks usage "across the entire session, including model calls, subagents, and background work like compaction". The kit's e2e run hasn't measured that for its own custom agents yet, and this line will say once it has.
+- **Where it applies.** GitHub documents it for Copilot CLI and the SDK. No page says VS Code's Copilot harness honours it, so don't rely on it there.
+
+Use it as a backstop above the ceiling, for example the ceiling plus 50%, when you dispatch from Copilot CLI. It doesn't replace budgets or spending limits, which govern the month.
+
+Sources, read 2026-11-09:
+
+- [Set AI credit session limits in Copilot CLI and SDK](https://github.blog/changelog/2026-07-01-set-ai-credit-session-limits-in-copilot-cli-and-sdk/) (changelog, 2026-07-01)
+- [Setting an AI credit session limit in GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli/set-session-limit)
+- [GitHub Copilot CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)
+- [Session limits](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/session-limits) (Copilot SDK)
+- [Optimizing your AI usage](https://docs.github.com/en/copilot/tutorials/optimize-ai-usage)
 
 ## Running it within the pool
 
