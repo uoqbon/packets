@@ -417,7 +417,7 @@ All four safety properties hold, with the tier floor as amended above: under the
 - **It stops between model calls, not between the kit's steps.** So it can stop partway through an implementer run, with the claim held and the work uncommitted. The kit's ceiling stops between steps.
 - **What happens next depends on the mode.** In a session, Copilot asks you to raise the limit and continues from where it stopped. A `copilot -p` run ends.
 - **GitHub's pages differ on how long it lasts.** The how-to and the changelog say a whole session, and the how-to says a `copilot -p` limit holds until Copilot finishes responding. The command reference says it applies to each response and "resets per user message". So don't count on one interactive limit across several messages.
-- **Subagents.** GitHub's changelog says Copilot tracks usage "across the entire session, including model calls, subagents, and background work like compaction". The kit's e2e run hasn't measured that for its own custom agents yet, and this line will say once it has.
+- **Subagents.** GitHub's changelog says Copilot tracks usage "across the entire session, including model calls, subagents, and background work like compaction". The kit hasn't measured that for its own custom agents yet. The solo stage of the e2e prompt ([tests/copilot-e2e.prompt.md](../tests/copilot-e2e.prompt.md)) checks it, and this line will say once that stage has run.
 - **Where it applies.** GitHub documents it for Copilot CLI and the SDK. No page says VS Code's Copilot harness honours it, so don't rely on it there.
 
 Use it as a backstop above the ceiling, for example the ceiling plus 50%, when you dispatch from Copilot CLI. It doesn't replace budgets or spending limits, which govern the month.
