@@ -10,7 +10,7 @@ Choices [PKT-9](../../plan/solo-budget/packets/PKT-9.md) left open, and why each
 
 ## Credits
 
-4. **Each stage opens with an "Expected credits" line, and closes with a Credits check against the AI usage report.** The figures come from docs/cost.md (`packet-plan` per phase, board sessions, the per-run table, `resume` at 40, the model rates) and from the solo table in the review notes (a solo S packet at 675 typical, 370 for one clean round, 815 when forced to tier 3). The packet says the expected credits come "from the cost page". The cost page has no solo figures until PKT-8, which is being built in parallel, so the review notes' table stands in. H-4 can re-read the figures against PKT-8's page.
+4. **Each stage opens with an "Expected credits" line, and closes with a Credits check against the AI usage report.** The figures come from docs/cost.md (`packet-plan` per phase, board sessions, the per-run table, `resume` at 40, the model rates) and from its *Solo profile* section, which PKT-8 added (#43): a solo S packet at 675 typical, 370 for one clean round, 820 when forced to tier 3. This PR first took them from the review notes' table, which gives 815 for the forced packet; once #43 merged, the stages cite the cost page, as the packet asks.
 5. **A Credits check passes within 0.6× to 1.75× of its figure.** That is the cost page's own range. Outside it, the check fails and names `budget.creditsPerRun` and the cost page, which H-2 calibrates. If the report can't show the stage's window, the check is BLOCKED, never PASS. The verifier's own chat session falls in the same window, so the stage records how much of the total is its own, or that the report can't tell.
 6. **A stage that spends credits stops for approval first.** H-4 says paid usage is approved for calibration only (decision 10), so each stage asks the owner to approve its figure before it spends anything.
 
@@ -95,5 +95,5 @@ Only a live run can check the rest:
 
 ## Pointers for PKT-8 or a later change
 
-- The README's paragraph on `tests/copilot-e2e.prompt.md` (*Inside Copilot*) lists the stages up to "safety probes, and ends with a report". It could add: "Stages 10 to 12, in sandboxes of their own, check a plan-only hand-off to the coding agent, the solo profile with a refused reviewer, and the credit ceiling's stops, raises and settles, and record what each cost."
-- Known limitations and the Models bullet should take H-4's answers (S11.6, S11.9) once it has run, as H-4's checklist says.
+- Done in #43: the README's *Inside Copilot* paragraph now names stages 10 to 12. #46 points cost.md's session-limit *Subagents* line at the e2e prompt's solo stage.
+- Still open: Known limitations and the Models bullet should take H-4's answers (S11.6, S11.9) once it has run, as H-4's checklist says.
